@@ -1,0 +1,19 @@
+/* Print media styling for Forensic Evidence Report */
+@media print {
+  body {
+    background-color: white !important;
+    color: black !important;
+  }
+  #root > header, #root > nav, #root > footer, button, .glass-panel:not(#printable-area) {
+    display: none !important;
+  }
+  #printable-area {
+    border: none !important;
+    box-shadow: none !important;
+    background: white !important;
+    color: black !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+}
