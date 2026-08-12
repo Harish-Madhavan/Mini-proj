@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { SCENARIOS } from './data/scenarios';
+import React, { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import Dashboard from './components/Dashboard';
 import GraphExplorer from './components/GraphExplorer';
 import OSINTIntegrator from './components/OSINTIntegrator';
 import HeuristicClustering from './components/HeuristicClustering';
 import RiskAnalyzer from './components/RiskAnalyzer';
 import ReportGenerator from './components/ReportGenerator';
-import { traceEndReceiver, fetchAddressTxs, formatBlockstreamTx } from './utils/bitcoinApi';
-import { createLiveTxCase, createAddressTraceCase, createAlgorithmicTraceCase } from './utils/caseHelpers';
+import { ToastProvider } from './context/ToastContext';
+import { CaseProvider } from './context/CaseContext';
+import { useCase } from './hooks/useCase';
 import { 
   Shield, 
   Layers, 
@@ -20,257 +21,80 @@ import {
   WifiOff
 } from 'lucide-react';
 
-export default function App() {
-  const [scenarios, setScenarios] = useState(() => {
-    try {
-      const saved = localStorage.getItem('aegistrace_scenarios');
-      return saved ? JSON.parse(saved) : SCENARIOS;
-    } catch {
-      return SCENARIOS;
-    }
-  });
+function AppContent() {
+  const { 
+    activeCase, 
+    activeTab, 
+    liveMode, 
+    setActiveTab, 
+    setLiveMode 
+  } = useCase();
 
-  const [activeCaseId, setActiveCaseId] = useState(() => {
-    try {
-      const saved = localStorage.getItem('aegistrace_activeCaseId');
-      return saved || SCENARIOS[0].id;
-    } catch {
-      return SCENARIOS[0].id;
-    }
-  });
-
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [liveMode, setLiveMode] = useState(true);
-  const [isLoadingLive, setIsLoadingLive] = useState(false);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('aegistrace_scenarios', JSON.stringify(scenarios));
-    } catch (e) {
-      console.warn("Could not save scenarios to localStorage", e);
-    }
-  }, [scenarios]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('aegistrace_activeCaseId', activeCaseId);
-    } catch (e) {
-      console.warn("Could not save activeCaseId to localStorage", e);
-    }
-  }, [activeCaseId]);
-
-  const activeCase = scenarios.find(s => s.id === activeCaseId) || scenarios[0] || SCENARIOS[0];
-
-  const handleExportCase = () => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(scenarios, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `aegistrace-cases-export-${new Date().toISOString().slice(0, 10)}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-  };
-
-  const handleImportCase = (jsonObj) => {
-    try {
-      if (Array.isArray(jsonObj) && jsonObj.length > 0 && jsonObj[0].id && jsonObj[0].nodes) {
-        setScenarios(jsonObj);
-        setActiveCaseId(jsonObj[0].id);
-        alert("Investigation cases imported successfully!");
-      } else if (jsonObj.id && jsonObj.nodes) {
-        setScenarios(prev => [jsonObj, ...prev.filter(s => s.id !== jsonObj.id)]);
-        setActiveCaseId(jsonObj.id);
-        alert(`Case "${jsonObj.title || jsonObj.id}" imported successfully!`);
-      } else {
-        alert("Invalid case file format.");
-      }
-    } catch (err) {
-      alert(`Import error: ${err.message}`);
-    }
-  };
-
-  const handleResetCases = () => {
-    if (confirm("Reset all investigation traces to default state?")) {
-      setScenarios(SCENARIOS);
-      setActiveCaseId(SCENARIOS[0].id);
-      localStorage.removeItem('aegistrace_scenarios');
-      localStorage.removeItem('aegistrace_activeCaseId');
-    }
-  };
-
-  const handleSelectCase = (id) => {
-    setActiveCaseId(id);
-    setActiveTab('trace');
-  };
-
-  const handleSearch = async (searchVal) => {
-    const trimmed = searchVal.trim();
-    if (!trimmed) return;
-    
-    setIsLoadingLive(true);
-    setActiveTab('trace');
-
-    try {
-      // 1. Check if input is a 64-char transaction hash
-      if (trimmed.length === 64 && /^[0-9a-fA-F]+$/.test(trimmed)) {
-        const formatted = await traceEndReceiver(trimmed, 2);
-        const res = createLiveTxCase(trimmed, formatted, scenarios);
-        setScenarios(res.scenarios);
-        setActiveCaseId(res.newCaseId);
-        setLiveMode(true);
-      } 
-      // 2. Check if input is a Bitcoin address (starts with bc1, 1, or 3)
-      else if (trimmed.startsWith('bc1') || trimmed.startsWith('1') || trimmed.startsWith('3')) {
-        const txs = await fetchAddressTxs(trimmed);
-        if (txs && txs.length > 0) {
-          const latestTx = txs[0];
-          const formatted = await traceEndReceiver(latestTx.txid, 2);
-          const res = createAddressTraceCase(trimmed, txs.length, latestTx.txid, formatted, scenarios);
-          setScenarios(res.scenarios);
-          setActiveCaseId(res.newCaseId);
-          setLiveMode(true);
-        } else {
-          generateAlgorithmicTrace(trimmed);
-        }
-      } else {
-        generateAlgorithmicTrace(trimmed);
-      }
-    } catch (err) {
-      console.warn("Mainnet query note:", err.message);
-      generateAlgorithmicTrace(trimmed);
-    } finally {
-      setIsLoadingLive(false);
-    }
-  };
-
-  const generateAlgorithmicTrace = (searchVal) => {
-    const res = createAlgorithmicTraceCase(searchVal, scenarios);
-    setScenarios(res.scenarios);
-    setActiveCaseId(res.newCaseId);
-    setActiveTab('trace');
-  };
-
-  const handleExpandAddress = async (address) => {
-    setIsLoadingLive(true);
-    try {
-      const txs = await fetchAddressTxs(address);
-      if (!txs || txs.length === 0) {
-        alert("No outgoing transactions found for this address on Bitcoin Mainnet.");
-        return;
-      }
-
-      const firstTx = txs[0];
-      const formatted = formatBlockstreamTx(firstTx);
-
-      const existingNodes = [...activeCase.nodes];
-      const existingLinks = [...activeCase.links];
-
-      const newTxNodeId = `tx_${firstTx.txid}`;
-      
-      existingLinks.push({
-        source: `out_${address}`,
-        target: newTxNodeId,
-        value: `${((firstTx.vout[0]?.value || 0) / 100000000).toFixed(4)} BTC`,
-        timestamp: 'On-chain'
-      });
-
-      formatted.nodes.forEach(node => {
-        if (!existingNodes.some(n => n.id === node.id)) {
-          existingNodes.push(node);
-        }
-      });
-      formatted.links.forEach(link => {
-        if (!existingLinks.some(l => l.source === link.source && l.target === link.target)) {
-          existingLinks.push(link);
-        }
-      });
-
-      const updatedCase = {
-        ...activeCase,
-        nodes: existingNodes,
-        links: existingLinks
-      };
-
-      setScenarios(scenarios.map(s => s.id === activeCase.id ? updatedCase : s));
-    } catch (err) {
-      alert(`Error expanding address: ${err.message}`);
-    } finally {
-      setIsLoadingLive(false);
-    }
-  };
-
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: Shield },
-    { id: 'trace', label: 'Fund Tracing Explorer', icon: Layers },
-    { id: 'osint', label: 'OSINT & Subpoenas', icon: Globe },
-    { id: 'clustering', label: 'Wallet Clustering', icon: GitMerge },
-    { id: 'risk', label: 'AI Risk Grading', icon: ShieldAlert },
-    { id: 'report', label: 'Forensic Report', icon: FileText }
+    { id: 'dashboard', path: '/dashboard', label: 'Dashboard', icon: Shield },
+    { id: 'trace', path: '/trace', label: 'Fund Tracing Explorer', icon: Layers },
+    { id: 'osint', path: '/osint', label: 'OSINT & Subpoenas', icon: Globe },
+    { id: 'clustering', path: '/clustering', label: 'Wallet Clustering', icon: GitMerge },
+    { id: 'risk', path: '/risk', label: 'AI Risk Grading', icon: ShieldAlert },
+    { id: 'report', path: '/report', label: 'Forensic Report', icon: FileText }
   ];
 
+  // Sync route path to activeTab
+  useEffect(() => {
+    const currentPath = location.pathname.substring(1);
+    const matchedItem = ['dashboard', 'trace', 'osint', 'clustering', 'risk', 'report'].find(id => id === currentPath);
+    if (matchedItem && matchedItem !== activeTab) {
+      setActiveTab(matchedItem);
+    }
+  }, [location.pathname, activeTab, setActiveTab]);
+
+  const handleNavClick = (itemId, itemPath) => {
+    setActiveTab(itemId);
+    navigate(itemPath);
+  };
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', padding: '1.5rem 2rem' }}>
+    <div className="app-container">
       
       {/* Top Banner Header */}
-      <header style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
-        borderBottom: '1px solid var(--border-color)',
-        paddingBottom: '1rem',
-        marginBottom: '1.5rem'
-      }}>
+      <header className="header-banner">
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <div style={{
-            backgroundColor: 'var(--primary)',
-            padding: '0.5rem',
-            borderRadius: '6px',
-            color: '#fff',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}>
-            <Radio size={22} />
+          <div className="brand-badge">
+            <Radio size={20} />
           </div>
           <div>
-            <h1 style={{ fontSize: '1.4rem', fontWeight: 700, letterSpacing: '-0.02em', color: '#fff' }}>
+            <h1 style={{ fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.02em', color: '#fff' }}>
               AEGISTRACE
             </h1>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+            <p style={{ fontSize: '0.725rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
               <span>NCB Blockchain Forensics Terminal</span>
               <span>•</span>
-              <span style={{ color: '#10b981', fontWeight: 600 }}>Live Connected</span>
+              <span style={{ color: 'var(--risk-low)', fontWeight: 600 }}>Live Connected</span>
             </p>
           </div>
         </div>
 
         {/* Current Active Case status pill */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
           <button
             onClick={() => setLiveMode(!liveMode)}
+            className={`btn ${liveMode ? 'btn-outline' : ''}`}
             style={{
-              padding: '0.45rem 0.85rem',
-              borderRadius: '6px',
-              border: '1px solid var(--border-color)',
-              backgroundColor: liveMode ? 'rgba(2, 132, 199, 0.1)' : 'transparent',
-              color: liveMode ? 'var(--primary)' : 'var(--text-secondary)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-              fontSize: '0.8rem',
-              fontWeight: 600
+              fontSize: '0.775rem',
+              padding: '0.35rem 0.75rem'
             }}
           >
-            {liveMode ? <Wifi size={14} /> : <WifiOff size={14} />}
-            {liveMode ? "Mainnet API Connected" : "Local Mode"}
+            {liveMode ? <Wifi size={13} /> : <WifiOff size={13} />}
+            {liveMode ? "Mainnet Connected" : "Local Mode"}
           </button>
           
-          <div className="glass-panel" style={{ padding: '0.45rem 0.85rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
-            <span style={{ color: 'var(--text-muted)' }}>Trace Query:</span>
+          <div className="glass-panel" style={{ padding: '0.35rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.775rem', borderRadius: '8px' }}>
+            <span style={{ color: 'var(--text-muted)' }}>Query:</span>
             <strong style={{ color: 'var(--primary)' }}>{activeCase.title}</strong>
-            <span style={{ fontSize: '0.7rem', backgroundColor: 'rgba(255,255,255,0.05)', padding: '0.1rem 0.35rem', borderRadius: '4px', color: 'var(--text-muted)' }}>
+            <span style={{ fontSize: '0.675rem', backgroundColor: 'rgba(255,255,255,0.06)', padding: '0.1rem 0.3rem', borderRadius: '4px', color: 'var(--text-muted)' }}>
               {activeCase.currency}
             </span>
           </div>
@@ -278,30 +102,15 @@ export default function App() {
       </header>
 
       {/* Main Tab Navigation */}
-      <nav style={{ display: 'flex', gap: '0.35rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.4rem' }}>
+      <nav className="main-nav">
         {navItems.map((item) => {
           const Icon = item.icon;
-          const isActive = activeTab === item.id;
+          const isActive = activeTab === item.id || location.pathname === item.path;
           return (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              style={{
-                background: isActive ? 'rgba(2, 132, 199, 0.1)' : 'transparent',
-                border: 'none',
-                outline: 'none',
-                color: isActive ? 'var(--primary)' : 'var(--text-secondary)',
-                padding: '0.6rem 1rem',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontWeight: isActive ? 600 : 500,
-                fontSize: '0.85rem',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.4rem',
-                transition: 'all 0.15s',
-                borderBottom: isActive ? '2px solid var(--primary)' : '2px solid transparent'
-              }}
+              onClick={() => handleNavClick(item.id, item.path)}
+              className={`nav-item ${isActive ? 'active' : ''}`}
             >
               <Icon size={15} />
               {item.label}
@@ -310,63 +119,38 @@ export default function App() {
         })}
       </nav>
 
-      {/* Main Body panels */}
+      {/* Main Body panels with React Router Routes */}
       <main style={{ flex: 1 }}>
-        {activeTab === 'dashboard' && (
-          <Dashboard 
-            scenarios={scenarios} 
-            activeCase={activeCase} 
-            onSelectCase={handleSelectCase} 
-            onSearch={handleSearch} 
-            onExportCase={handleExportCase}
-            onImportCase={handleImportCase}
-            onResetCases={handleResetCases}
-          />
-        )}
-        {activeTab === 'trace' && (
-          <GraphExplorer 
-            activeCase={activeCase} 
-            onSelectTab={setActiveTab} 
-            onExpandAddress={handleExpandAddress}
-            isLoadingLive={isLoadingLive}
-          />
-        )}
-        {activeTab === 'osint' && (
-          <OSINTIntegrator 
-            activeCase={activeCase} 
-          />
-        )}
-        {activeTab === 'clustering' && (
-          <HeuristicClustering 
-            activeCase={activeCase} 
-          />
-        )}
-        {activeTab === 'risk' && (
-          <RiskAnalyzer 
-            activeCase={activeCase} 
-          />
-        )}
-        {activeTab === 'report' && (
-          <ReportGenerator 
-            activeCase={activeCase} 
-          />
-        )}
+        <Routes>
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/trace" element={<GraphExplorer />} />
+          <Route path="/osint" element={<OSINTIntegrator />} />
+          <Route path="/clustering" element={<HeuristicClustering />} />
+          <Route path="/risk" element={<RiskAnalyzer />} />
+          <Route path="/report" element={<ReportGenerator />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
       </main>
 
       {/* Footer information */}
-      <footer style={{ 
-        marginTop: '3rem', 
-        borderTop: '1px solid var(--border-color)', 
-        paddingTop: '1rem', 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        fontSize: '0.75rem', 
-        color: 'var(--text-muted)' 
-      }}>
+      <footer className="footer-bar">
         <span>AegisTrace NCB System V2.8.4 - SIH1675 Live Blockchain Explorer</span>
         <span>Secure Session | Token Encryption: Active</span>
       </footer>
 
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <ToastProvider>
+        <CaseProvider>
+          <AppContent />
+        </CaseProvider>
+      </ToastProvider>
+    </BrowserRouter>
   );
 }

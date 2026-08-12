@@ -1,19 +1,30 @@
 import React, { useState } from 'react';
 import { 
   Globe, 
-  MapPin, 
   FileSignature, 
   Search, 
   Clipboard, 
   AlertTriangle,
   Download
 } from 'lucide-react';
+import { useCase } from '../hooks/useCase';
+import { useToast } from '../hooks/useToast';
+import { 
+  EXCHANGES, 
+  DEFAULT_FIR_NUMBER, 
+  DEFAULT_OFFICER_TITLE, 
+  ZONAL_UNITS, 
+  generateSection67NoticeText 
+} from '../constants/legalConstants';
 
-export default function OSINTIntegrator({ activeCase }) {
-  const [selectedExchange, setSelectedExchange] = useState('WazirX (Zanmai Labs Pvt Ltd)');
-  const [firNumber, setFirNumber] = useState('NCB/NDPS/CR-104/2026');
-  const [zonalUnit, setZonalUnit] = useState('NCB Headquarters, New Delhi');
-  const [officerRank, setOfficerRank] = useState('Inspector R. Sharma (Investigating Officer)');
+export default function OSINTIntegrator() {
+  const { activeCase } = useCase();
+  const { showToast } = useToast();
+
+  const [selectedExchange, setSelectedExchange] = useState(EXCHANGES[0]);
+  const [firNumber, setFirNumber] = useState(DEFAULT_FIR_NUMBER);
+  const [zonalUnit, setZonalUnit] = useState(ZONAL_UNITS[0].value);
+  const [officerRank, setOfficerRank] = useState(DEFAULT_OFFICER_TITLE);
 
   const [isQueryingOSINT, setIsQueryingOSINT] = useState(false);
   const [osintData, setOsintData] = useState(null);
@@ -38,57 +49,32 @@ export default function OSINTIntegrator({ activeCase }) {
           { ip: receiverNode?.details?.address ? "Exchange Gateway IP" : "122.161.49.5", org: "Compliance Gateway", loc: "Exchange Endpoint", type: "Deposit Session IP" }
         ]
       });
+      showToast("OSINT network attribution completed!", "success");
     }, 800);
   };
 
-  const generateSubpoenaText = () => {
+  const getSubpoenaText = () => {
     if (!receiverNode) return "";
-    const generatedSigKey = osintData?.sigKey || "NCB-CERT-F839A2";
-    return `OFFICE OF THE NARCOTICS CONTROL BUREAU
-MINISTRY OF HOME AFFAIRS, GOVERNMENT OF INDIA
-ZONAL UNIT: ${zonalUnit.toUpperCase()}
-CASE CRIME REF: ${firNumber}
-
-Date: ${new Date().toISOString().split('T')[0]}
-
-TO,
-Legal Compliance & Law Enforcement Relations Division
-${selectedExchange}
-
-SUBJECT: Formal Notice under Section 67 of the Narcotic Drugs and Psychotropic Substances (NDPS) Act, 1985 - Immediate Statutory Request for Account & KYC Records.
-
-Sir/Madam,
-
-This office is conducting an active investigation involving suspicious cryptocurrency transactions (Case Title: ${activeCase.title}). 
-
-On-chain forensic blockchain tracing demonstrates that transaction value movement terminates directly at a deposit wallet address assigned to your platform:
-
-Deposit Wallet Address: ${receiverNode.details.address}
-Attributed Asset: ${activeCase.currency} Protocol
-Settled Traced Value: ${receiverNode.balance}
-
-Pursuant to Section 67 of the NDPS Act, 1985, you are hereby directed to provide the following subscriber details associated with this deposit address within 48 hours of receipt:
-
-1. Full Name, Date of Birth, Address, Government Photo ID (Aadhaar / PAN / Passport) submitted during KYC.
-2. Connected Bank Account details (Bank Name, Account Number, IFSC) and Fiat Withdrawal History.
-3. Complete IP Access logs with timestamps (UTC) for registration, logins, and deposit sessions.
-4. Linked Email Address, Phone Number, and Device Identifiers.
-
-Kindly treat this communication as CONFIDENTIAL under statutory law.
-
-Issued By:
-${officerRank}
-Narcotics Control Bureau (NCB), Govt. of India
-Digital Verification Key: SECURE-KEY-${generatedSigKey}`;
+    return generateSection67NoticeText({
+      zonalUnit,
+      firNumber,
+      selectedExchange,
+      caseTitle: activeCase.title,
+      depositAddress: receiverNode.details.address,
+      currency: activeCase.currency,
+      balance: receiverNode.balance,
+      officerRank,
+      sigKey: osintData?.sigKey
+    });
   };
 
   const handleCopySubpoena = () => {
-    navigator.clipboard.writeText(generateSubpoenaText());
-    alert("Subpoena notice copied to clipboard.");
+    navigator.clipboard.writeText(getSubpoenaText());
+    showToast("Subpoena notice copied to clipboard.", "success");
   };
 
   const handleDownloadSubpoena = () => {
-    const text = generateSubpoenaText();
+    const text = getSubpoenaText();
     const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -96,242 +82,157 @@ Digital Verification Key: SECURE-KEY-${generatedSigKey}`;
     a.download = `NCB-Section67-Notice-${activeCase.id.toUpperCase()}.txt`;
     a.click();
     URL.revokeObjectURL(url);
+    showToast("Downloaded Section 67 Subpoena notice text file.", "success");
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', minHeight: '500px' }}>
       
-      {/* On-Chain / Network IP Lookup */}
+      {/* OSINT Query Panel */}
       <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-        <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <Globe style={{ color: 'var(--primary)' }} size={18} /> Network Node & IP Cross-Reference
-        </h3>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-          Inspect peer-to-peer network broadcast origin nodes and exchange gateway connection logs for the selected transaction trace.
-        </p>
+        <div>
+          <h3 style={{ fontSize: '1.25rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Globe style={{ color: 'var(--primary)' }} /> OSINT Network & Exchange Attribution
+          </h3>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Correlate on-chain endpoints with ISP nodes & Exchange KYC records.</p>
+        </div>
 
-        <button 
+        <button
           onClick={handleQueryOSINT}
           disabled={isQueryingOSINT}
-          style={{
-            padding: '0.6rem 1rem',
-            borderRadius: '6px',
-            border: '1px solid var(--primary)',
-            backgroundColor: 'rgba(2, 132, 199, 0.05)',
-            color: 'var(--primary)',
-            fontWeight: 600,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '0.5rem',
-            fontSize: '0.85rem'
-          }}
+          className="btn btn-primary"
+          style={{ width: '100%', padding: '0.75rem', justifyContent: 'center', fontSize: '0.85rem' }}
         >
-          <Search size={16} /> 
-          {isQueryingOSINT ? "Inspecting network node attributes..." : "Query Network Attributes"}
+          <Search size={16} /> {isQueryingOSINT ? "Querying OSINT Databases..." : "Run OSINT Attribution Scan"}
         </button>
 
-        {osintData && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.5rem' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--primary)', fontWeight: 600, textTransform: 'uppercase' }}>Network IP Routing</span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {osintData.ipGeolocations.map((ip, i) => (
-                <div key={i} style={{ backgroundColor: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
-                    <strong className="mono-addr">{ip.ip}</strong>
-                    <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{ip.type}</span>
-                  </div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                    <MapPin size={12} style={{ color: '#ef4444' }} /> {ip.loc} | {ip.org}
-                  </div>
+        {osintData ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.4rem' }}>
+              P2P Node IP Geolocation Correlations
+            </h4>
+            {osintData.ipGeolocations.map((item, idx) => (
+              <div key={idx} style={{ backgroundColor: 'rgba(5, 8, 16, 0.8)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '0.8rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>{item.type}:</span>
+                  <strong className="mono-addr" style={{ color: 'var(--primary)' }}>{item.ip}</strong>
                 </div>
-              ))}
-            </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>ISP / Network:</span>
+                  <span>{item.org} ({item.loc})</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ backgroundColor: 'rgba(5, 8, 16, 0.4)', padding: '1rem', borderRadius: '6px', border: '1px dashed var(--border-color)', fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+            Click "Run OSINT Attribution Scan" to correlate P2P node IPs with network infrastructure.
           </div>
         )}
-      </div>
 
-      {/* Subpoena Draft Generator */}
-      <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <FileSignature style={{ color: 'var(--primary)' }} size={18} /> Section 67 NDPS Legal Notice Generator
-        </h3>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-          Generate a formal law enforcement request notice under Section 67 NDPS Act 1985 for the identified exchange deposit endpoint.
-        </p>
+        {/* Section 67 NDPS Notice Parameters */}
+        <div style={{ marginTop: 'auto', borderTop: '1px solid var(--border-color)', paddingTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <h4 style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <FileSignature size={16} style={{ color: '#eab308' }} /> Subpoena Parameters (Section 67 NDPS Act)
+          </h4>
 
-        {/* Editable Form Inputs */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Target Exchange / VASP</label>
-            <select 
-              value={selectedExchange} 
+          <div>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Target Exchange Operator:</label>
+            <select
+              value={selectedExchange}
               onChange={(e) => setSelectedExchange(e.target.value)}
-              style={{
-                padding: '0.45rem',
-                borderRadius: '6px',
-                border: '1px solid var(--border-color)',
-                backgroundColor: '#0f172a',
-                color: 'var(--text-primary)',
-                outline: 'none',
-                fontSize: '0.8rem'
-              }}
+              className="select-field"
+              style={{ width: '100%' }}
             >
-              <option value="WazirX (Zanmai Labs Pvt Ltd)">WazirX (Zanmai Labs)</option>
-              <option value="CoinDCX (Neblio Technologies Pvt Ltd)">CoinDCX (Neblio Tech)</option>
-              <option value="CoinSwitch (Peepal Co)">CoinSwitch Kuber</option>
-              <option value="Bitbns (Inovio Ventures)">Bitbns</option>
-              <option value="Giottus Technologies">Giottus</option>
-              <option value="Binance Global Law Enforcement Division">Binance Global</option>
-              <option value="Bybit Law Enforcement Portal">Bybit Compliance</option>
-              <option value="OKX Law Enforcement Relations">OKX</option>
-              <option value="KuCoin Legal Compliance">KuCoin</option>
-              <option value="Kraken Legal Department">Kraken Compliance</option>
-              <option value="Gate.io Compliance Team">Gate.io</option>
+              {EXCHANGES.map((ex, idx) => (
+                <option key={idx} value={ex}>{ex}</option>
+              ))}
             </select>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>FIR / Crime Ref No.</label>
-            <input 
-              type="text" 
-              value={firNumber} 
-              onChange={(e) => setFirNumber(e.target.value)}
-              style={{
-                padding: '0.45rem',
-                borderRadius: '6px',
-                border: '1px solid var(--border-color)',
-                backgroundColor: '#0f172a',
-                color: 'var(--text-primary)',
-                outline: 'none',
-                fontSize: '0.8rem'
-              }}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+            <div>
+              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>FIR / Crime Ref No:</label>
+              <input
+                type="text"
+                value={firNumber}
+                onChange={(e) => setFirNumber(e.target.value)}
+                className="input-field"
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>NCB Zonal Unit:</label>
+              <select
+                value={zonalUnit}
+                onChange={(e) => setZonalUnit(e.target.value)}
+                className="select-field"
+                style={{ width: '100%' }}
+              >
+                {ZONAL_UNITS.map((zu, idx) => (
+                  <option key={idx} value={zu.value}>{zu.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Investigating Officer Designation:</label>
+            <input
+              type="text"
+              value={officerRank}
+              onChange={(e) => setOfficerRank(e.target.value)}
+              className="input-field"
+              style={{ width: '100%' }}
             />
           </div>
         </div>
+      </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Issuing Zonal Unit</label>
-            <input 
-              type="text" 
-              value={zonalUnit} 
-              onChange={(e) => setZonalUnit(e.target.value)}
-              style={{
-                padding: '0.45rem',
-                borderRadius: '6px',
-                border: '1px solid var(--border-color)',
-                backgroundColor: '#0f172a',
-                color: 'var(--text-primary)',
-                outline: 'none',
-                fontSize: '0.8rem'
-              }}
-            />
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Officer Name & Rank</label>
-            <input 
-              type="text" 
-              value={officerRank} 
-              onChange={(e) => setOfficerRank(e.target.value)}
-              style={{
-                padding: '0.45rem',
-                borderRadius: '6px',
-                border: '1px solid var(--border-color)',
-                backgroundColor: '#0f172a',
-                color: 'var(--text-primary)',
-                outline: 'none',
-                fontSize: '0.8rem'
-              }}
-            />
+      {/* Subpoena Preview Panel */}
+      <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <FileSignature style={{ color: '#eab308' }} size={18} /> Generated NDPS Notice Document
+          </h3>
+          <div style={{ display: 'flex', gap: '0.4rem' }}>
+            <button
+              onClick={handleCopySubpoena}
+              className="btn"
+            >
+              <Clipboard size={14} /> Copy Text
+            </button>
+            <button
+              onClick={handleDownloadSubpoena}
+              className="btn btn-primary"
+            >
+              <Download size={14} /> Download .txt
+            </button>
           </div>
         </div>
 
         {receiverNode ? (
-          <>
-            <div style={{ flex: 1, position: 'relative' }}>
-              <textarea
-                value={generateSubpoenaText()}
-                readOnly
-                style={{
-                  width: '100%',
-                  height: '200px',
-                  fontFamily: 'monospace',
-                  fontSize: '0.75rem',
-                  padding: '0.75rem',
-                  borderRadius: '6px',
-                  border: '1px solid var(--border-color)',
-                  backgroundColor: '#080c14',
-                  color: 'var(--text-primary)',
-                  resize: 'none',
-                  outline: 'none',
-                  lineHeight: '1.4'
-                }}
-              />
-              <div style={{ position: 'absolute', bottom: '10px', right: '10px', display: 'flex', gap: '0.5rem' }}>
-                <button
-                  onClick={handleDownloadSubpoena}
-                  style={{
-                    padding: '0.35rem 0.65rem',
-                    borderRadius: '4px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'rgba(255,255,255,0.05)',
-                    color: '#fff',
-                    fontSize: '0.75rem',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.25rem'
-                  }}
-                  title="Download Notice as Text file"
-                >
-                  <Download size={12} /> Download
-                </button>
-
-                <button
-                  onClick={handleCopySubpoena}
-                  style={{
-                    padding: '0.35rem 0.65rem',
-                    borderRadius: '4px',
-                    border: 'none',
-                    backgroundColor: 'var(--primary)',
-                    color: '#fff',
-                    fontSize: '0.75rem',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.25rem'
-                  }}
-                  title="Copy Subpoena Notice"
-                >
-                  <Clipboard size={12} /> Copy Text
-                </button>
-              </div>
-            </div>
-
-            <div style={{ 
-              backgroundColor: 'rgba(245, 158, 11, 0.05)', 
-              border: '1px solid var(--risk-medium)', 
-              borderRadius: '6px', 
-              padding: '0.6rem 0.8rem', 
-              fontSize: '0.8rem', 
-              display: 'flex', 
-              alignItems: 'flex-start',
-              gap: '0.5rem' 
-            }}>
-              <AlertTriangle size={16} style={{ color: 'var(--risk-medium)', flexShrink: 0 }} />
-              <div style={{ color: 'var(--text-secondary)' }}>
-                Notices under Section 67 NDPS Act must be signed by an authorized officer prior to dispatch.
-              </div>
-            </div>
-          </>
+          <textarea
+            readOnly
+            value={getSubpoenaText()}
+            style={{
+              flex: 1,
+              width: '100%',
+              backgroundColor: '#050810',
+              color: '#94a3b8',
+              fontFamily: 'JetBrains Mono, monospace',
+              fontSize: '0.75rem',
+              padding: '1rem',
+              borderRadius: '6px',
+              border: '1px solid var(--border-color)',
+              resize: 'none',
+              lineHeight: '1.5'
+            }}
+          />
         ) : (
-          <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', border: '1px dashed var(--border-color)', borderRadius: '6px' }}>
-            No end receiver exchange address identified in current trace.
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', textAlign: 'center', padding: '2rem' }}>
+            <AlertTriangle size={36} style={{ color: '#f59e0b', marginBottom: '0.75rem' }} />
+            <p>No terminal End Receiver deposit node located in current active case graph.</p>
           </div>
         )}
       </div>

@@ -10,8 +10,14 @@ import {
   Award,
   Upload
 } from 'lucide-react';
+import { useCase } from '../hooks/useCase';
+import { useToast } from '../hooks/useToast';
+import { ZONAL_UNITS } from '../constants/legalConstants';
 
-export default function ReportGenerator({ activeCase }) {
+export default function ReportGenerator() {
+  const { activeCase } = useCase();
+  const { showToast } = useToast();
+
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
@@ -86,6 +92,7 @@ export default function ReportGenerator({ activeCase }) {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    showToast("Cleared signature pad.", "info");
   };
 
   const handleImageUpload = (e) => {
@@ -99,6 +106,7 @@ export default function ReportGenerator({ activeCase }) {
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        showToast("Signature/Stamp image loaded.", "success");
       };
       img.src = event.target.result;
     };
@@ -107,7 +115,14 @@ export default function ReportGenerator({ activeCase }) {
   };
 
   const handlePrint = () => {
+    showToast("Opening print dialog for PDF export...", "info");
     window.print();
+  };
+
+  const toggleLock = () => {
+    const nextLocked = !isLocked;
+    setIsLocked(nextLocked);
+    showToast(nextLocked ? "Report integrity seal locked." : "Report form unlocked for editing.", nextLocked ? "success" : "info");
   };
 
   const getRefCode = () => {
@@ -310,38 +325,23 @@ export default function ReportGenerator({ activeCase }) {
             value={bureauZone}
             disabled={isLocked}
             onChange={(e) => setBureauZone(e.target.value)}
-            style={{
-              padding: '0.5rem',
-              borderRadius: '6px',
-              border: '1px solid var(--border-color)',
-              backgroundColor: '#0f172a',
-              color: 'var(--text-primary)',
-              outline: 'none',
-              fontSize: '0.8rem'
-            }}
+            className="select-field"
+            style={{ width: '100%' }}
           >
-            <option value="NCB Head Office, New Delhi">NCB Headquarters, Delhi</option>
-            <option value="NCB Mumbai Zonal Unit">Mumbai Zonal Unit (MZU)</option>
-            <option value="NCB Bengaluru Zonal Unit">Bengaluru Zonal Unit (BZU)</option>
-            <option value="NCB Chennai Intelligence Cell">Chennai Intelligence Cell (CIU)</option>
+            {ZONAL_UNITS.map((zu, idx) => (
+              <option key={idx} value={zu.value}>{zu.label}</option>
+            ))}
           </select>
         </div>
 
         <button
-          onClick={() => setIsLocked(!isLocked)}
+          onClick={toggleLock}
+          className={`btn ${isLocked ? 'btn-outline' : ''}`}
           style={{
-            padding: '0.6rem',
-            borderRadius: '6px',
-            border: '1px solid var(--border-color)',
-            backgroundColor: isLocked ? 'rgba(139, 92, 246, 0.1)' : 'rgba(255, 255, 255, 0.02)',
+            borderColor: isLocked ? 'var(--secondary)' : 'var(--border-color)',
             color: isLocked ? 'var(--secondary)' : 'var(--text-secondary)',
-            fontWeight: 600,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '0.5rem',
-            fontSize: '0.85rem'
+            backgroundColor: isLocked ? 'rgba(139, 92, 246, 0.1)' : 'rgba(255, 255, 255, 0.02)',
+            justifyContent: 'center'
           }}
         >
           {isLocked ? <Lock size={14} /> : <LockOpen size={14} />}
@@ -350,20 +350,8 @@ export default function ReportGenerator({ activeCase }) {
         
         <button
           onClick={handlePrint}
-          style={{
-            padding: '0.65rem',
-            borderRadius: '6px',
-            border: 'none',
-            backgroundColor: 'var(--primary)',
-            color: '#fff',
-            fontWeight: 600,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '0.5rem',
-            fontSize: '0.85rem'
-          }}
+          className="btn btn-primary"
+          style={{ justifyContent: 'center' }}
         >
           <Printer size={16} /> Print / Save as PDF
         </button>

@@ -12,16 +12,21 @@ import {
   Upload,
   RotateCcw
 } from 'lucide-react';
+import { useCase } from '../hooks/useCase';
+import { useToast } from '../hooks/useToast';
 
-export default function Dashboard({ 
-  scenarios, 
-  activeCase, 
-  onSelectCase, 
-  onSearch, 
-  onExportCase, 
-  onImportCase, 
-  onResetCases 
-}) {
+export default function Dashboard() {
+  const { 
+    scenarios, 
+    activeCase, 
+    handleSelectCase, 
+    handleSearch, 
+    handleExportCase, 
+    handleImportCase, 
+    handleResetCases 
+  } = useCase();
+
+  const { showToast } = useToast();
   const [searchVal, setSearchVal] = useState('');
 
   const handleFileUpload = (e) => {
@@ -31,9 +36,9 @@ export default function Dashboard({
     reader.onload = (event) => {
       try {
         const parsed = JSON.parse(event.target.result);
-        if (onImportCase) onImportCase(parsed);
+        if (handleImportCase) handleImportCase(parsed);
       } catch (err) {
-        alert("Failed to parse JSON file: " + err.message);
+        showToast("Failed to parse JSON file: " + err.message, "error");
       }
     };
     reader.readAsText(file);
@@ -55,13 +60,13 @@ export default function Dashboard({
   const handleSubmit = (e) => {
     e.preventDefault();
     if (searchVal.trim()) {
-      onSearch(searchVal.trim());
+      handleSearch(searchVal.trim());
     }
   };
 
   const handleSampleClick = (val) => {
     setSearchVal(val);
-    onSearch(val);
+    handleSearch(val);
   };
 
   return (
@@ -88,34 +93,20 @@ export default function Dashboard({
               placeholder="Enter Tx Hash (e.g. 4b9a8f2e...) or Address (e.g. bc1q...)"
               value={searchVal}
               onChange={(e) => setSearchVal(e.target.value)}
-              className="mono-addr"
+              className="mono-addr input-field"
               style={{
                 width: '100%',
-                padding: '0.75rem 0.75rem 0.75rem 2.5rem',
-                borderRadius: '6px',
-                border: '1px solid var(--border-color)',
-                backgroundColor: 'rgba(5, 8, 16, 0.8)',
-                color: 'var(--text-primary)',
-                outline: 'none',
+                paddingLeft: '2.5rem',
+                paddingTop: '0.75rem',
+                paddingBottom: '0.75rem',
                 fontSize: '0.85rem'
               }}
             />
           </div>
           <button
             type="submit"
-            style={{
-              padding: '0 1.5rem',
-              borderRadius: '6px',
-              border: 'none',
-              backgroundColor: 'var(--primary)',
-              color: '#fff',
-              fontWeight: 600,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              fontSize: '0.85rem'
-            }}
+            className="btn btn-primary"
+            style={{ padding: '0 1.5rem', fontSize: '0.85rem' }}
           >
             Run Trace <ArrowRight size={16} />
           </button>
@@ -128,15 +119,8 @@ export default function Dashboard({
             <button
               key={i}
               onClick={() => handleSampleClick(sq.value)}
-              style={{
-                fontSize: '0.75rem',
-                padding: '0.25rem 0.6rem',
-                borderRadius: '4px',
-                border: '1px solid var(--border-color)',
-                backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                color: 'var(--text-secondary)',
-                cursor: 'pointer'
-              }}
+              className="btn"
+              style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }}
             >
               {sq.label}
             </button>
@@ -171,19 +155,7 @@ export default function Dashboard({
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <label
-              style={{
-                padding: '0.4rem 0.75rem',
-                borderRadius: '6px',
-                border: '1px solid var(--border-color)',
-                backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                color: 'var(--text-primary)',
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.35rem'
-              }}
+              className="btn"
               title="Import JSON Case File"
             >
               <Upload size={14} /> Import Case
@@ -191,39 +163,17 @@ export default function Dashboard({
             </label>
 
             <button
-              onClick={onExportCase}
-              style={{
-                padding: '0.4rem 0.75rem',
-                borderRadius: '6px',
-                border: '1px solid var(--border-color)',
-                backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                color: 'var(--text-primary)',
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.35rem'
-              }}
+              onClick={handleExportCase}
+              className="btn"
               title="Export All Cases to JSON File"
             >
               <Download size={14} /> Export JSON
             </button>
 
             <button
-              onClick={onResetCases}
-              style={{
-                padding: '0.4rem 0.6rem',
-                borderRadius: '6px',
-                border: '1px solid var(--border-color)',
-                backgroundColor: 'rgba(239, 68, 68, 0.05)',
-                color: '#f87171',
-                fontSize: '0.8rem',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.25rem'
-              }}
+              onClick={handleResetCases}
+              className="btn"
+              style={{ backgroundColor: 'rgba(239, 68, 68, 0.05)', color: '#f87171', borderColor: 'rgba(239, 68, 68, 0.2)' }}
               title="Reset Traces to Default"
             >
               <RotateCcw size={14} /> Reset
@@ -235,7 +185,7 @@ export default function Dashboard({
           {scenarios.map((c) => (
             <div 
               key={c.id} 
-              onClick={() => onSelectCase(c.id)}
+              onClick={() => handleSelectCase(c.id)}
               className="glass-panel-hover"
               style={{
                 padding: '1rem 1.25rem',

@@ -1,13 +1,14 @@
 import React from 'react';
 import { 
   ShieldAlert, 
-  Activity, 
   CheckCircle,
-  AlertTriangle,
-  FileCheck2
+  AlertTriangle
 } from 'lucide-react';
+import { useCase } from '../hooks/useCase';
 
-export default function RiskAnalyzer({ activeCase }) {
+export default function RiskAnalyzer() {
+  const { activeCase } = useCase();
+
   if (!activeCase) return <div style={{ color: 'var(--text-secondary)' }}>Select a case first.</div>;
 
   const hasMixer = activeCase.nodes.some(n => n.type === 'mixer');
@@ -101,59 +102,51 @@ export default function RiskAnalyzer({ activeCase }) {
         </div>
       </div>
 
-      {/* AI Explainability panel */}
-      <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-        <h3 style={{ fontSize: '1.25rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <Activity style={{ color: 'var(--primary)' }} /> Calculated Risk Score
-        </h3>
-        
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '1rem 0', position: 'relative' }}>
-          <svg width="150" height="150" viewBox="0 0 100 100">
-            <circle cx="50" cy="50" r="40" stroke="rgba(255,255,255,0.05)" strokeWidth="8" fill="none" />
+      {/* Dynamic Gauge Panel */}
+      <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
+        <h4 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Aggregate Risk Index
+        </h4>
+
+        {/* Circular Risk Meter */}
+        <div style={{ position: 'relative', width: '180px', height: '180px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <svg width="180" height="180" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="40" fill="none" stroke="#1e293b" strokeWidth="8" />
             <circle 
               cx="50" 
               cy="50" 
               r="40" 
-              stroke={calculatedRiskScore > 85 ? 'var(--risk-high)' : calculatedRiskScore > 60 ? 'var(--risk-medium)' : 'var(--risk-low)'} 
-              strokeWidth="8" 
               fill="none" 
-              strokeDasharray="251"
-              strokeDashoffset={251 - (251 * calculatedRiskScore) / 100}
+              stroke={calculatedRiskScore > 75 ? '#ef4444' : calculatedRiskScore > 50 ? '#f59e0b' : '#10b981'} 
+              strokeWidth="8"
+              strokeDasharray="251.2"
+              strokeDashoffset={251.2 - (251.2 * calculatedRiskScore) / 100}
               strokeLinecap="round"
               transform="rotate(-90 50 50)"
+              style={{ transition: 'stroke-dashoffset 1s ease-in-out' }}
             />
-            <text x="50" y="55" textAnchor="middle" fill="#fff" fontSize="16" fontWeight="bold">
-              {calculatedRiskScore}%
-            </text>
           </svg>
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginTop: '0.5rem', fontWeight: 600 }}>
-            Automated Forensic Danger Index
-          </span>
+          <div style={{ position: 'absolute', textAlign: 'center' }}>
+            <span style={{ fontSize: '2.4rem', fontWeight: 800, color: '#fff', display: 'block' }}>{calculatedRiskScore}</span>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>out of 100</span>
+          </div>
         </div>
 
-        {/* Explainability Breakdown Card */}
-        <div className="glass-panel" style={{ padding: '1rem', borderLeft: '3px solid var(--primary)', backgroundColor: 'rgba(0, 240, 255, 0.02)' }}>
-          <span style={{ fontSize: '0.8rem', color: 'var(--primary)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-            <FileCheck2 size={14} /> Risk Scoring Breakdown
+        <div style={{ textAlign: 'center', marginTop: '0.5rem' }}>
+          <span style={{ 
+            fontSize: '0.85rem', 
+            fontWeight: 700, 
+            padding: '0.3rem 0.8rem', 
+            borderRadius: '20px',
+            backgroundColor: calculatedRiskScore > 75 ? 'rgba(239, 68, 68, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+            color: calculatedRiskScore > 75 ? '#ef4444' : '#f59e0b',
+            textTransform: 'uppercase'
+          }}>
+            {calculatedRiskScore > 75 ? "CRITICAL RISK LEVEL" : "HIGH RISK LEVEL"}
           </span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.75rem', fontSize: '0.8rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Base Threat Factor:</span>
-              <strong style={{ color: '#fff' }}>+{baseScore}%</strong>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Obfuscation & Mixer Penalty:</span>
-              <strong style={{ color: 'var(--risk-high)' }}>+{mixerBonus + hopBonus}%</strong>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>End Receiver Mitigation:</span>
-              <strong style={{ color: isKycVerified ? 'var(--risk-low)' : 'var(--risk-high)' }}>{kycDiscount}%</strong>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.5rem', marginTop: '0.5rem' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Final Risk Grade:</span>
-              <strong style={{ color: 'var(--primary)' }}>{calculatedRiskScore}% Score</strong>
-            </div>
-          </div>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginTop: '0.75rem' }}>
+            Automatic escalation triggered for NCB Section 67 subpoena issuance.
+          </p>
         </div>
       </div>
 

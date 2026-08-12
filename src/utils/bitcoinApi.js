@@ -1,24 +1,24 @@
-/**
- * Blockstream & Mempool.space API integration for real BTC blockchain tracing & End Receiver identification.
- * Features in-memory caching and automatic fallback gateway failover.
- */
+import { API_CONFIG } from '../constants/config';
 
-const PRIMARY_BASE_URL = 'https://blockstream.info/api';
-const FALLBACK_BASE_URL = 'https://mempool.space/api';
+export const apiCache = new Map();
 
-const apiCache = new Map();
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+export function clearCache() {
+  apiCache.clear();
+}
 
 async function fetchWithFallbackAndCache(endpoint) {
   const cacheKey = endpoint;
   const cached = apiCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+  if (cached && Date.now() - cached.timestamp < API_CONFIG.CACHE_TTL_MS) {
+    // Refresh position for LRU
+    apiCache.delete(cacheKey);
+    apiCache.set(cacheKey, cached);
     return cached.data;
   }
 
   const urls = [
-    `${PRIMARY_BASE_URL}${endpoint}`,
-    `${FALLBACK_BASE_URL}${endpoint}`
+    `${API_CONFIG.PRIMARY_BASE_URL}${endpoint}`,
+    `${API_CONFIG.FALLBACK_BASE_URL}${endpoint}`
   ];
 
   let lastError = null;
@@ -27,6 +27,11 @@ async function fetchWithFallbackAndCache(endpoint) {
       const response = await fetch(url);
       if (response.ok) {
         const data = await response.json();
+        // LRU eviction: if size exceeds max, remove oldest key
+        if (apiCache.size >= API_CONFIG.MAX_CACHE_SIZE) {
+          const oldestKey = apiCache.keys().next().value;
+          if (oldestKey) apiCache.delete(oldestKey);
+        }
         apiCache.set(cacheKey, { timestamp: Date.now(), data });
         return data;
       }
@@ -51,6 +56,100 @@ export async function fetchAddressTxs(address) {
 }
 
 /**
+ * Classify Bitcoin script types from address prefix and scriptpubkey type string.
+ */
+export function getScriptTypeFromAddress(address, scriptType = '') {
+  if (scriptType === 'op_return' || !address) return 'OP_RETURN (Null Data)';
+  if (address.startsWith('bc1p') || scriptType === 'v1_p2tr') return 'Taproot (P2TR / Bech32m)';
+  if (address.startsWith('bc1q') && address.length > 50) return 'SegWit Script (v0 P2WSH)';
+  if (address.startsWith('bc1q') || scriptType === 'v0_p2wpkh') return 'Native SegWit (v0 P2WPKH)';
+  if (address.startsWith('3') || scriptType === 'p2sh') return 'Pay-to-Script-Hash (P2SH Multi-sig)';
+  if (address.startsWith('1') || scriptType === 'p2pkh') return 'Legacy (P2PKH)';
+  return 'Standard Script';
+}
+
+/**
+ * Extract and decode OP_RETURN null data payload bytes into ASCII text.
+ */
+export function parseOpReturnPayload(output) {
+  if (!output) return null;
+  const isOpReturn = output.scriptpubkey_type === 'op_return' || 
+    (output.scriptpubkey && output.scriptpubkey.startsWith('6a')) ||
+    (output.scriptpubkey_asm && output.scriptpubkey_asm.startsWith('OP_RETURN'));
+
+  if (!isOpReturn) return null;
+
+  const asm = output.scriptpubkey_asm || '';
+  const asmMatch = asm.match(/OP_RETURN\s+([0-9a-fA-F]+)/);
+  const hex = asmMatch ? asmMatch[1] : (output.scriptpubkey ? output.scriptpubkey.replace(/^6a/, '') : '');
+
+  const decodeHexToAscii = (strHex) => {
+    if (!strHex || strHex.length < 2) return '';
+    try {
+      const bytes = strHex.match(/.{1,2}/g)?.map(b => parseInt(b, 16)) || [];
+      const printable = bytes.map(b => (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.').join('');
+      return printable.replace(/\./g, '').length >= 2 ? printable : '';
+    } catch {
+      return '';
+    }
+  };
+
+  let text = decodeHexToAscii(hex);
+  if (!text && hex.length > 2) {
+    text = decodeHexToAscii(hex.slice(2));
+  }
+
+  return {
+    rawHex: hex || output.scriptpubkey || 'OP_RETURN',
+    decodedText: text || null
+  };
+}
+
+/**
+ * Compute transaction fee metrics (sat/vB, RBF signal, vsize).
+ */
+export function calculateTxMetrics(tx) {
+  const weight = tx.weight || (tx.size ? tx.size * 4 : 0);
+  const vsize = weight > 0 ? Math.ceil(weight / 4) : tx.size || 0;
+  const feeSat = tx.fee || 0;
+  const feeRateSatVb = vsize > 0 ? (feeSat / vsize).toFixed(1) : 'N/A';
+  const isRbfSignaled = (tx.vin || []).some(v => typeof v.sequence === 'number' && v.sequence < 0xfffffffe);
+  const blockConfirmation = tx.status?.confirmed 
+    ? (tx.status.block_height ? `Block #${tx.status.block_height}` : 'Confirmed')
+    : 'Unconfirmed (In Mempool)';
+
+  return {
+    vsize,
+    weight,
+    feeSat,
+    feeRateSatVb,
+    isRbfSignaled,
+    blockConfirmation
+  };
+}
+
+/**
+ * Detect CoinJoin / Privacy Mixing rounds based on input counts & equal output values.
+ */
+export function isCoinJoinTransaction(tx) {
+  const inputsCount = (tx.vin || []).length;
+  const outputs = tx.vout || [];
+
+  if (inputsCount < 2 || outputs.length < 2) return false;
+
+  const valueCounts = {};
+  outputs.forEach(o => {
+    if (o.value > 0) {
+      valueCounts[o.value] = (valueCounts[o.value] || 0) + 1;
+    }
+  });
+
+  // If at least 2 outputs have identical non-zero values in a multi-input tx -> CoinJoin/Equal-output pattern
+  const maxEqualOutputs = Math.max(0, ...Object.values(valueCounts));
+  return maxEqualOutputs >= 2;
+}
+
+/**
  * Format a raw Blockstream transaction object into graph nodes and links.
  */
 export function formatBlockstreamTx(tx, outspends = []) {
@@ -58,20 +157,29 @@ export function formatBlockstreamTx(tx, outspends = []) {
   const links = [];
   const txNodeId = `tx_${tx.txid}`;
 
+  const metrics = calculateTxMetrics(tx);
+  const isCoinJoin = isCoinJoinTransaction(tx);
+
   // Add the transaction hub node
   nodes.push({
     id: txNodeId,
-    label: `Tx: ${tx.txid.slice(0, 8)}...`,
-    type: 'hop',
+    label: isCoinJoin ? `CoinJoin: ${tx.txid.slice(0, 6)}...` : `Tx: ${tx.txid.slice(0, 8)}...`,
+    type: isCoinJoin ? 'mixer' : 'hop',
     balance: `${((tx.fee || 0) / 100000000).toFixed(6)} BTC Fee`,
-    risk: 'low',
-    entityName: `On-Chain Tx Hub`,
+    risk: isCoinJoin ? 'high' : 'low',
+    entityName: isCoinJoin ? 'CoinJoin Privacy Mixer Round' : 'On-Chain Tx Hub',
     details: {
       address: tx.txid,
-      lastActive: tx.status?.block_time ? new Date(tx.status.block_time * 1000).toISOString() : 'Unconfirmed',
+      lastActive: tx.status?.block_time ? new Date(tx.status.block_time * 1000).toISOString().split('T')[0] : 'Mempool',
       ipLog: 'Bitcoin P2P Network',
-      kycStatus: 'ON-CHAIN TRANSACTION',
-      riskReason: `Size: ${tx.size} bytes. Weight: ${tx.weight} vB. Fee: ${tx.fee || 0} Sats.`,
+      kycStatus: isCoinJoin ? 'PRIVACY MIXER (COINJOIN)' : 'ON-CHAIN TRANSACTION',
+      feeRateSatVb: `${metrics.feeRateSatVb} sat/vB`,
+      vsize: `${metrics.vsize} vB`,
+      rbfStatus: metrics.isRbfSignaled ? 'RBF Enabled' : 'Final (No RBF)',
+      confirmations: metrics.blockConfirmation,
+      riskReason: isCoinJoin 
+        ? `Detected equal-value output CoinJoin mixing structure across ${tx.vin?.length || 0} inputs.`
+        : `Fee Rate: ${metrics.feeRateSatVb} sat/vB. Size: ${tx.size} bytes (${metrics.vsize} vB). ${metrics.isRbfSignaled ? 'Signaled RBF.' : ''}`,
       device: 'Bitcoin Protocol'
     }
   });
@@ -82,6 +190,8 @@ export function formatBlockstreamTx(tx, outspends = []) {
       const addr = input.prevout.scriptpubkey_address;
       const valBtc = (input.prevout.value / 100000000).toFixed(6);
       const inputNodeId = `in_${addr}`;
+      const scriptStd = getScriptTypeFromAddress(addr, input.prevout.scriptpubkey_type);
+
       if (!nodes.some(n => n.id === inputNodeId)) {
         nodes.push({
           id: inputNodeId,
@@ -92,10 +202,11 @@ export function formatBlockstreamTx(tx, outspends = []) {
           entityName: `Input Wallet (${addr.slice(0, 6)}...)`,
           details: {
             address: addr,
-            lastActive: 'Spent',
+            lastActive: 'Spent UTXO',
             ipLog: 'P2P Broadcast Node',
             kycStatus: 'UNREGISTERED',
-            riskReason: 'Source input wallet providing UTXO to transaction.',
+            scriptStandard: scriptStd,
+            riskReason: `Input UTXO contributor (${scriptStd}).`,
             device: 'Bitcoin Client'
           }
         });
@@ -112,20 +223,50 @@ export function formatBlockstreamTx(tx, outspends = []) {
   // Outputs & Heuristic End Receiver Classification
   (tx.vout || []).forEach((output, i) => {
     const addr = output.scriptpubkey_address;
+    const opReturn = parseOpReturnPayload(output);
+
+    // Handle OP_RETURN null data outputs
+    if (opReturn) {
+      const opNodeId = `op_${tx.txid}_${i}`;
+      nodes.push({
+        id: opNodeId,
+        label: 'OP_RETURN Data',
+        type: 'hop',
+        balance: '0 BTC',
+        risk: 'medium',
+        entityName: 'Embedded OP_RETURN Payload',
+        details: {
+          address: `OP_RETURN:${opReturn.rawHex.slice(0, 16)}...`,
+          lastActive: 'On-chain Payload',
+          ipLog: 'N/A',
+          kycStatus: 'NULL DATA SCRIPT',
+          scriptStandard: 'OP_RETURN (Unspendable)',
+          opReturnHex: opReturn.rawHex,
+          opReturnDecoded: opReturn.decodedText || 'Binary / Encoded Payload',
+          riskReason: `Embedded null-data payload in scriptpubkey: ${opReturn.decodedText ? `"${opReturn.decodedText}"` : opReturn.rawHex.slice(0, 32)}`
+        }
+      });
+      links.push({
+        source: txNodeId,
+        target: opNodeId,
+        value: '0 BTC Data',
+        timestamp: 'Embedded'
+      });
+      return;
+    }
+
     if (!addr) return;
 
     const valBtc = (output.value / 100000000).toFixed(6);
     const outNodeId = `out_${addr}`;
     const outspend = outspends[i] || {};
     const isSpent = outspend.spent;
+    const scriptStd = getScriptTypeFromAddress(addr, output.scriptpubkey_type);
 
-    // Heuristics:
-    // 1. Unspent -> Terminal End Receiver (UTXO Holder)
-    // 2. Spent & matches Exchange/P2SH script patterns -> End Receiver (Exchange Deposit)
-    // 3. Smaller amount in a 2-output split (Peeling Chain) -> Payment recipient
+    // Enhanced Heuristics
     const isRoundValue = (output.value % 100000 === 0) || (output.value % 1000000 === 0);
     const isMultiSigOrP2SH = addr.startsWith('3') || addr.startsWith('bc1p');
-    
+
     let nodeType = 'hop';
     let label = 'Change / Hop';
     let entityName = 'Intermediate Wallet';
@@ -142,7 +283,8 @@ export function formatBlockstreamTx(tx, outspends = []) {
         lastActive: 'Active UTXO',
         ipLog: 'On-chain Wallet',
         kycStatus: 'HOLDING FUNDS (UNSPENT)',
-        riskReason: `Output remains unspent in local UTXO set. Balance: ${valBtc} BTC.`,
+        scriptStandard: scriptStd,
+        riskReason: `Output remains unspent in local UTXO set (${scriptStd}). Balance: ${valBtc} BTC.`,
         device: 'N/A'
       };
     } else if (isMultiSigOrP2SH || isRoundValue || i === 0) {
@@ -152,14 +294,15 @@ export function formatBlockstreamTx(tx, outspends = []) {
       risk = 'low';
       details = {
         address: addr,
-        lastActive: 'Deposit Spent/Forwarded',
+        lastActive: 'Deposit Forwarded',
         ipLog: 'Regulated Exchange Gateway',
         kycStatus: 'KYC VERIFIED',
+        scriptStandard: scriptStd,
         ownerName: 'Identified Gateway Profile',
         email: 'compliance@exchange-node.io',
         phone: 'Attributed Gateway',
         kycDocumentId: 'SUBPOENA READY',
-        riskReason: 'Centralized exchange or payment receiver identified by structural heuristics.',
+        riskReason: `Centralized exchange or payment receiver identified by structural heuristics (${scriptStd}).`,
         device: 'Web/API Gateway'
       };
     } else {
@@ -168,7 +311,8 @@ export function formatBlockstreamTx(tx, outspends = []) {
         lastActive: 'Forwarded',
         ipLog: 'Transit Proxy',
         kycStatus: 'UNREGISTERED',
-        riskReason: 'Change or intermediate hop wallet used for value routing.',
+        scriptStandard: scriptStd,
+        riskReason: `Change or intermediate hop wallet used for value routing (${scriptStd}).`,
         device: 'N/A'
       };
     }
@@ -199,7 +343,7 @@ export function formatBlockstreamTx(tx, outspends = []) {
 /**
  * Automative Recursive Outspends Tracing Algorithm (SIH1675 Core)
  * Traces funds forward from a transaction, identifying change outputs vs payment outputs,
- * and recursively follows spent outputs to locate the final "end receiver" wallets.
+ * script-matching change heuristics, CoinJoin rounds, and recursively follows spent outputs.
  */
 export async function traceEndReceiver(startTxId, maxDepth = 2) {
   const nodes = [];
@@ -215,34 +359,46 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
       const outspends = await fetchOutspends(txId);
 
       const txNodeId = `tx_${txId}`;
+      const metrics = calculateTxMetrics(tx);
+      const isCoinJoin = isCoinJoinTransaction(tx);
       
       // Add the Transaction Block Hub Node
       if (!nodes.some(n => n.id === txNodeId)) {
         nodes.push({
           id: txNodeId,
-          label: `Tx: ${txId.slice(0, 8)}...`,
-          type: 'hop',
+          label: isCoinJoin ? `CoinJoin: ${txId.slice(0, 6)}...` : `Tx: ${txId.slice(0, 8)}...`,
+          type: isCoinJoin ? 'mixer' : 'hop',
           balance: `${((tx.fee || 0) / 100000000).toFixed(6)} BTC Fee`,
-          risk: 'low',
-          entityName: `Hop Hub (Depth ${currentDepth})`,
+          risk: isCoinJoin ? 'high' : 'low',
+          entityName: isCoinJoin ? 'CoinJoin Privacy Mixer Round' : `Hop Hub (Depth ${currentDepth})`,
           details: {
             address: txId,
-            lastActive: tx.status?.block_time ? new Date(tx.status.block_time * 1000).toLocaleDateString() : 'Mined',
-            ipLog: 'N/A (Mined)',
-            kycStatus: 'ON-CHAIN TX',
-            riskReason: `Transaction size: ${tx.size} bytes. Fee: ${tx.fee || 0} Sats.`,
+            lastActive: tx.status?.block_time ? new Date(tx.status.block_time * 1000).toLocaleDateString() : 'Mempool',
+            ipLog: 'Bitcoin P2P Network',
+            kycStatus: isCoinJoin ? 'PRIVACY MIXER (COINJOIN)' : 'ON-CHAIN TX',
+            feeRateSatVb: `${metrics.feeRateSatVb} sat/vB`,
+            vsize: `${metrics.vsize} vB`,
+            rbfStatus: metrics.isRbfSignaled ? 'RBF Enabled' : 'Final (No RBF)',
+            confirmations: metrics.blockConfirmation,
+            riskReason: isCoinJoin
+              ? `Detected equal-output CoinJoin privacy mixing structure across ${tx.vin?.length || 0} inputs.`
+              : `Tx Fee Rate: ${metrics.feeRateSatVb} sat/vB (${metrics.vsize} vB). ${metrics.isRbfSignaled ? 'RBF Signaled.' : ''}`,
             device: 'Bitcoin Protocol'
           }
         });
       }
 
-      // Add inputs (only for the starting transaction to keep graph focused)
+      // Input script type & address extraction
+      const inputScriptTypes = [];
       if (currentDepth === 0) {
         (tx.vin || []).forEach(input => {
           if (input.prevout && input.prevout.scriptpubkey_address) {
             const addr = input.prevout.scriptpubkey_address;
             const valBtc = (input.prevout.value / 100000000).toFixed(6);
             const inputNodeId = `in_${addr}`;
+            const scriptStd = getScriptTypeFromAddress(addr, input.prevout.scriptpubkey_type);
+            inputScriptTypes.push(scriptStd);
+
             if (!nodes.some(n => n.id === inputNodeId)) {
               nodes.push({
                 id: inputNodeId,
@@ -256,7 +412,8 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
                   lastActive: 'Transacted',
                   ipLog: 'Broadcast Origin IP',
                   kycStatus: 'UNREGISTERED',
-                  riskReason: 'Transaction input contributor.',
+                  scriptStandard: scriptStd,
+                  riskReason: `Transaction input contributor (${scriptStd}).`,
                   device: 'Unknown'
                 }
               });
@@ -272,8 +429,44 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
       }
 
       // Parse outputs and analyze end receivers
+      const firstInputScriptType = inputScriptTypes[0] || (tx.vin?.[0]?.prevout ? getScriptTypeFromAddress(tx.vin[0].prevout.scriptpubkey_address, tx.vin[0].prevout.scriptpubkey_type) : null);
+
       for (let i = 0; i < (tx.vout || []).length; i++) {
         const output = tx.vout[i];
+        const opReturn = parseOpReturnPayload(output);
+
+        // Handle OP_RETURN embedded data payloads
+        if (opReturn) {
+          const opNodeId = `op_${txId}_${i}`;
+          if (!nodes.some(n => n.id === opNodeId)) {
+            nodes.push({
+              id: opNodeId,
+              label: 'OP_RETURN Data',
+              type: 'hop',
+              balance: '0 BTC',
+              risk: 'medium',
+              entityName: 'Embedded OP_RETURN Payload',
+              details: {
+                address: `OP_RETURN:${opReturn.rawHex.slice(0, 16)}...`,
+                lastActive: 'On-chain Payload',
+                ipLog: 'N/A',
+                kycStatus: 'NULL DATA SCRIPT',
+                scriptStandard: 'OP_RETURN (Unspendable)',
+                opReturnHex: opReturn.rawHex,
+                opReturnDecoded: opReturn.decodedText || 'Binary Payload',
+                riskReason: `Embedded null-data payload: ${opReturn.decodedText ? `"${opReturn.decodedText}"` : opReturn.rawHex.slice(0, 32)}`
+              }
+            });
+          }
+          links.push({
+            source: txNodeId,
+            target: opNodeId,
+            value: '0 BTC Data',
+            timestamp: 'Embedded'
+          });
+          continue;
+        }
+
         const addr = output.scriptpubkey_address;
         if (!addr) continue;
 
@@ -283,14 +476,23 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
 
         const isSpent = outspend.spent;
         const spendingTxId = isSpent ? outspend.txid : null;
+        const scriptStd = getScriptTypeFromAddress(addr, output.scriptpubkey_type);
 
-        // Enhanced Heuristic End Receiver Detection Logic:
-        // 1. Unspent output -> Terminal UTXO End Receiver
-        // 2. Spent output with P2SH/Taproot/Exchange pattern or explicit round payment -> End Receiver Deposit Point
-        // 3. Peeling Chain: In 2-output txs, the smaller output is typically the payment recipient (End Receiver), larger output is change hop.
+        // Script-matching change heuristic:
+        // In 2-output transactions, if output script type matches input script type while the other output differs,
+        // the matching output is change (hop), and the differing output is payment recipient (end receiver).
         const is2Outputs = tx.vout.length === 2;
-        const otherOutputVal = is2Outputs ? tx.vout[1 - i].value : 0;
-        const isPeelingPayment = is2Outputs && output.value < otherOutputVal;
+        const otherOutput = is2Outputs ? tx.vout[1 - i] : null;
+        const otherAddr = otherOutput?.scriptpubkey_address;
+        const otherScriptStd = otherAddr ? getScriptTypeFromAddress(otherAddr, otherOutput.scriptpubkey_type) : null;
+        
+        let isScriptMatchedChange = false;
+        if (is2Outputs && firstInputScriptType) {
+          if (scriptStd === firstInputScriptType && otherScriptStd !== firstInputScriptType) {
+            isScriptMatchedChange = true;
+          }
+        }
+
         const isExchangeScript = addr.startsWith('3') || addr.startsWith('bc1p') || addr.startsWith('1');
 
         let nodeType = 'hop';
@@ -309,10 +511,11 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
             lastActive: 'Active UTXO holder',
             ipLog: 'On-chain Wallet',
             kycStatus: 'HOLDING FUNDS (UNSPENT)',
-            riskReason: `This output remains unspent. The end receiver holds ${valBtc} BTC.`,
+            scriptStandard: scriptStd,
+            riskReason: `This output remains unspent (${scriptStd}). The end receiver holds ${valBtc} BTC.`,
             device: 'N/A'
           };
-        } else if (isPeelingPayment || isExchangeScript) {
+        } else if (!isScriptMatchedChange && (isExchangeScript || (is2Outputs && !isScriptMatchedChange))) {
           nodeType = 'receiver';
           label = 'End Receiver: Exchange';
           entityName = 'Attributed Deposit Wallet';
@@ -322,11 +525,12 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
             lastActive: 'Deposit Confirmed',
             ipLog: 'Registered Exchange Gateway',
             kycStatus: 'KYC VERIFIED',
+            scriptStandard: scriptStd,
             ownerName: `Target Holder (${addr.slice(0, 6)})`,
             email: `deposit.${addr.slice(0, 4)}@exchange-compliance.net`,
             phone: 'On-file with Gateway',
             kycDocumentId: 'SUBPOENA ELIGIBLE',
-            riskReason: 'Centralized exchange deposit point identified by peeling chain & script analysis.',
+            riskReason: `Centralized exchange deposit point identified by script analysis (${scriptStd}).`,
             device: 'Exchange Gateway'
           };
         } else {
@@ -335,7 +539,8 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
             lastActive: 'Forwarded',
             ipLog: 'Relay Proxy',
             kycStatus: 'UNREGISTERED',
-            riskReason: 'Transit hop used to split and forward transaction values.',
+            scriptStandard: scriptStd,
+            riskReason: `Transit change hop identified by script matching heuristic (${scriptStd}).`,
             device: 'N/A'
           };
         }
@@ -381,4 +586,3 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
 
   return { nodes, links };
 }
-
