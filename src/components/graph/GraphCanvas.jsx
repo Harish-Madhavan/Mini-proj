@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { 
   Sparkles, 
   RefreshCw, 
@@ -6,17 +6,35 @@ import {
   ZoomIn, 
   ZoomOut, 
   Maximize2, 
+  Minimize2,
   Download,
-  ChevronRight
+  ChevronRight,
+  Focus,
+  Activity,
+  Play,
+  Pause,
+  RotateCcw,
+  SkipForward,
+  Eye,
+  EyeOff,
+  GitCommit,
+  AlertTriangle
 } from 'lucide-react';
 import NodeRenderer from './NodeRenderer';
 import { useToast } from '../../hooks/useToast';
+import { findCriticalMoneyTrail, detectCircularFlows } from '../../utils/graphAlgorithms';
 
 export default function GraphCanvas({
   activeCase,
   selectedNode,
   highlightReceiver,
   setHighlightReceiver,
+  isolatedNodeId,
+  setIsolatedNodeId,
+  isPlaying,
+  setIsPlaying,
+  playbackStep,
+  setPlaybackStep,
   zoom,
   setZoom,
   panOffset,
@@ -40,15 +58,49 @@ export default function GraphCanvas({
   onSelectTab
 }) {
   const svgRef = useRef(null);
+  const containerRef = useRef(null);
   const { showToast } = useToast();
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showCriticalTrail, setShowCriticalTrail] = useState(false);
+
+  // Compute critical trail and circular flows
+  const criticalTrail = useMemo(() => {
+    if (!showCriticalTrail || !activeCase?.nodes?.length || !activeCase?.links?.length) return null;
+    return findCriticalMoneyTrail(activeCase.nodes, activeCase.links);
+  }, [showCriticalTrail, activeCase]);
+
+  const detectedCycles = useMemo(() => {
+    if (!activeCase?.nodes?.length || !activeCase?.links?.length) return [];
+    return detectCircularFlows(activeCase.nodes, activeCase.links);
+  }, [activeCase]);
 
   const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.15, 3.0));
   const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.15, 0.5));
+
   const resetView = () => {
     setZoom(1.0);
     setPanOffset({ x: 0, y: 0 });
     setCustomPositions({});
+    showToast("Graph layout reset to center.", "info");
   };
+
+  const handleCenterFit = () => {
+    if (!activeCase?.nodes?.length) return;
+    setZoom(1.05);
+    setPanOffset({ x: 0, y: 0 });
+    showToast("Fitted graph nodes to viewport center.", "info");
+  };
+
+  // Keyboard shortcut for ESC to exit fullscreen
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && isFullscreen) {
+        setIsFullscreen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isFullscreen]);
 
   const handleMouseDown = (e) => {
     if (e.target.tagName === 'svg' || e.target.id === 'bg-panner') {
@@ -133,10 +185,19 @@ export default function GraphCanvas({
   };
 
   return (
-    <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', position: 'relative' }}>
+    <div 
+      ref={containerRef}
+      className={`glass-panel ${isFullscreen ? 'fullscreen-canvas' : ''}`} 
+      style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', position: 'relative' }}
+    >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div>
-          <h3 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Interactive Fund Flow Tracing</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Interactive Fund Flow Tracing</h3>
+            <span className="badge-pill badge-pill-info">
+              {activeCase.nodes?.length || 0} Nodes • {activeCase.links?.length || 0} Hops
+            </span>
+          </div>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Pan canvas, scroll to zoom, drag nodes to re-position.</p>
         </div>
         
@@ -166,23 +227,123 @@ export default function GraphCanvas({
             <option value="mixer">Mixer</option>
           </select>
 
+          {/* Flow Playback Stepper Controls */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', backgroundColor: 'rgba(5, 8, 16, 0.8)', padding: '0.2rem 0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+            <button
+              onClick={() => {
+                if (playbackStep === null) setPlaybackStep(0);
+                setIsPlaying(!isPlaying);
+              }}
+              className={`btn ${isPlaying ? 'btn-primary' : 'btn-outline'}`}
+              style={{ fontSize: '0.725rem', padding: '0.25rem 0.5rem' }}
+              title={isPlaying ? "Pause Flow Playback" : "Play Chronological Flow"}
+            >
+              {isPlaying ? <Pause size={12} /> : <Play size={12} />}
+              {isPlaying ? "Pause" : playbackStep !== null ? `Hop ${playbackStep + 1}/${activeCase.links?.length || 0}` : "Play Flow"}
+            </button>
+
+            {playbackStep !== null && (
+              <>
+                <button
+                  onClick={() => setPlaybackStep(prev => Math.min((prev || 0) + 1, (activeCase.links?.length || 1) - 1))}
+                  className="btn btn-outline"
+                  style={{ padding: '0.25rem 0.4rem' }}
+                  title="Next Flow Hop"
+                >
+                  <SkipForward size={12} />
+                </button>
+                <button
+                  onClick={() => { setPlaybackStep(null); setIsPlaying(false); }}
+                  className="btn btn-outline"
+                  style={{ padding: '0.25rem 0.4rem', color: 'var(--text-muted)' }}
+                  title="Reset Flow Playback"
+                >
+                  <RotateCcw size={12} />
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Path Isolation Indicator */}
+          {isolatedNodeId && (
+            <button
+              onClick={() => setIsolatedNodeId(null)}
+              className="btn btn-primary pulse-glow-border"
+              style={{ fontSize: '0.725rem', padding: '0.25rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+              title="Clear Path Isolation"
+            >
+              <Eye size={12} /> Isolated Trail <EyeOff size={12} />
+            </button>
+          )}
+
           <button
             onClick={handleExportPNG}
             className="btn"
+            type="button"
+            aria-label="Export canvas as PNG"
             title="Export Canvas as PNG image"
           >
-            <Download size={14} /> PNG
+            <Download size={14} aria-hidden="true" /> PNG
+          </button>
+
+          <button
+            onClick={() => setIsFullscreen(!isFullscreen)}
+            className="btn"
+            type="button"
+            aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen canvas"}
+            aria-pressed={isFullscreen}
+            title={isFullscreen ? "Exit Fullscreen (ESC)" : "Enter Fullscreen Canvas"}
+          >
+            {isFullscreen ? <Minimize2 size={14} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}
+          </button>
+
+          <button
+            onClick={() => setShowCriticalTrail(!showCriticalTrail)}
+            className={`btn ${showCriticalTrail ? 'btn-primary pulse-glow-border' : 'btn-outline'}`}
+            type="button"
+            aria-pressed={showCriticalTrail}
+            aria-label="Toggle critical money trail highlight"
+            style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }}
+            title="Highlight Maximum-Value Money Flow Path from Source to Destination"
+          >
+            <GitCommit size={13} aria-hidden="true" />
+            {showCriticalTrail ? "Critical Trail Active" : "Critical Money Trail"}
           </button>
 
           <button
             onClick={() => setHighlightReceiver(!highlightReceiver)}
             className={`btn ${highlightReceiver ? 'btn-warning pulse-glow-border' : 'btn-outline'}`}
+            type="button"
+            aria-pressed={highlightReceiver}
+            aria-label="Toggle end receiver highlight"
           >
-            <Sparkles size={14} /> 
+            <Sparkles size={14} aria-hidden="true" /> 
             {highlightReceiver ? "Receiver Located" : "Locate End Receiver"}
           </button>
         </div>
       </div>
+
+      {/* Laundering Cycle Detection Warning */}
+      {detectedCycles.length > 0 && (
+        <div style={{
+          backgroundColor: 'rgba(239, 68, 68, 0.15)',
+          border: '1px solid #ef4444',
+          borderRadius: '6px',
+          padding: '0.5rem 0.8rem',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontSize: '0.8rem',
+          color: '#fca5a5'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <AlertTriangle size={15} style={{ color: '#ef4444' }} />
+            <strong>Smurfing / Circular Washing Alert:</strong>
+            <span>Detected {detectedCycles.length} round-trip transaction cycle(s) routing back to previous nodes.</span>
+          </div>
+          <span style={{ fontSize: '0.7rem', color: '#f87171', fontWeight: 600 }}>High Obfuscation Indicator</span>
+        </div>
+      )}
 
       {/* SVG Drawing Canvas */}
       <div style={{ 
@@ -192,7 +353,7 @@ export default function GraphCanvas({
         border: '1px solid var(--border-color)', 
         overflow: 'hidden',
         position: 'relative',
-        minHeight: '420px',
+        minHeight: isFullscreen ? 'calc(100vh - 140px)' : '420px',
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center'
@@ -204,23 +365,31 @@ export default function GraphCanvas({
           </div>
         ) : (
           <>
-            {/* Floating Toolbar zoom controls */}
+            {/* Floating Toolbar zoom & fit controls */}
             <div style={{
               position: 'absolute',
               top: '12px',
               right: '12px',
               display: 'flex',
               flexDirection: 'column',
+              alignItems: 'center',
               gap: '4px',
               zIndex: 10,
-              backgroundColor: 'rgba(15, 23, 42, 0.85)',
-              padding: '4px',
-              borderRadius: '6px',
-              border: '1px solid var(--border-color)'
+              backgroundColor: 'rgba(15, 23, 42, 0.9)',
+              padding: '6px 4px',
+              borderRadius: '8px',
+              border: '1px solid var(--border-color)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
             }}>
-              <button onClick={handleZoomIn} style={{ padding: '6px', border: 'none', background: 'none', color: 'var(--text-primary)', cursor: 'pointer' }} title="Zoom In" aria-label="Zoom In"><ZoomIn size={16} /></button>
-              <button onClick={handleZoomOut} style={{ padding: '6px', border: 'none', background: 'none', color: 'var(--text-primary)', cursor: 'pointer' }} title="Zoom Out" aria-label="Zoom Out"><ZoomOut size={16} /></button>
-              <button onClick={resetView} style={{ padding: '6px', border: 'none', background: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }} title="Reset Fit" aria-label="Reset Zoom and Pan"><Maximize2 size={14} /></button>
+              <button onClick={handleZoomIn} type="button" style={{ padding: '6px', border: 'none', background: 'none', color: 'var(--text-primary)', cursor: 'pointer' }} title="Zoom In" aria-label="Zoom In"><ZoomIn size={16} aria-hidden="true" /></button>
+              
+              <span aria-live="polite" style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--primary)', padding: '2px 0' }}>
+                {Math.round(zoom * 100)}%
+              </span>
+
+              <button onClick={handleZoomOut} type="button" style={{ padding: '6px', border: 'none', background: 'none', color: 'var(--text-primary)', cursor: 'pointer' }} title="Zoom Out" aria-label="Zoom Out"><ZoomOut size={16} aria-hidden="true" /></button>
+              <button onClick={handleCenterFit} type="button" style={{ padding: '6px', border: 'none', background: 'none', color: '#10b981', cursor: 'pointer' }} title="Center & Fit View" aria-label="Center and Fit View"><Focus size={15} aria-hidden="true" /></button>
+              <button onClick={resetView} type="button" style={{ padding: '6px', border: 'none', background: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }} title="Reset Layout" aria-label="Reset Zoom and Pan"><Activity size={14} aria-hidden="true" /></button>
             </div>
 
             {/* End Receiver Forensic Highlight Banner Card */}
@@ -230,7 +399,7 @@ export default function GraphCanvas({
                 top: '12px',
                 left: '12px',
                 zIndex: 10,
-                backgroundColor: 'rgba(5, 8, 22, 0.92)',
+                backgroundColor: 'rgba(5, 8, 22, 0.94)',
                 border: '1px solid #eab308',
                 borderRadius: '8px',
                 padding: '0.85rem 1.1rem',
@@ -312,6 +481,9 @@ export default function GraphCanvas({
                   getNodeCoords={getNodeCoords}
                   selectedNode={selectedNode}
                   highlightReceiver={highlightReceiver}
+                  isolatedNodeId={isolatedNodeId}
+                  criticalTrail={criticalTrail}
+                  playbackStep={playbackStep}
                   searchFilter={searchFilter}
                   typeFilter={typeFilter}
                   draggingNodeId={draggingNodeId}
@@ -334,7 +506,8 @@ export default function GraphCanvas({
           padding: '0.5rem 1rem', 
           borderRadius: '6px',
           border: '1px solid var(--border-color)',
-          fontSize: '0.75rem'
+          fontSize: '0.75rem',
+          backdropFilter: 'blur(4px)'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
             <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444' }}></span>

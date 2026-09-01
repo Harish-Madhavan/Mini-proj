@@ -6,11 +6,18 @@ import {
   UserCheck, 
   PlusCircle, 
   Trash2,
-  ChevronRight
+  ChevronRight,
+  Download,
+  Upload,
+  CheckCircle,
+  AlertCircle
 } from 'lucide-react';
 import { fetchAddressTxs } from '../utils/bitcoinApi';
 import { useCase } from '../hooks/useCase';
 import { useToast } from '../hooks/useToast';
+import { validateBtcAddress, exportToCsv } from '../utils/forensicUtils';
+import { computeAddressClusters, detectPeelingChain } from '../utils/clusteringAlgorithms';
+import { downloadJson } from '../utils/download';
 
 export default function HeuristicClustering() {
   const { activeCase } = useCase();
@@ -26,11 +33,40 @@ export default function HeuristicClustering() {
   const [isClustering, setIsClustering] = useState(false);
 
   const handleAddAddress = () => {
-    if (newAddr.trim() && !suspectAddresses.includes(newAddr.trim())) {
-      setSuspectAddresses([...suspectAddresses, newAddr.trim()]);
-      setNewAddr('');
-      showToast("Added address to clustering set.", "info");
+    const trimmed = newAddr.trim();
+    if (!trimmed) return;
+
+    if (suspectAddresses.includes(trimmed)) {
+      showToast("Address is already in the clustering set.", "warning");
+      return;
     }
+
+    const validation = validateBtcAddress(trimmed);
+    if (!validation.isValid) {
+      showToast(`Address format notice: ${validation.error}`, "warning");
+    }
+
+    setSuspectAddresses([...suspectAddresses, trimmed]);
+    setNewAddr('');
+    showToast(`Added ${validation.type} address to pool.`, "info");
+  };
+
+  const handleImportFromGraph = () => {
+    if (!activeCase?.nodes?.length) {
+      showToast("No nodes available in active case graph.", "warning");
+      return;
+    }
+
+    const addressesFromGraph = activeCase.nodes
+      .map(n => n.details?.address)
+      .filter(Boolean)
+      .filter(addr => !addr.startsWith('0x') && (addr.startsWith('bc1') || addr.startsWith('1') || addr.startsWith('3') || addr.length > 20));
+
+    const uniqueAddrs = Array.from(new Set([...suspectAddresses, ...addressesFromGraph]));
+    const newlyAdded = uniqueAddrs.length - suspectAddresses.length;
+
+    setSuspectAddresses(uniqueAddrs);
+    showToast(`Imported ${newlyAdded} unique addresses from active case graph!`, "success");
   };
 
   const handleRemoveAddress = (index) => {
@@ -45,8 +81,7 @@ export default function HeuristicClustering() {
 
     const addrs = suspectAddresses;
     const count = addrs.length;
-    let liveMatchFound = false;
-    let sharedTxCount = 0;
+    const transactions = [];
 
     // Check if any of the addresses are real BTC addresses and fetch live transactions
     const btcAddrs = addrs.filter(a => a.startsWith('bc1') || a.startsWith('1') || a.startsWith('3'));
@@ -57,71 +92,68 @@ export default function HeuristicClustering() {
           btcAddrs.map(addr => fetchAddressTxs(addr))
         );
 
-        const allTxIds = [];
         txHistories.forEach(res => {
           if (res.status === 'fulfilled' && Array.isArray(res.value)) {
-            res.value.forEach(tx => allTxIds.push(tx.txid));
+            res.value.forEach(tx => transactions.push(tx));
           }
         });
-
-        // Count frequency of transaction overlaps
-        const frequencyMap = {};
-        allTxIds.forEach(id => {
-          frequencyMap[id] = (frequencyMap[id] || 0) + 1;
-        });
-
-        const coSpentTxs = Object.values(frequencyMap).filter(c => c > 1);
-        if (coSpentTxs.length > 0) {
-          liveMatchFound = true;
-          sharedTxCount = coSpentTxs.length;
-        }
       } catch (e) {
         console.warn("Live CIOH check fallback:", e);
       }
     }
 
-    // Analyze address formats
-    const hasSegwit = addrs.some(a => a.startsWith('bc1q') || a.startsWith('bc1p'));
-    const hasLegacy = addrs.some(a => a.startsWith('1'));
+    const clusterAnalysis = computeAddressClusters(addrs, transactions);
+    const peelingAnalysis = detectPeelingChain(transactions);
 
-    // Calculate confidence score based on script alignment & co-spending heuristics
-    let confidence = 82;
-    if (hasSegwit && !hasLegacy) confidence += 10;
-    if (count >= 3) confidence += 4;
-    if (liveMatchFound) confidence += 4;
-    confidence = Math.min(99, confidence);
-
-    // Generate deterministic cluster hash
-    let seed = 0;
-    addrs.forEach(a => {
-      for (let i = 0; i < a.length; i++) seed = (seed << 5) - seed + a.charCodeAt(i);
-    });
-    const clusterHash = Math.abs(seed).toString(16).toUpperCase().padStart(6, '0');
+    if (peelingAnalysis.isPeelingChain) {
+      clusterAnalysis.heuristicsApplied.push(
+        `Active Peeling Chain Detected (${peelingAnalysis.hopCount} hops, avg peel ${peelingAnalysis.averagePeelPercent}%)`
+      );
+    }
 
     const baseVal = parseFloat(activeCase?.nodes[0]?.balance || "14.85") * (count / 3);
     const totalBtc = baseVal.toFixed(4);
 
-    const heuristicsList = [
-      liveMatchFound 
-        ? `Live Blockchain Verified CIOH (Verified co-spending in ${sharedTxCount} Mainnet Tx inputs)`
-        : `Common Input Ownership Heuristic (CIOH co-spending pattern across ${count} addresses)`,
-      hasSegwit ? "SegWit (Bech32) Script Pattern Alignment" : "Standard Legacy Pay-to-PubKey-Hash (P2PKH) Pattern",
-      "Peeling Chain Change Output Reuse Heuristic",
-      "Time-Lock Delta & Gas Preference Alignment"
-    ];
-
     setTimeout(() => {
       setIsClustering(false);
       setClusteringResult({
-        clusterId: `CLUS-BTC-${clusterHash}`,
-        confidenceScore: confidence,
-        addressCount: count,
+        ...clusterAnalysis,
         totalBalance: `${totalBtc} BTC`,
-        heuristicsApplied: heuristicsList,
         primaryWalletEntity: "Target Entity / Unidentified Syndicate Alpha"
       });
-      showToast(`Clustering complete: Cluster ID CLUS-BTC-${clusterHash}`, "success");
-    }, 600);
+      showToast(`Clustering complete: Cluster ID ${clusterAnalysis.clusterId}`, "success");
+    }, 400);
+  };
+
+  const handleExportCsv = () => {
+    if (!clusteringResult) return;
+    const rows = clusteringResult.addresses.map((addr, idx) => {
+      const v = validateBtcAddress(addr);
+      return {
+        Index: idx + 1,
+        ClusterID: clusteringResult.clusterId,
+        Address: addr,
+        ScriptFormat: v.type,
+        Confidence: `${clusteringResult.confidenceScore}%`,
+        EstimatedControlBalance: clusteringResult.totalBalance
+      };
+    });
+
+    exportToCsv(`NCB-Cluster-${clusteringResult.clusterId}.csv`, rows, [
+      { key: 'Index', header: '#' },
+      { key: 'ClusterID', header: 'Cluster Entity ID' },
+      { key: 'Address', header: 'Bitcoin Address' },
+      { key: 'ScriptFormat', header: 'Script Format' },
+      { key: 'Confidence', header: 'CIOH Confidence' },
+      { key: 'EstimatedControlBalance', header: 'Aggregate Balance' }
+    ]);
+    showToast("Downloaded cluster forensic evidence CSV!", "success");
+  };
+
+  const handleExportJson = () => {
+    if (!clusteringResult) return;
+    downloadJson(clusteringResult, `NCB-Cluster-${clusteringResult.clusterId}.json`);
+    showToast("Downloaded cluster analysis JSON file!", "success");
   };
 
   return (
@@ -129,11 +161,22 @@ export default function HeuristicClustering() {
       
       {/* Input Wallet List panel */}
       <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        <div>
-          <h3 style={{ fontSize: '1.25rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <GitMerge style={{ color: '#a855f7' }} /> Common Input Ownership Heuristic (CIOH)
-          </h3>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Group separate addresses into single-entity wallet clusters by analyzing co-spending input signatures.</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <GitMerge style={{ color: '#a855f7' }} /> Common Input Ownership Heuristic (CIOH)
+            </h3>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Group separate addresses into single-entity wallet clusters by analyzing co-spending input signatures.</p>
+          </div>
+
+          <button
+            onClick={handleImportFromGraph}
+            className="btn btn-outline"
+            style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }}
+            title="Import all addresses from currently active case graph"
+          >
+            <Upload size={13} /> Import Graph Addrs
+          </button>
         </div>
 
         {/* Add Address Form */}
@@ -156,18 +199,27 @@ export default function HeuristicClustering() {
 
         {/* List of Addresses */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1, overflowY: 'auto', maxHeight: '280px' }}>
-          {suspectAddresses.map((addr, idx) => (
-            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.6rem 0.8rem', borderRadius: '6px', backgroundColor: 'rgba(5, 8, 16, 0.8)', border: '1px solid var(--border-color)' }}>
-              <span className="mono-addr" style={{ fontSize: '0.8rem' }}>{addr}</span>
-              <button
-                onClick={() => handleRemoveAddress(idx)}
-                style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', opacity: 0.7 }}
-                title="Remove address"
-              >
-                <Trash2 size={14} />
-              </button>
-            </div>
-          ))}
+          {suspectAddresses.map((addr, idx) => {
+            const validation = validateBtcAddress(addr);
+            return (
+              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.6rem 0.8rem', borderRadius: '6px', backgroundColor: 'rgba(5, 8, 16, 0.8)', border: '1px solid var(--border-color)', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', overflow: 'hidden' }}>
+                  <span className="mono-addr" style={{ fontSize: '0.8rem', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{addr}</span>
+                  <span style={{ fontSize: '0.65rem', color: validation.isValid ? '#10b981' : '#f59e0b', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                    {validation.isValid ? <CheckCircle size={10} /> : <AlertCircle size={10} />}
+                    {validation.type}
+                  </span>
+                </div>
+                <button
+                  onClick={() => handleRemoveAddress(idx)}
+                  style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', opacity: 0.7 }}
+                  title="Remove address"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            );
+          })}
         </div>
 
         <button
@@ -176,15 +228,36 @@ export default function HeuristicClustering() {
           className="btn btn-primary"
           style={{ width: '100%', padding: '0.75rem', justifyContent: 'center', fontSize: '0.85rem' }}
         >
-          <Shuffle size={16} /> {isClustering ? "Executing CIOH Algorithm..." : "Compute Wallet Entity Cluster"}
+          <Shuffle size={16} /> {isClustering ? "Executing CIOH Algorithm..." : `Compute Wallet Cluster (${suspectAddresses.length} Addresses)`}
         </button>
       </div>
 
       {/* Cluster Output panel */}
       <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-        <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <UserCheck style={{ color: '#10b981' }} size={18} /> Cluster Analysis Output
-        </h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <UserCheck style={{ color: '#10b981' }} size={18} /> Cluster Analysis Output
+          </h3>
+
+          {clusteringResult && (
+            <div style={{ display: 'flex', gap: '0.4rem' }}>
+              <button
+                onClick={handleExportCsv}
+                className="btn"
+                title="Download CSV Evidence Table"
+              >
+                <Download size={13} /> CSV
+              </button>
+              <button
+                onClick={handleExportJson}
+                className="btn btn-outline"
+                title="Download JSON Data"
+              >
+                <Download size={13} /> JSON
+              </button>
+            </div>
+          )}
+        </div>
 
         {clusteringResult ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -227,7 +300,7 @@ export default function HeuristicClustering() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', textAlign: 'center', padding: '2rem' }}>
             <HelpCircle size={40} style={{ marginBottom: '1rem' }} />
-            <p style={{ fontSize: '0.85rem' }}>Add 2 or more Bitcoin addresses to the pool and click "Compute Wallet Entity Cluster" to execute co-spending heuristics.</p>
+            <p style={{ fontSize: '0.85rem' }}>Add 2 or more Bitcoin addresses to the pool and click "Compute Wallet Cluster" to execute co-spending heuristics.</p>
           </div>
         )}
       </div>

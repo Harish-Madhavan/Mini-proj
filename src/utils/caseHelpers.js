@@ -1,19 +1,34 @@
+import { calculateForensicRiskScore } from './riskScoring';
+
 /**
  * Helper utility functions for creating live trace cases & algorithmic trace cases.
  */
 
+export function calculateDynamicCaseRiskScore(nodes = []) {
+  const result = calculateForensicRiskScore(nodes);
+  return result.riskScore;
+}
+
 export function createLiveTxCase(txId, formattedNodesAndLinks, scenarios) {
   const newCaseId = `live-btc-${txId.slice(0, 8)}`;
+  const nodes = formattedNodesAndLinks.nodes || [];
+  const riskScore = calculateDynamicCaseRiskScore(nodes);
+  const isHistorical = nodes.some(n => n.details?.kycStatus?.includes('HISTORICAL'));
+  const meta = formattedNodesAndLinks.meta || null;
+
   const liveCase = {
     id: newCaseId,
     title: `Live BTC Tx: ${txId.slice(0, 8)}...`,
-    subtitle: `Mainnet Real-Time Forward Trace`,
+    subtitle: isHistorical ? `Historical P2P Mainnet Trace` : `Mainnet Real-Time Forward Trace`,
     currency: "BTC",
-    suspectName: `Origin Entity (${txId.slice(0, 6)})`,
+    suspectName: isHistorical ? `Historical P2P Sender (${txId.slice(0, 6)})` : `Origin Entity (${txId.slice(0, 6)})`,
     initialTxHash: txId,
     status: "LIVE_TRACE",
-    riskScore: 80,
-    description: `Real-time outspend tracing for Tx ${txId}. Identifies intermediate peeling hops and terminal End Receiver UTXOs/Exchange endpoints.`,
+    riskScore,
+    traceMeta: meta,
+    description: isHistorical 
+      ? `Historical early Bitcoin era transaction trace for Tx ${txId}. Clean direct peer-to-peer transfer.`
+      : `Real-time outspend tracing for Tx ${txId}. Identifies intermediate peeling hops and terminal End Receiver UTXOs/Exchange endpoints.${meta?.confidence ? ` Trace confidence ${(meta.confidence*100).toFixed(0)}% (${meta.confidenceLevel}).` : ''}${meta?.haltReason ? ` Halt: ${meta.haltReason}.` : ''}`,
     nodes: formattedNodesAndLinks.nodes,
     links: formattedNodesAndLinks.links
   };
@@ -26,6 +41,11 @@ export function createLiveTxCase(txId, formattedNodesAndLinks, scenarios) {
 
 export function createAddressTraceCase(address, txCount, latestTxId, formattedNodesAndLinks, scenarios) {
   const newCaseId = `addr-btc-${address.slice(0, 8)}`;
+  const nodes = formattedNodesAndLinks.nodes || [];
+  const riskScore = calculateDynamicCaseRiskScore(nodes);
+  const isHistorical = nodes.some(n => n.details?.kycStatus?.includes('HISTORICAL'));
+  const meta = formattedNodesAndLinks.meta || null;
+
   const liveCase = {
     id: newCaseId,
     title: `Address Trace: ${address.slice(0, 10)}...`,
@@ -34,8 +54,11 @@ export function createAddressTraceCase(address, txCount, latestTxId, formattedNo
     suspectName: `Queried Address: ${address.slice(0, 12)}...`,
     initialTxHash: latestTxId,
     status: "LIVE_TRACE",
-    riskScore: 75,
-    description: `Fetched ${txCount} transactions for address ${address}. Showing forward outspend path to identified End Receivers from latest activity.`,
+    riskScore,
+    traceMeta: meta,
+    description: isHistorical
+      ? `Historical early Bitcoin era address ${address} (${txCount} txs). Clean historical on-chain transfer.`
+      : `Fetched ${txCount} transactions for address ${address}. Showing forward outspend path to identified End Receivers from latest activity.${meta?.confidence ? ` Confidence ${(meta.confidence*100).toFixed(0)}%.` : ''}`,
     nodes: formattedNodesAndLinks.nodes,
     links: formattedNodesAndLinks.links
   };
