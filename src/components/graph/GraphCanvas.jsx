@@ -28,6 +28,19 @@ import { useToast } from '../../hooks/useToast';
 import { findCriticalMoneyTrail, detectCircularFlows } from '../../utils/graphAlgorithms';
 import { calculateTaintMap, calculateEdgeTaintMap, generateTaintLedger } from '../../utils/taintAnalysis';
 
+function ToolBtn({ active, activeClass = 'btn-primary pulse-glow-border', variant = 'btn-outline', style, children, ...props }) {
+  return (
+    <button
+      type="button"
+      className={`btn ${active ? activeClass : variant}`}
+      style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem', ...style }}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
 export default function GraphCanvas({
   activeCase,
   selectedNode,
@@ -277,103 +290,97 @@ export default function GraphCanvas({
 
           {/* Flow Playback Stepper Controls */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', backgroundColor: 'rgba(5, 8, 16, 0.8)', padding: '0.2rem 0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-            <button
+            <ToolBtn
               onClick={() => {
                 if (playbackStep === null) setPlaybackStep(0);
                 setIsPlaying(!isPlaying);
               }}
-              className={`btn ${isPlaying ? 'btn-primary' : 'btn-outline'}`}
+              active={isPlaying}
               style={{ fontSize: '0.725rem', padding: '0.25rem 0.5rem' }}
-              title={isPlaying ? "Pause Flow Playback" : "Play Chronological Flow"}
+              title={isPlaying ? "Pause" : "Play step by step"}
             >
               {isPlaying ? <Pause size={12} /> : <Play size={12} />}
               {isPlaying ? "Pause" : playbackStep !== null ? `Step ${playbackStep + 1}/${activeCase.links?.length || 0}` : "Play"}
-            </button>
+            </ToolBtn>
 
             {playbackStep !== null && (
               <>
-                <button
+                <ToolBtn
                   onClick={() => setPlaybackStep(prev => Math.min((prev || 0) + 1, (activeCase.links?.length || 1) - 1))}
-                  className="btn btn-outline"
                   style={{ padding: '0.25rem 0.4rem' }}
-                  title="Next Flow Hop"
+                  title="Next step"
+                  aria-label="Next step"
                 >
                   <SkipForward size={12} />
-                </button>
-                <button
+                </ToolBtn>
+                <ToolBtn
                   onClick={() => { setPlaybackStep(null); setIsPlaying(false); }}
-                  className="btn btn-outline"
                   style={{ padding: '0.25rem 0.4rem', color: 'var(--text-muted)' }}
-                  title="Reset Flow Playback"
+                  title="Reset playback"
+                  aria-label="Reset playback"
                 >
                   <RotateCcw size={12} />
-                </button>
+                </ToolBtn>
               </>
             )}
           </div>
 
           {/* Path Isolation Indicator */}
           {isolatedNodeId && (
-            <button
+            <ToolBtn
               onClick={() => setIsolatedNodeId(null)}
-              className="btn btn-primary pulse-glow-border"
-              style={{ fontSize: '0.725rem', padding: '0.25rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
-              title="Clear Path Isolation"
+              active
+              style={{ fontSize: '0.725rem', padding: '0.25rem 0.6rem' }}
+              title="Clear path isolation"
+              aria-label="Clear path isolation"
             >
-              <Eye size={12} /> Isolated Trail <EyeOff size={12} />
-            </button>
+              <Eye size={12} /> Isolated view <EyeOff size={12} />
+            </ToolBtn>
           )}
 
-          <button
+          <ToolBtn
             onClick={handleExportPNG}
-            className="btn"
-            type="button"
             aria-label="Export canvas as PNG"
-            title="Export Canvas as PNG image"
+            title="Export canvas as PNG image"
           >
-            <Download size={14} aria-hidden="true" /> PNG
-          </button>
+            <Download size={14} aria-hidden="true" />
+          </ToolBtn>
 
-          <button
+          <ToolBtn
             onClick={() => setIsFullscreen(!isFullscreen)}
-            className="btn"
-            type="button"
             aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen canvas"}
             aria-pressed={isFullscreen}
             title={isFullscreen ? "Exit Fullscreen (ESC)" : "Enter Fullscreen Canvas"}
           >
             {isFullscreen ? <Minimize2 size={14} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}
-          </button>
+          </ToolBtn>
 
-          <button
+          <ToolBtn
             onClick={() => setShowCriticalTrail(!showCriticalTrail)}
-            className={`btn ${showCriticalTrail ? 'btn-primary pulse-glow-border' : 'btn-outline'}`}
-            type="button"
+            active={showCriticalTrail}
             aria-pressed={showCriticalTrail}
-            aria-label="Toggle critical money trail highlight"
-            style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }}
-            title="Highlight Maximum-Value Money Flow Path from Source to Destination"
+            aria-label="Toggle main money trail highlight"
+            title="Highlight the highest-value path from start to end"
           >
             <GitCommit size={13} aria-hidden="true" />
             {showCriticalTrail ? "Main trail on" : "Main trail"}
-          </button>
+          </ToolBtn>
 
-          <button
+          <ToolBtn
             onClick={() => {
               const next = !showTaintHeatmap;
               setShowTaintHeatmap(next);
               if (next) showToast(`Fund trace on (${TAINT_MODEL_LABELS[taintModel]}).`, "info");
             }}
-            className={`btn ${showTaintHeatmap ? 'btn-danger pulse-glow-border' : 'btn-outline'}`}
-            type="button"
+            active={showTaintHeatmap}
+            activeClass="btn-danger pulse-glow-border"
             aria-pressed={showTaintHeatmap}
             aria-label="Toggle fund tracing"
-            style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
             title="Show each wallet's share of traced funds"
           >
             <Flame size={13} style={{ color: showTaintHeatmap ? '#ef4444' : 'inherit' }} />
             {showTaintHeatmap ? "Trace on" : "Trace"}
-          </button>
+          </ToolBtn>
 
           {showTaintHeatmap && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
@@ -391,32 +398,30 @@ export default function GraphCanvas({
                 <option value="fifo">Oldest first</option>
                 <option value="poison">Full spread</option>
               </select>
-              <button
+              <ToolBtn
                 onClick={() => setShowTaintLedger(true)}
-                className="btn btn-outline"
-                type="button"
-                style={{ fontSize: '0.725rem', padding: '0.2rem 0.45rem', height: '28px', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                style={{ fontSize: '0.725rem', padding: '0.2rem 0.45rem', height: '28px', gap: '0.25rem' }}
                 title="Open fund tracing ledger"
               >
                 <Table size={12} /> Ledger
-              </button>
+              </ToolBtn>
             </div>
           )}
 
-          <button
+          <ToolBtn
             onClick={() => setHighlightReceiver(!highlightReceiver)}
-            className={`btn ${highlightReceiver ? 'btn-warning pulse-glow-border' : 'btn-outline'}`}
-            type="button"
+            active={highlightReceiver}
+            activeClass="btn-warning pulse-glow-border"
             aria-pressed={highlightReceiver}
             aria-label="Toggle end receiver highlight"
           >
             <Sparkles size={14} aria-hidden="true" />
             {highlightReceiver ? "Receiver on" : "End receiver"}
-          </button>
+          </ToolBtn>
         </div>
       </div>
 
-      {/* Laundering Cycle Detection Warning */}
+      {/* Cycle warning */}
       {detectedCycles.length > 0 && (
         <div style={{
           backgroundColor: 'rgba(239, 68, 68, 0.15)',
@@ -434,7 +439,7 @@ export default function GraphCanvas({
             <strong>Circular flow:</strong>
             <span>{detectedCycles.length} cycle{detectedCycles.length === 1 ? '' : 's'} returning to earlier nodes.</span>
           </div>
-          <span style={{ fontSize: '0.7rem', color: '#f87171', fontWeight: 600 }}>High Obfuscation Indicator</span>
+          <span style={{ fontSize: '0.7rem', color: '#f87171', fontWeight: 600 }}>Review</span>
         </div>
       )}
 
@@ -624,7 +629,7 @@ export default function GraphCanvas({
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                 <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }}></span>
-                <span style={{ color: '#10b981', fontWeight: 600 }}>Low (5-35%)</span>
+                <span style={{ color: '#10b981', fontWeight: 600 }}>Low (2-35%)</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                 <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#94a3b8' }}></span>

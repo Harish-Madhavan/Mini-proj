@@ -1,34 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import {
   Search,
-  Layers,
-  Globe,
-  GitMerge,
-  Network,
-  ShieldAlert,
-  FileText,
-  LayoutDashboard,
   Terminal,
   Zap,
   X
 } from 'lucide-react';
 import { useCase } from '../hooks/useCase';
+import { NAV_ITEMS } from '../constants/navigation';
 
 export default function CommandPalette({ isOpen, onClose }) {
   const { scenarios, handleSelectCase, setActiveTab, handleSearch } = useCase();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
 
-  const navigationItems = [
-    { label: 'Go to Dashboard', path: 'dashboard', icon: LayoutDashboard, category: 'Navigation', shortcut: '1' },
-    { label: 'Go to Tracing', path: 'trace', icon: Layers, category: 'Navigation', shortcut: '2' },
-    { label: 'Go to Notices', path: 'osint', icon: Globe, category: 'Navigation', shortcut: '3' },
-    { label: 'Go to Clustering', path: 'clustering', icon: GitMerge, category: 'Navigation', shortcut: '4' },
-    { label: 'Go to Linked cases', path: 'syndicate', icon: Network, category: 'Navigation', shortcut: '5' },
-    { label: 'Go to Risk', path: 'risk', icon: ShieldAlert, category: 'Navigation', shortcut: '6' },
-    { label: 'Go to Watchlist', path: 'watchlist', icon: Terminal, category: 'Navigation', shortcut: '7' },
-    { label: 'Go to Report', path: 'report', icon: FileText, category: 'Navigation', shortcut: '8' }
-  ];
+  const navigationItems = NAV_ITEMS.map((item, index) => ({
+    label: `Go to ${item.label}`,
+    path: item.id,
+    icon: item.icon,
+    category: 'Navigation',
+    shortcut: String(index + 1),
+  }));
 
   const caseItems = scenarios.map(c => ({
     label: `Open case: ${c.title}`,

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildChainOfCustody, verifyChainOfCustody, chainDigest } from './chainOfCustody';
+import { cyrb53Hex } from './forensicUtils';
 
 const caseObj = {
   id: 'case-x',
@@ -53,6 +54,11 @@ describe('chainOfCustody', () => {
     };
     const chain = buildChainOfCustody(branched);
     expect(chain.gaps.some(g => g.kind === 'VALUE_DISCONTINUITY')).toBe(true);
+  });
+
+  it('shares the canonical hash core with forensicUtils', () => {
+    expect(chainDigest('aegis')).toBe(cyrb53Hex('aegis'));
+    expect(cyrb53Hex('aegis')).toHaveLength(16);
   });
 
   it('produces stable digests and handles empty input', () => {

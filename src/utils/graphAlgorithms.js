@@ -6,6 +6,8 @@
  * 4. Centrality with normalized throughput
  */
 
+import { parseBtcAmount } from './forensicUtils';
+
 // Simple max-heap for critical trail (binary heap, O(log n) push/pop)
 class MaxHeap {
   constructor() { this.heap = []; }
@@ -141,7 +143,7 @@ export function computeLayeredGraphLayout(nodes = [], links = [], bounds = { wid
  * Uses DP on DAG when graph is acyclic (O(V+E)), else Max-Heap search.
  */
 function parseLinkValue(value) {
-  return parseFloat(String(value || '0').replace(/[^0-9.]/g, '')) || 0;
+  return parseBtcAmount(value);
 }
 
 export function findCriticalMoneyTrail(nodes = [], links = [], startNodeId = null, endNodeId = null) {
@@ -178,16 +180,13 @@ export function findCriticalMoneyTrail(nodes = [], links = [], startNodeId = nul
   const adj = new Map();
   const inDegree = new Map();
   nodes.forEach(n => { adj.set(n.id, []); inDegree.set(n.id, 0); });
-  const linkIndexMap = new Map(); // `${src}->${tgt}` -> idx (first)
   links.forEach((l, idx) => {
     const src = typeof l.source === 'object' ? l.source.id : l.source;
     const tgt = typeof l.target === 'object' ? l.target.id : l.target;
     if (!idSet.has(src) || !idSet.has(tgt)) return;
-    const numericVal = parseFloat(String(l.value || '0').replace(/[^0-9.]/g, '')) || 0;
+    const numericVal = parseLinkValue(l.value);
     adj.get(src).push({ target: tgt, value: numericVal, linkIndex: idx });
     inDegree.set(tgt, (inDegree.get(tgt) || 0) + 1);
-    const key = `${src}->${tgt}`;
-    if (!linkIndexMap.has(key)) linkIndexMap.set(key, idx);
   });
 
   // Try DAG longest path (topological DP) — Bitcoin graphs are DAGs

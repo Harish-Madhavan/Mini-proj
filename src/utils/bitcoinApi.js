@@ -6,7 +6,7 @@ import {
   exchangeDepositConfidence,
   computeTraceConfidence,
   isDustOutput,
-  extractTxPubkey,
+  getIdentityKey,
   getSpendDwellBlocks,
   QUICK_SPEND_BLOCKS,
   LONG_DWELL_BLOCKS,
@@ -14,6 +14,7 @@ import {
   DUST_THRESHOLD_SATS,
 } from './traceHeuristics';
 import { buildTxHubNode, buildInputNode, buildOpReturnNode, buildOutputNode } from './graphBuilders';
+import { satsToBtc } from './forensicUtils';
 
 export const apiCache = new Map();
 
@@ -88,6 +89,17 @@ export async function fetchAddressTxs(address) {
   if (!address || typeof address !== 'string' || address.length > 100) throw new Error('Invalid address');
   return fetchWithFallbackAndCache(`/address/${address}/txs`);
 }
+
+/**
+ * Display labels for endpoint activity profiles (single source for all views).
+ */
+export const ENDPOINT_PROFILE_LABELS = {
+  SINGLE_USE_DEPOSIT: 'Single-use deposit',
+  DRAINED_PASS_THROUGH: 'Drained pass-through',
+  ACTIVE_REUSED_WALLET: 'Active reused wallet',
+  DORMANT_HOLDER: 'Dormant holder',
+  UNPROFILED: 'Unprofiled',
+};
 
 /**
  * Chain + mempool stats for one address (funded/spent sums and counts).
@@ -249,6 +261,89 @@ export function isCoinJoinTransaction(tx) {
 }
 
 /**
+ * Historical-era branch of the classifier, kept separate so the modern
+ * decision chain stays flat. Same identity + dwell rules, own labels.
+ */
+function classifyHistoricalOutput({ tx, output, outspend, isSpent, value, scriptStd, valBtc, blockHeight }) {
+  if (!isSpent) {
+    return classifiedNode({
+      nodeType: 'receiver',
+      label: 'End receiver (early network)',
+      entityName: 'Early network wallet',
+      kycStatus: 'HISTORICAL UNSPENT FUNDS',
+      ipLog: 'Early Bitcoin user',
+      riskReason: `Early Bitcoin era output holding unspent funds (${scriptStd}). Direct transfer between people.`,
+      confidence: 0.85,
+    });
+  }
+  // Era-independent identity: funder addresses OR bare pubkeys (2009-era
+  // P2PK flows have no addresses — compare the keys themselves).
+  const histInputKeys = new Set((tx.vin || []).map(v => getIdentityKey(v.prevout)).filter(Boolean));
+  const histOutKey = getIdentityKey(output);
+  const histValueOutputs = (tx.vout || []).filter(o => (o.value || 0) > 0);
+  const histIsSelf = !!histOutKey && histInputKeys.has(histOutKey);
+  const histIsSoleFresh = !histIsSelf && value > 0 && histValueOutputs.length === 1 && histValueOutputs[0] === output;
+  // Dwell behavior from spender heights: fast sweep vs dwelled payment.
+  const histDwell = getSpendDwellBlocks(tx, outspend);
+  const histIsQuickSweep = !histIsSelf && histDwell != null && histDwell <= QUICK_SPEND_BLOCKS;
+  const histIsDwelled = !histIsSelf && !histIsSoleFresh && histDwell != null && histDwell >= LONG_DWELL_BLOCKS;
+  const histVerdict = histIsSelf || histIsQuickSweep ? 'change'
+    : histIsSoleFresh || histIsDwelled ? 'payment' : null;
+  if (histVerdict) {
+    const histIsChange = histVerdict === 'change';
+    const histScore = histIsSelf ? -4.0 : histIsSoleFresh ? 4.0 : histIsChange ? -1.5 : 1.5;
+    const histConf = (histIsSelf || histIsSoleFresh) ? 0.85 : 0.65;
+    const histWhy = histIsSelf
+      ? `Output reuses a funder key (Block #${blockHeight || 'early'}) — self-consolidation, not a payment.`
+      : histIsSoleFresh
+        ? `Sole output to a fresh identity (${valBtc} BTC, Block #${blockHeight || 'early'}) — payment by construction, no change exists.`
+        : histIsChange
+          ? `Spent ${histDwell} blocks after confirmation — fast change sweep (Block #${blockHeight || 'early'}).`
+          : `Dwelled ${histDwell} blocks before moving — recipient holding, not a change sweep (Block #${blockHeight || 'early'}).`;
+    return classifiedNode({
+      nodeType: 'hop',
+      label: histIsChange
+        ? (histIsSelf ? 'Change (early network)' : 'Change step (early network)')
+        : 'Payment (early network)',
+      entityName: histIsChange ? 'Early change' : 'Early payment receiver',
+      kycStatus: histIsChange ? 'HISTORICAL CHANGE' : 'HISTORICAL PAYMENT',
+      ipLog: 'Early Bitcoin user',
+      riskReason: histWhy,
+      confidence: histConf,
+      extra: {
+        // Score-only heuristics: feeds trace confidence without modern-weight breakdown fields
+        heuristics: {
+          score: histScore,
+          confidence: histConf,
+          weightedScore: histScore,
+          isChangeCandidate: histScore < -1.0,
+          isPaymentCandidate: histScore > 1.0,
+        },
+        ...(histIsChange ? { isChange: true } : { isPayment: true }),
+      },
+    });
+  }
+  return classifiedNode({
+    nodeType: 'hop',
+    label: 'Pass-through (early network)',
+    entityName: 'Early network transfer',
+    kycStatus: 'HISTORICAL DIRECT TRANSFER',
+    ipLog: 'Early Bitcoin user',
+    riskReason: `Early direct on-chain transfer (Block #${blockHeight || 'early'}). Plain historical flow.`,
+    confidence: 0.9,
+  });
+}
+
+/**
+ * Classification result factory: every branch below returns the same shape so
+ * node builders never drift. Branch-specific extras (heuristics, isChange,
+ * isPayment, isDust, isCoinJoinOutput, exchangeConf) ride along in `extra`.
+ */
+function classifiedNode({ nodeType, label, entityName, risk = 'low', kycStatus, ipLog, riskReason, confidence, extra = {} }) {
+  return { nodeType, label, entityName, risk, kycStatus, ipLog, riskReason, confidence, ...extra };
+}
+
+/**
  * Shared classifier: determines node type/label for a single output using weighted heuristics
  * Used by both formatBlockstreamTx and traceEndReceiver to avoid drift.
  */
@@ -278,111 +373,36 @@ function classifyOutputShared({
   // pizza purchase: 131 funder inputs, one fresh round output). Flattening
   // both to a generic transit hop destroys that decisive signal.
   if (isHistoricalEra) {
-    if (!isSpent) {
-      return {
-        nodeType: 'receiver',
-        label: 'End receiver (early network)',
-        entityName: 'Early network wallet',
-        risk: 'low',
-        kycStatus: 'HISTORICAL UNSPENT FUNDS',
-        ipLog: 'Early Bitcoin user',
-        riskReason: `Early Bitcoin era output holding unspent funds (${scriptStd}). Direct transfer between people.`,
-        device: 'Early client',
-        confidence: 0.85,
-      };
-    }
-    // Era-independent identity: funder addresses OR bare pubkeys (2009-era
-    // P2PK flows have no addresses — compare the keys themselves).
-    const histKeyOf = (s) => s?.scriptpubkey_address || (extractTxPubkey(s) ? `pubkey:${extractTxPubkey(s)}` : null);
-    const histInputKeys = new Set((tx.vin || []).map(v => histKeyOf(v.prevout)).filter(Boolean));
-    const histOutKey = histKeyOf(output);
-    const histValueOutputs = (tx.vout || []).filter(o => (o.value || 0) > 0);
-    const histIsSelf = !!histOutKey && histInputKeys.has(histOutKey);
-    const histIsSoleFresh = !histIsSelf && value > 0 && histValueOutputs.length === 1 && histValueOutputs[0] === output;
-    // Dwell behavior from spender heights: fast sweep vs dwelled payment.
-    const histDwell = getSpendDwellBlocks(tx, outspend);
-    const histIsQuickSweep = !histIsSelf && histDwell != null && histDwell <= QUICK_SPEND_BLOCKS;
-    const histIsDwelled = !histIsSelf && !histIsSoleFresh && histDwell != null && histDwell >= LONG_DWELL_BLOCKS;
-    const histVerdict = histIsSelf || histIsQuickSweep ? 'change'
-      : histIsSoleFresh || histIsDwelled ? 'payment' : null;
-    if (histVerdict) {
-      const histIsChange = histVerdict === 'change';
-      const histScore = histIsSelf ? -4.0 : histIsSoleFresh ? 4.0 : histIsChange ? -1.5 : 1.5;
-      const histConf = (histIsSelf || histIsSoleFresh) ? 0.85 : 0.65;
-      const histWhy = histIsSelf
-        ? `Output reuses a funder key (Block #${blockHeight || 'early'}) — self-consolidation, not a payment.`
-        : histIsSoleFresh
-          ? `Sole output to a fresh identity (${valBtc} BTC, Block #${blockHeight || 'early'}) — payment by construction, no change exists.`
-          : histIsChange
-            ? `Spent ${histDwell} blocks after confirmation — fast change sweep (Block #${blockHeight || 'early'}).`
-            : `Dwelled ${histDwell} blocks before moving — recipient holding, not a change sweep (Block #${blockHeight || 'early'}).`;
-      return {
-        nodeType: 'hop',
-        label: histIsChange
-          ? (histIsSelf ? 'Change (early network)' : 'Change step (early network)')
-          : 'Payment (early network)',
-        entityName: histIsChange ? 'Early change' : 'Early payment receiver',
-        risk: 'low',
-        kycStatus: histIsChange ? 'HISTORICAL CHANGE' : 'HISTORICAL PAYMENT',
-        ipLog: 'Early Bitcoin user',
-        riskReason: histWhy,
-        device: 'Early client',
-        confidence: histConf,
-        // Score-only heuristics: feeds trace confidence without modern-weight breakdown fields
-        heuristics: {
-          score: histScore,
-          confidence: histConf,
-          weightedScore: histScore,
-          isChangeCandidate: histScore < -1.0,
-          isPaymentCandidate: histScore > 1.0,
-        },
-        ...(histIsChange ? { isChange: true } : { isPayment: true }),
-      };
-    }
-    return {
-      nodeType: 'hop',
-      label: 'Pass-through (early network)',
-      entityName: 'Early network transfer',
-      risk: 'low',
-      kycStatus: 'HISTORICAL DIRECT TRANSFER',
-      ipLog: 'Early Bitcoin user',
-      riskReason: `Early direct on-chain transfer (Block #${blockHeight || 'early'}). Plain historical flow.`,
-      device: 'Early client',
-      confidence: 0.9,
-    };
+    return classifyHistoricalOutput({ tx, output, outspend, isSpent, value, scriptStd, valBtc, blockHeight });
   }
-
   // Dust handling
   if (isDustOutput(value)) {
-    return {
+    return classifiedNode({
       nodeType: 'hop',
       label: 'Dust Output',
       entityName: 'Dust / Uneconomic Output',
-      risk: 'low',
       kycStatus: 'DUST (UNECONOMIC)',
       ipLog: 'N/A',
       riskReason: `Dust output (${value} satoshis < ${DUST_THRESHOLD_SATS}) — too small to spend, ignored for tracing.`,
-      device: 'N/A',
       confidence: 0.92,
-      isDust: true,
-    };
+      extra: { isDust: true },
+    });
   }
 
   // CoinJoin outputs: never mark as change/payment, flag as mixed
   if (isCoinJoin) {
     // In CoinJoin, all equal outputs are mixed payments, not change
-    return {
+    return classifiedNode({
       nodeType: 'mixer',
       label: 'Mix Output',
-        entityName: 'Mixed output',
+      entityName: 'Mixed output',
       risk: 'high',
       kycStatus: 'MIXED FUNDS',
       ipLog: 'Privacy Mixing Round',
       riskReason: `Equal-value mixing output — the trail breaks here, not traceable as change/payment.`,
-      device: 'CoinJoin Coordinator',
       confidence: 0.4,
-      isCoinJoinOutput: true,
-    };
+      extra: { isCoinJoinOutput: true },
+    });
   }
 
   // Weighted heuristic scoring (primary decision engine). outputId carries the
@@ -402,50 +422,41 @@ function classifyOutputShared({
   if (!isSpent) {
     // If exchange confidence high, mark as identity-checked receiver, else generic holder
     if (exchangeConf > 0.4) {
-      return {
+      return classifiedNode({
         nodeType: 'receiver',
         label: 'End receiver (exchange)',
         entityName: 'Unspent exchange deposit',
-        risk: 'low',
         kycStatus: 'IDENTITY VERIFIED (UNSPENT)',
         ipLog: 'Exchange',
         riskReason: `Unspent exchange-held output (${scriptStd}, exchange likelihood ${(exchangeConf*100).toFixed(0)}%, heuristic ${heuristics.score}) — holds ${valBtc} BTC.`,
-        device: 'Exchange',
         confidence: Math.max(0.78, heuristics.confidence),
-        exchangeConf,
-        heuristics,
-      };
+        extra: { exchangeConf, heuristics },
+      });
     }
-    return {
+    return classifiedNode({
       nodeType: 'receiver',
       label: 'End receiver (unspent)',
       entityName: 'Unspent output wallet',
-      risk: 'low',
       kycStatus: 'HOLDING FUNDS (UNSPENT)',
       ipLog: 'On chain',
       riskReason: `Output remains unspent (${scriptStd}, heuristic ${heuristics.score}) — end receiver holds ${valBtc} BTC.`,
-      device: 'N/A',
       confidence: Math.max(0.82, heuristics.confidence),
-      heuristics,
-    };
+      extra: { heuristics },
+    });
   }
 
   // Spent outputs: decide change vs payment
   if (heuristics.isChangeCandidate) {
-    return {
+    return classifiedNode({
       nodeType: 'hop',
       label: 'Change',
       entityName: 'Change wallet',
-      risk: 'low',
       kycStatus: 'UNREGISTERED TRANSIT (CHANGE)',
       ipLog: 'In transit',
       riskReason: `Change address detected (heuristic ${heuristics.score}, ${(heuristics.confidence*100).toFixed(0)}% confidence, script ${scriptStd}).`,
-      device: 'N/A',
       confidence: heuristics.confidence,
-      heuristics,
-      exchangeConf,
-      isChange: true,
-    };
+      extra: { heuristics, exchangeConf, isChange: true },
+    });
   }
 
   if (heuristics.isPaymentCandidate || exchangeConf > 0.45) {
@@ -453,7 +464,7 @@ function classifyOutputShared({
     // traceEndReceiver will link forward, so this is intermediate payment hop that will be expanded
     // For display, treat as receiver if at maxDepth or exchange, else hop with payment hint
     const isLikelyExchange = exchangeConf > 0.45;
-    return {
+    return classifiedNode({
       nodeType: isLikelyExchange ? 'receiver' : 'hop',
       label: isLikelyExchange ? 'End receiver (exchange, spent)' : 'Payment',
       entityName: isLikelyExchange ? 'Exchange account (spent)' : 'Payment recipient',
@@ -463,28 +474,40 @@ function classifyOutputShared({
       riskReason: isLikelyExchange
         ? `Exchange deposit (script ${scriptStd}, likelihood ${(exchangeConf*100).toFixed(0)}%, heuristic ${heuristics.score}).`
         : `Payment to recipient (${scriptStd}, heuristic ${heuristics.score}) — spent forward.`,
-      device: isLikelyExchange ? 'Exchange' : 'Recipient wallet',
       confidence: Math.max(heuristics.confidence, isLikelyExchange ? 0.6 : 0.5),
-      heuristics,
-      exchangeConf,
-      isPayment: true,
-    };
+      extra: { heuristics, exchangeConf, isPayment: true },
+    });
   }
 
   // Ambiguous — default to hop
-  return {
+  return classifiedNode({
     nodeType: 'hop',
     label: 'Pass-through',
     entityName: 'Pass-through wallet',
-    risk: 'low',
     kycStatus: 'UNREGISTERED TRANSIT',
     ipLog: 'In transit',
     riskReason: `Middle step (heuristic ${heuristics.score}, unclear, ${scriptStd}).`,
-    device: 'N/A',
     confidence: heuristics.confidence,
-    heuristics,
-    exchangeConf,
-  };
+    extra: { heuristics, exchangeConf },
+  });
+}
+
+/**
+ * Shared per-output pipeline for formatBlockstreamTx and traceEndReceiver:
+ * OP_RETURN detection, identifier + value formatting, classification.
+ * Returns { opReturn } for data carriers, else { addr, valBtc, outNodeId, scriptStd, cls }.
+ */
+function prepareOutput({ tx, txid, output, outputIndex, outspends, inputScriptTypes, seenAddresses, isCoinJoin }) {
+  const opReturn = parseOpReturnPayload(output);
+  if (opReturn) return { opReturn };
+  const addr = getAddressOrIdentifier(output) || `out_script_${txid.slice(0, 6)}_${outputIndex}`;
+  const valBtc = satsToBtc(output.value);
+  const outNodeId = `out_${addr}`;
+  const scriptStd = getScriptTypeFromAddress(addr, output.scriptpubkey_type);
+  const cls = classifyOutputShared({
+    tx, output, outputIndex, outspends, inputScriptTypes, seenAddresses, addr, scriptStd, valBtc, isCoinJoin,
+  });
+  return { addr, valBtc, outNodeId, scriptStd, cls };
 }
 
 /**
@@ -523,7 +546,7 @@ export function formatBlockstreamTx(tx, outspends = []) {
     if (scriptStd) inputScriptTypes.push(scriptStd);
     if (addr) {
       const sat = input.prevout?.value || 0;
-      const valBtc = (sat / 100000000).toFixed(6);
+      const valBtc = satsToBtc(sat);
       const inputNodeId = `in_${addr}`;
       seenAddresses.add(addr);
       if (!nodes.some(n => n.id === inputNodeId)) {
@@ -536,21 +559,13 @@ export function formatBlockstreamTx(tx, outspends = []) {
   // Mark depth for hop-decay heuristic
   tx._traceDepth = 0;
   (tx.vout || []).forEach((output, i) => {
-    const opReturn = parseOpReturnPayload(output);
-    if (opReturn) {
-      nodes.push(buildOpReturnNode({ txId: tx.txid, index: i, payload: opReturn }));
+    const prep = prepareOutput({ tx, txid: tx.txid, output, outputIndex: i, outspends, inputScriptTypes, seenAddresses, isCoinJoin });
+    if (prep.opReturn) {
+      nodes.push(buildOpReturnNode({ txId: tx.txid, index: i, payload: prep.opReturn }));
       links.push({ source: txNodeId, target: `op_${tx.txid}_${i}`, value: '0 BTC Data', timestamp: 'Embedded' });
       return;
     }
-
-    const addr = getAddressOrIdentifier(output) || `out_script_${tx.txid.slice(0, 6)}_${i}`;
-    const valBtc = (output.value / 100000000).toFixed(6);
-    const outNodeId = `out_${addr}`;
-    const scriptStd = getScriptTypeFromAddress(addr, output.scriptpubkey_type);
-
-    const cls = classifyOutputShared({
-      tx, output, outputIndex: i, outspends, inputScriptTypes, seenAddresses, addr, scriptStd, valBtc, isCoinJoin,
-    });
+    const { addr, valBtc, outNodeId, scriptStd, cls } = prep;
 
     if (!nodes.some(n => n.id === outNodeId)) {
       const lastActive = cls.kycStatus?.includes('UNSPENT')
@@ -708,7 +723,7 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
           if (addr) {
             seenAddresses.add(addr);
             const sat = input.prevout?.value || 0;
-            const valBtc = (sat / 100000000).toFixed(6);
+            const valBtc = satsToBtc(sat);
             const inputNodeId = `in_${addr}`;
             addNode(buildInputNode({ addr, scriptStd, satoshis: sat }));
             addLink(inputNodeId, txNodeId, `${valBtc} BTC`, 'On-chain');
@@ -728,24 +743,17 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
 
       for (let i = 0; i < (tx.vout || []).length; i++) {
         const output = tx.vout[i];
-        const opReturn = parseOpReturnPayload(output);
-        if (opReturn) {
-          addNode(buildOpReturnNode({ txId: item.txId, index: i, payload: opReturn }));
+        const prep = prepareOutput({ tx, txid: item.txId, output, outputIndex: i, outspends, inputScriptTypes, seenAddresses, isCoinJoin });
+        if (prep.opReturn) {
+          addNode(buildOpReturnNode({ txId: item.txId, index: i, payload: prep.opReturn }));
           addLink(txNodeId, `op_${item.txId}_${i}`, '0 BTC Data', 'Embedded');
           continue;
         }
-
-        const addr = getAddressOrIdentifier(output) || `out_script_${item.txId.slice(0, 6)}_${i}`;
-        const valBtc = (output.value / 100000000).toFixed(6);
-        const outNodeId = `out_${addr}`;
-        const scriptStd = getScriptTypeFromAddress(addr, output.scriptpubkey_type);
+        const { addr, valBtc, outNodeId, scriptStd, cls } = prep;
         const outspend = outspends[i] || {};
         const isSpent = outspend.spent === true;
         const spendingTxId = outspend.txid || null;
 
-        const cls = classifyOutputShared({
-          tx, output, outputIndex: i, outspends, inputScriptTypes, seenAddresses, addr, scriptStd, valBtc, isCoinJoin,
-        });
         if (cls.heuristics) pendingHeuristics.push(cls.heuristics);
 
         const lastActive = cls.kycStatus?.includes('UNSPENT') ? 'Holds unspent funds' : cls.kycStatus?.includes('MIXED') ? 'Mixed funds' : 'On chain';

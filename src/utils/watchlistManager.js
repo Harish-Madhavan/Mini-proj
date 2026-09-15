@@ -8,6 +8,49 @@ import { API_CONFIG } from '../constants/config';
 
 const WATCHLIST_STORAGE_KEY = 'aegistrace_watchlist';
 const ALERTS_STORAGE_KEY = 'aegistrace_mempool_alerts';
+const MAX_WATCHLIST = 100;
+
+/**
+ * Single canonical watchlist entry shape. Both the hook and the manager
+ * build entries through here — previously one side stored bare strings and
+ * the other objects under the same key, corrupting reads.
+ */
+export function makeWatchEntry(address, overrides = {}) {
+  const clean = {};
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value !== undefined && value !== null && value !== '') clean[key] = value;
+  }
+  return {
+    address: address.trim(),
+    tag: 'Watched wallet',
+    syndicate: 'Open case',
+    riskTier: 'HIGH',
+    addedDate: new Date().toISOString().split('T')[0],
+    notes: 'Added for monitoring.',
+    ...clean,
+  };
+}
+
+/**
+ * Normalize stored data into entries, dropping garbage and duplicates.
+ * Migrates legacy bare-string arrays in place.
+ */
+export function normalizeWatchlist(items) {
+  if (!Array.isArray(items)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const item of items) {
+    const entry = typeof item === 'string'
+      ? (item.trim() ? makeWatchEntry(item, { notes: 'Imported from an older watchlist.' }) : null)
+      : (item && typeof item.address === 'string' && item.address.trim() ? { ...item, address: item.address.trim() } : null);
+    if (!entry) continue;
+    const key = entry.address.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(entry);
+  }
+  return out.slice(0, MAX_WATCHLIST);
+}
 
 export const DEFAULT_WATCHLIST = [
   {
@@ -38,7 +81,10 @@ export const DEFAULT_WATCHLIST = [
 
 export function getWatchlist() {
   const saved = safeGetItem(WATCHLIST_STORAGE_KEY, null);
-  if (Array.isArray(saved) && saved.length > 0) return saved;
+  if (Array.isArray(saved) && saved.length > 0) {
+    const normalized = normalizeWatchlist(saved);
+    if (normalized.length > 0) return normalized;
+  }
   return DEFAULT_WATCHLIST;
 }
 
@@ -55,15 +101,16 @@ export function addToWatchlist(item) {
   if (current.some(w => typeof w.address === 'string' && w.address.toLowerCase() === rawAddress.toLowerCase())) {
     return { success: false, message: 'Address is already on your watchlist.' };
   }
+  if (current.length >= MAX_WATCHLIST) {
+    return { success: false, message: 'Watchlist is full (100).' };
+  }
   const updated = [
-    {
-      address: rawAddress,
-      tag: item.tag || 'Watched wallet',
-      syndicate: item.syndicate || 'Open case',
-      riskTier: item.riskTier || 'HIGH',
-      addedDate: new Date().toISOString().split('T')[0],
-      notes: item.notes || 'Added during analysis.'
-    },
+    makeWatchEntry(rawAddress, {
+      tag: item.tag,
+      syndicate: item.syndicate,
+      riskTier: item.riskTier,
+      notes: item.notes,
+    }),
     ...current
   ];
   saveWatchlist(updated);

@@ -23,14 +23,21 @@ import { calculateTaintMap, formatTaintPct } from '../utils/taintAnalysis';
 import { generateForensicNarrative } from '../utils/narrativeGenerator';
 import { buildChainOfCustody, verifyChainOfCustody } from '../utils/chainOfCustody';
 import { useEndpointProfile } from '../hooks/useEndpointProfile';
+import { ENDPOINT_PROFILE_LABELS } from '../utils/bitcoinApi';
 
-const ENDPOINT_PROFILE_LABELS = {
-  SINGLE_USE_DEPOSIT: 'Single-use deposit',
-  DRAINED_PASS_THROUGH: 'Drained pass-through (funds moved on)',
-  ACTIVE_REUSED_WALLET: 'Active reused wallet',
-  DORMANT_HOLDER: 'Dormant holder',
-  UNPROFILED: 'Unprofiled',
-};
+const SHEET_CELL = { padding: '0.4rem', border: '1px solid #e2e8f0' };
+const SHEET_CELL_SM = { padding: '0.35rem', border: '1px solid #e2e8f0' };
+const EXHIBIT_CELL = { padding: '0.35rem', border: '1px solid #cbd5e1' };
+
+function HopRow({ pill, pillStyle, address, balance, balanceColor = '#0f172a', dashed = false, bg = '#f8fafc', borderColor = '#e2e8f0' }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', backgroundColor: bg, padding: '0.5rem', borderRadius: '4px', border: `${dashed ? '1px dashed' : '1px solid'} ${borderColor}` }}>
+      <span style={{ padding: '0.15rem 0.4rem', borderRadius: '3px', fontWeight: 700, ...pillStyle }}>{pill}</span>
+      <span style={{ fontFamily: 'monospace', flex: 1 }}>{address}</span>
+      <strong style={{ color: balanceColor }}>{balance}</strong>
+    </div>
+  );
+}
 
 export default function ReportGenerator() {
   const { activeCase } = useCase();
@@ -415,23 +422,23 @@ ${investigatorNotes}
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem', border: '1px solid #cbd5e1' }}>
                   <thead>
                     <tr style={{ backgroundColor: '#f8fafc', textAlign: 'left', borderBottom: '1px solid #cbd5e1' }}>
-                      <th style={{ padding: '0.35rem', border: '1px solid #cbd5e1' }}>Ex. #</th>
-                      <th style={{ padding: '0.35rem', border: '1px solid #cbd5e1' }}>Node Entity</th>
-                      <th style={{ padding: '0.35rem', border: '1px solid #cbd5e1' }}>On-Chain Identifier / Address</th>
-                      <th style={{ padding: '0.35rem', border: '1px solid #cbd5e1' }}>Value</th>
-                      <th style={{ padding: '0.35rem', border: '1px solid #cbd5e1' }}>Forensic Role</th>
+                      <th style={EXHIBIT_CELL}>Ex. #</th>
+                      <th style={EXHIBIT_CELL}>Node Entity</th>
+                      <th style={EXHIBIT_CELL}>On-Chain Identifier / Address</th>
+                      <th style={EXHIBIT_CELL}>Value</th>
+                      <th style={EXHIBIT_CELL}>Forensic Role</th>
                     </tr>
                   </thead>
                   <tbody>
                     {activeCase.nodes.map((n, i) => (
                       <tr key={n.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                        <td style={{ padding: '0.35rem', border: '1px solid #cbd5e1', fontWeight: 600 }}>Ex-{i + 1}</td>
-                        <td style={{ padding: '0.35rem', border: '1px solid #cbd5e1' }}>{n.entityName || n.label}</td>
-                        <td style={{ padding: '0.35rem', border: '1px solid #cbd5e1', fontFamily: 'monospace' }}>
+                        <td style={{ ...EXHIBIT_CELL, fontWeight: 600 }}>Ex-{i + 1}</td>
+                        <td style={EXHIBIT_CELL}>{n.entityName || n.label}</td>
+                        <td style={{ ...EXHIBIT_CELL, fontFamily: 'monospace' }}>
                           {n.details?.address ? `${n.details.address.slice(0, 10)}...${n.details.address.slice(-8)}` : n.id}
                         </td>
-                        <td style={{ padding: '0.35rem', border: '1px solid #cbd5e1', fontWeight: 600 }}>{n.balance}</td>
-                        <td style={{ padding: '0.35rem', border: '1px solid #cbd5e1' }}>{n.type.toUpperCase()}</td>
+                        <td style={{ ...EXHIBIT_CELL, fontWeight: 600 }}>{n.balance}</td>
+                        <td style={EXHIBIT_CELL}>{n.type.toUpperCase()}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -517,38 +524,33 @@ ${investigatorNotes}
             <GitBranch size={16} /> TRANSACTION STEPS
           </h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            {/* Suspect Node */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', backgroundColor: '#f8fafc', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-              <span style={{ padding: '0.15rem 0.4rem', borderRadius: '3px', backgroundColor: '#fca5a5', color: '#991b1b', fontWeight: 700 }}>Start</span>
-              <span style={{ fontFamily: 'monospace', flex: 1 }}>{suspectNode?.details?.address || suspectNode?.id || 'N/A'}</span>
-              <strong style={{ color: '#0f172a' }}>{suspectNode?.balance || '0 BTC'}</strong>
-            </div>
-
-            {/* Mixer */}
+            <HopRow
+              pill="Start" pillStyle={{ backgroundColor: '#fca5a5', color: '#991b1b' }}
+              address={suspectNode?.details?.address || suspectNode?.id || 'N/A'}
+              balance={suspectNode?.balance || '0 BTC'}
+            />
             {mixer && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', backgroundColor: '#f8fafc', padding: '0.5rem', borderRadius: '4px', border: '1px dashed #e2e8f0' }}>
-                <span style={{ padding: '0.15rem 0.4rem', borderRadius: '3px', backgroundColor: '#ddd6fe', color: '#5b21b6', fontWeight: 700 }}>Mixing</span>
-                <span style={{ fontFamily: 'monospace', flex: 1 }}>{mixer.details?.address || mixer.id}</span>
-                <strong style={{ color: '#0f172a' }}>{mixer.balance}</strong>
-              </div>
+              <HopRow
+                pill="Mixing" pillStyle={{ backgroundColor: '#ddd6fe', color: '#5b21b6' }}
+                address={mixer.details?.address || mixer.id}
+                balance={mixer.balance} dashed
+              />
             )}
-
-            {/* Steps */}
             {hops.map((hop, idx) => (
-              <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', backgroundColor: '#f8fafc', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                <span style={{ padding: '0.15rem 0.4rem', borderRadius: '3px', backgroundColor: '#e2e8f0', color: '#475569', fontWeight: 700 }}>Step #{idx + 1}</span>
-                <span style={{ fontFamily: 'monospace', flex: 1 }}>{hop.details?.address || hop.id}</span>
-                <strong style={{ color: '#0f172a' }}>{hop.balance}</strong>
-              </div>
+              <HopRow
+                key={idx}
+                pill={`Step #${idx + 1}`} pillStyle={{ backgroundColor: '#e2e8f0', color: '#475569' }}
+                address={hop.details?.address || hop.id}
+                balance={hop.balance}
+              />
             ))}
-
-            {/* Receiver Node */}
             {receiverNode && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', backgroundColor: '#ecfdf5', padding: '0.5rem', borderRadius: '4px', border: '1px solid #059669' }}>
-                <span style={{ padding: '0.15rem 0.4rem', borderRadius: '3px', backgroundColor: '#a7f3d0', color: '#065f46', fontWeight: 700 }}>End receiver</span>
-                <span style={{ fontFamily: 'monospace', flex: 1 }}>{receiverNode.details?.address || receiverNode.id}</span>
-                <strong style={{ color: '#065f46' }}>{receiverNode.balance}</strong>
-              </div>
+              <HopRow
+                pill="End receiver" pillStyle={{ backgroundColor: '#a7f3d0', color: '#065f46' }}
+                address={receiverNode.details?.address || receiverNode.id}
+                balance={receiverNode.balance} balanceColor="#065f46"
+                bg="#ecfdf5" borderColor="#059669"
+              />
             )}
           </div>
         </div>
@@ -607,26 +609,26 @@ ${investigatorNotes}
           <table style={{ width: '100%', fontSize: '0.75rem', borderCollapse: 'collapse', border: '1px solid #e2e8f0' }}>
             <thead>
               <tr style={{ backgroundColor: '#f1f5f9', color: '#334155', textAlign: 'left' }}>
-                <th style={{ padding: '0.4rem', border: '1px solid #e2e8f0' }}>Step</th>
-                <th style={{ padding: '0.4rem', border: '1px solid #e2e8f0' }}>What happened</th>
-                <th style={{ padding: '0.4rem', border: '1px solid #e2e8f0' }}>Status</th>
+                <th style={SHEET_CELL}>Step</th>
+                <th style={SHEET_CELL}>What happened</th>
+                <th style={SHEET_CELL}>Status</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0', fontWeight: 600 }}>1. Start</td>
-                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0' }}>Starting wallet noted.</td>
-                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0', color: '#059669', fontWeight: 600 }}>Done</td>
+                <td style={{ ...SHEET_CELL, fontWeight: 600 }}>1. Start</td>
+                <td style={SHEET_CELL}>Starting wallet noted.</td>
+                <td style={{ ...SHEET_CELL, color: '#059669', fontWeight: 600 }}>Done</td>
               </tr>
               <tr>
-                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0', fontWeight: 600 }}>2. Tracing</td>
-                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0' }}>Followed the money through {hops.length} middle steps.</td>
-                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0', color: '#059669', fontWeight: 600 }}>Done</td>
+                <td style={{ ...SHEET_CELL, fontWeight: 600 }}>2. Tracing</td>
+                <td style={SHEET_CELL}>Followed the money through {hops.length} middle steps.</td>
+                <td style={{ ...SHEET_CELL, color: '#059669', fontWeight: 600 }}>Done</td>
               </tr>
               <tr>
-                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0', fontWeight: 600 }}>3. End point</td>
-                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0' }}>Final deposit found at {receiverNode?.entityName || 'exchange'}.</td>
-                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0', color: '#0284c7', fontWeight: 600 }}>Ready for notice</td>
+                <td style={{ ...SHEET_CELL, fontWeight: 600 }}>3. End point</td>
+                <td style={SHEET_CELL}>Final deposit found at {receiverNode?.entityName || 'exchange'}.</td>
+                <td style={{ ...SHEET_CELL, color: '#0284c7', fontWeight: 600 }}>Ready for notice</td>
               </tr>
             </tbody>
           </table>
@@ -644,21 +646,21 @@ ${investigatorNotes}
             <table style={{ width: '100%', fontSize: '0.72rem', borderCollapse: 'collapse', border: '1px solid #e2e8f0' }}>
               <thead>
                 <tr style={{ backgroundColor: '#f1f5f9', color: '#334155', textAlign: 'left' }}>
-                  <th style={{ padding: '0.35rem', border: '1px solid #e2e8f0' }}>#</th>
-                  <th style={{ padding: '0.35rem', border: '1px solid #e2e8f0' }}>Transfer</th>
-                  <th style={{ padding: '0.35rem', border: '1px solid #e2e8f0' }}>BTC</th>
-                  <th style={{ padding: '0.35rem', border: '1px solid #e2e8f0' }}>Seal</th>
+                  <th style={SHEET_CELL_SM}>#</th>
+                  <th style={SHEET_CELL_SM}>Transfer</th>
+                  <th style={SHEET_CELL_SM}>BTC</th>
+                  <th style={SHEET_CELL_SM}>Seal</th>
                 </tr>
               </thead>
               <tbody>
                 {custody.events.map(e => (
                   <tr key={e.seq}>
-                    <td style={{ padding: '0.35rem', border: '1px solid #e2e8f0', fontWeight: 600 }}>{e.seq}</td>
-                    <td style={{ padding: '0.35rem', border: '1px solid #e2e8f0', fontFamily: 'monospace' }}>
+                    <td style={{ ...SHEET_CELL_SM, fontWeight: 600 }}>{e.seq}</td>
+                    <td style={{ ...SHEET_CELL_SM, fontFamily: 'monospace' }}>
                       {shortRef(e.from)} → {shortRef(e.to)}{e.approximateOrder ? ' *' : ''}
                     </td>
-                    <td style={{ padding: '0.35rem', border: '1px solid #e2e8f0', fontWeight: 600 }}>{e.amountBtc.toFixed(4)}</td>
-                    <td style={{ padding: '0.35rem', border: '1px solid #e2e8f0', fontFamily: 'monospace' }}>{e.eventHash.slice(0, 8)}…</td>
+                    <td style={{ ...SHEET_CELL_SM, fontWeight: 600 }}>{e.amountBtc.toFixed(4)}</td>
+                    <td style={{ ...SHEET_CELL_SM, fontFamily: 'monospace' }}>{e.eventHash.slice(0, 8)}…</td>
                   </tr>
                 ))}
               </tbody>

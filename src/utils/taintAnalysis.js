@@ -1,3 +1,5 @@
+import { parseBtcAmount } from './forensicUtils';
+
 /**
  * Taint propagation analysis for forensic fund flows (SIH1675 Core)
  * Models supported:
@@ -166,9 +168,7 @@ export function generateTaintLedger(nodes = [], links = [], taintMap = new Map()
 
 export function parseSats(valueStr) {
   if (!valueStr) return 0;
-  const num = parseFloat(String(valueStr).replace(/[^0-9.]/g, ''));
-  if (isNaN(num)) return 0;
-  return Math.round(num * 1e8); // BTC to sats
+  return Math.round(parseBtcAmount(valueStr) * 1e8); // BTC to sats
 }
 
 export function formatTaintPct(v) {

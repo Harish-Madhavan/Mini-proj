@@ -3,6 +3,8 @@
  * Supporting Bitcoin address format validation, economic value conversion, and forensic CSV export.
  */
 
+import { downloadBlob } from './download';
+
 // Approximate benchmark exchange rates for law enforcement seizure valuation
 export const BTC_USD_BENCHMARK = 95000;
 export const USD_INR_BENCHMARK = 86.5;
@@ -63,6 +65,41 @@ export function validateBtcAddress(address) {
   }
 
   return { isValid: false, type: 'Invalid', error: 'Unknown address type (starts with bc1, 1, or 3)' };
+}
+
+/**
+ * Parse a BTC amount out of display strings like "10.50 BTC" (also tolerates
+ * numbers and empty values). Single core for every ad-hoc parse in the app.
+ */
+export function parseBtcAmount(value) {
+  if (value == null) return 0;
+  const num = parseFloat(String(value).replace(/[^0-9.]/g, ''));
+  return Number.isFinite(num) ? num : 0;
+}
+
+/**
+ * Format satoshis as a bare BTC string (callers add any unit suffix).
+ */
+export function satsToBtc(sats, decimals = 6) {
+  const n = Number(sats) || 0;
+  return (n / 100000000).toFixed(decimals);
+}
+
+/**
+ * Deterministic 64-bit string hash (cyrb53) as 16 uppercase hex chars.
+ * Single canonical core shared by cluster IDs and custody digests.
+ */
+export function cyrb53Hex(str) {
+  const s = typeof str === 'string' ? str : JSON.stringify(str);
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return ((h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0')).toUpperCase();
 }
 
 /**
@@ -137,14 +174,6 @@ export function exportToCsv(filename, rows, columns) {
   });
 
   const csvContent = [headerLine, ...rowLines].join('\r\n');
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.setAttribute('href', url);
-  anchor.setAttribute('download', filename.endsWith('.csv') ? filename : `${filename}.csv`);
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadBlob(csvContent, filename.endsWith('.csv') ? filename : `${filename}.csv`, 'text/csv;charset=utf-8;');
   return true;
 }

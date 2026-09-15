@@ -22,8 +22,7 @@ export const SCENARIOS = [
           lastActive: "On-chain transaction",
           ipLog: "Bitcoin network",
           kycStatus: "UNKNOWN OWNER (ON-CHAIN)",
-          riskReason: "Where the traced money starts.",
-          device: "Wallet software"
+          riskReason: "Where the traced money starts."
         }
       },
       {
@@ -38,8 +37,7 @@ export const SCENARIOS = [
           lastActive: "Forwarded",
           ipLog: "Intermediate Relay",
           kycStatus: "UNREGISTERED",
-          riskReason: "Split pattern matches a change step.",
-          device: "N/A"
+          riskReason: "Split pattern matches a change step."
         }
       },
       {
@@ -54,8 +52,7 @@ export const SCENARIOS = [
           lastActive: "Forwarded",
           ipLog: "Intermediate Proxy",
           kycStatus: "UNREGISTERED",
-          riskReason: "Passes value toward the deposit.",
-          device: "N/A"
+          riskReason: "Passes value toward the deposit."
         }
       },
       {
@@ -74,8 +71,7 @@ export const SCENARIOS = [
           email: "compliance-notice@exchange-gateway.io",
           phone: "Exchange",
           kycDocumentId: "SUBPOENA ELIGIBLE",
-          riskReason: "Final deposit for the traced payments.",
-          device: "Exchange website"
+          riskReason: "Final deposit for the traced payments."
         }
       }
     ],

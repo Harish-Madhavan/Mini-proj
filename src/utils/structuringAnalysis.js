@@ -13,6 +13,9 @@
  * CoinJoin detectors instead) so the two typologies don't double-count.
  */
 
+import { parseBtcAmount } from './forensicUtils';
+import { BITCOIN_CONSTANTS } from '../constants/config';
+
 export const STRUCTURING_CONFIG = {
   /** Band tolerance: outputs within ±5% group together. */
   BAND_TOLERANCE: 0.05,
@@ -20,8 +23,8 @@ export const STRUCTURING_CONFIG = {
   MIN_BAND_SIZE: 3,
   /** Investigative cap per structured payment (0.5 BTC). Configurable, not statutory. */
   VALUE_CAP_SATS: 50000000,
-  /** Dust is uneconomic noise, never structuring. */
-  DUST_FLOOR_SATS: 546,
+  /** Dust is uneconomic noise, never structuring (shared bitcoin dust floor). */
+  DUST_FLOOR_SATS: BITCOIN_CONSTANTS.DUST_THRESHOLD_SATS,
   /**
    * Minimum share of sibling outflow a band must represent (0.5%). Without
    * this, any large batch dispersal with a few similar-valued dust fragments
@@ -125,7 +128,7 @@ export function scanCaseStructuring(nodes = [], links = []) {
     return { detected: false, sources: [], maxBandSize: 0, confidence: 0 };
   }
 
-  const parseBtc = (v) => parseFloat(String(v || '0').replace(/[^0-9.]/g, '')) || 0;
+  const parseBtc = (v) => parseBtcAmount(v);
   const bySource = new Map();
   links.forEach(l => {
     const src = typeof l.source === 'object' ? l.source.id : l.source;

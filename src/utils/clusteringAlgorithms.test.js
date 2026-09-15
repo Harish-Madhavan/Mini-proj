@@ -94,6 +94,7 @@ describe('clusteringAlgorithms', () => {
       const analysis = computeAddressClusters(addresses, mockTxs);
       expect(analysis).not.toBeNull();
       expect(analysis.clusterId).toContain('CLUS-BTC-');
+      expect(computeAddressClusters(addresses, mockTxs).clusterId).toBe(analysis.clusterId);
       expect(analysis.confidenceScore).toBeGreaterThanOrEqual(80);
       expect(analysis.coSpentTransactions.length).toBe(2);
       expect(analysis.clustersCount).toBe(2); // ['addr_1', 'addr_2', 'addr_3'] and ['addr_solo']

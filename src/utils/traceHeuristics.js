@@ -20,10 +20,11 @@
  *      confidence (cf. May-2010 10,000 BTC pizza purchase: 131 inputs, one fresh
  *      round output); previously-seen output => tempered (possible change-address reuse).
  *
- * Also exports: valueConservationCheck, detectDustOutputs, exchangeDepositHeuristic, computeTraceConfidence
+ * Also exports: checkValueConservation, isDustOutput, exchangeDepositConfidence, computeTraceConfidence
  */
 
 import { TRACE_CONFIG as CENTRAL_TRACE_CONFIG, BITCOIN_CONSTANTS } from '../constants/config';
+import { txFeeRateSatVb } from './clusteringAlgorithms';
 export const DUST_THRESHOLD_SATS = BITCOIN_CONSTANTS.DUST_THRESHOLD_SATS;
 export const TRACE_CONFIG = CENTRAL_TRACE_CONFIG;
 
@@ -34,11 +35,8 @@ export const TRACE_CONFIG = CENTRAL_TRACE_CONFIG;
  */
 export function isRoundValue(sats) {
   if (!Number.isFinite(sats) || sats <= 0 || !Number.isInteger(sats)) return false;
-  // Round if divisible by 100k sats (0.001 BTC — covers 0.01/0.1/1.0 BTC tiers)
-  if (sats % 100000 === 0) return true;
-  // Round milli-BTC style amounts with at least 4 trailing zeros
-  if (sats % 10000 === 0 && String(sats).endsWith('0000')) return true;
-  return false;
+  // Four trailing zeros covers every tier (100k sats ⊃ 0.001 BTC and up)
+  return sats % 10000 === 0 && String(sats).endsWith('0000');
 }
 
 /**
@@ -195,8 +193,8 @@ export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outsp
   const blockTime = tx.status?.block_time;
   const feeEraApplies = blockTime == null || blockTime >= FEE_MARKET_GENESIS_TIME;
   if (feeEraApplies) {
-    const feeRate = tx.fee && tx.vsize ? (tx.fee / (tx.weight ? tx.weight / 4 : tx.size || 250)) : null;
-    if (Number.isFinite(feeRate)) {
+    const feeRate = txFeeRateSatVb(tx);
+    if (feeRate != null) {
       if (feeRate > 80) feeScore = 0.8; // high fee manual bump — payment may be urgent
       else if (feeRate < 2 && tx.status?.confirmed) feeScore = -0.6; // uneconomic low fee — likely change consolidation with low priority
     }

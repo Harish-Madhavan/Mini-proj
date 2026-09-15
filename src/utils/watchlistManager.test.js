@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { 
-  getWatchlist, 
-  addToWatchlist, 
-  removeFromWatchlist, 
-  checkAddressMempoolStatus 
+import {
+  getWatchlist,
+  addToWatchlist,
+  removeFromWatchlist,
+  checkAddressMempoolStatus,
+  normalizeWatchlist,
+  makeWatchEntry
 } from './watchlistManager';
 
 describe('watchlistManager', () => {
@@ -23,6 +25,30 @@ describe('watchlistManager', () => {
     const list = getWatchlist();
     expect(list.length).toBeGreaterThanOrEqual(2);
     expect(list[0].address).toBeDefined();
+  });
+
+  it('migrates legacy string entries to objects', () => {
+    const migrated = normalizeWatchlist(['bc1qmigrate1', 'bc1qmigrate1', null, 42, '  ']);
+    expect(migrated.length).toBe(1);
+    expect(migrated[0].address).toBe('bc1qmigrate1');
+    expect(migrated[0].tag).toBeTruthy();
+  });
+
+  it('builds entries with defaults that empty overrides cannot clobber', () => {
+    const entry = makeWatchEntry('bc1qfactory', { tag: '', notes: undefined });
+    expect(entry.address).toBe('bc1qfactory');
+    expect(entry.tag).toBe('Watched wallet');
+    expect(entry.notes).toBe('Added for monitoring.');
+    expect(makeWatchEntry('bc1qfactory', { tag: 'Custom' }).tag).toBe('Custom');
+  });
+
+  it('caps the watchlist at 100 entries', () => {
+    for (let i = 0; i < 100; i++) {
+      addToWatchlist({ address: `bc1qcapfill${i}` });
+    }
+    const full = addToWatchlist({ address: 'bc1qoneover' });
+    expect(full.success).toBe(false);
+    expect(full.message).toContain('full');
   });
 
   it('adds and removes a target address cleanly', () => {

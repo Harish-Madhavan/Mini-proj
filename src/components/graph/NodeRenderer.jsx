@@ -1,4 +1,5 @@
 import React from 'react';
+import { taintTier } from '../../utils/taintAnalysis';
 
 export default function NodeRenderer({
   nodes,
@@ -147,10 +148,7 @@ export default function NodeRenderer({
         if (node.type === 'receiver') nodeColor = '#10b981';
 
         const nodeTaint = taintMap.get(node.id) ?? 0;
-        let taintHaloColor = '#94a3b8';
-        if (nodeTaint >= 0.75) taintHaloColor = '#ef4444';
-        else if (nodeTaint >= 0.35) taintHaloColor = '#f59e0b';
-        else if (nodeTaint > 0.05) taintHaloColor = '#10b981';
+        const taintHaloColor = taintTier(nodeTaint).color;
 
         const isReceiverHighlight = highlightReceiver && node.type === 'receiver';
         const isIsolatedSelf = isolatedNodeId === node.id;

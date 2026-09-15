@@ -11,9 +11,10 @@
 
 import { calculateForensicRiskScore } from './riskScoring';
 import { generateObfuscationDossier } from './obfuscationForensics';
+import { parseBtcAmount } from './forensicUtils';
 
 function sumRoutedBtc(links = []) {
-  return links.reduce((s, l) => s + (parseFloat(String(l.value || '0').replace(/[^0-9.]/g, '')) || 0), 0);
+  return links.reduce((s, l) => s + parseBtcAmount(l.value), 0);
 }
 
 /**

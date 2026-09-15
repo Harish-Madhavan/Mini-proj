@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { useCase } from '../hooks/useCase';
 import { useToast } from '../hooks/useToast';
-import { convertBtcToFiat, validateBtcAddress } from '../utils/forensicUtils';
+import { convertBtcToFiat, validateBtcAddress, parseBtcAmount } from '../utils/forensicUtils';
 import { EXCHANGES } from '../constants/legalConstants';
 import { useWatchlist } from '../hooks/useWatchlist';
 
@@ -90,8 +90,7 @@ export default function Dashboard() {
   const totalSessionBtc = useMemo(() => {
     return scenarios.reduce((acc, c) => {
       const originNode = c.nodes?.find(n => n.type === 'suspect') || c.nodes?.[0];
-      const parsed = parseFloat(originNode?.balance?.replace(/[^0-9.]/g, '') || 0);
-      return acc + (isNaN(parsed) ? 0 : parsed);
+      return acc + parseBtcAmount(originNode?.balance);
     }, 0);
   }, [scenarios]);
 
@@ -344,7 +343,9 @@ export default function Dashboard() {
         <div className="glass-panel" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
           <h3 style={{ fontSize: '0.9rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.4rem' }}><Star size={14} style={{ color: '#f59e0b' }} aria-hidden="true" /> Watchlist ({watchlist.length}) <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: '0.75rem' }}>— starred from graph nodes, persists locally</span></h3>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-            {watchlist.map(addr => {
+            {watchlist.map((item) => {
+              const addr = typeof item === 'string' ? item : item?.address;
+              if (!addr) return null;
               const explorer = getExplorerUrls(addr);
               return (
                 <div key={addr} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', padding: '0.3rem 0.5rem', borderRadius: '6px', backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', fontSize: '0.75rem' }}>

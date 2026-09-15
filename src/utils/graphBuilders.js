@@ -2,17 +2,19 @@
  * Shared node/link builders to deduplicate bitcoinApi format/trace logic
  */
 
+import { satsToBtc } from './forensicUtils';
+
 export function buildTxHubNode({ txId, metrics, isCoinJoin, conservation, depth = null, totalOutSats = null }) {
   const label = isCoinJoin ? `Mixing: ${txId.slice(0, 6)}...` : `Transaction ${txId.slice(0, 8)}...`;
   const entityName = isCoinJoin ? 'Mixing round' : depth != null ? `Step hub (depth ${depth})` : 'Transaction hub';
   // Balance is routed volume (sum of outputs), never the miner fee — downstream
   // taint/fiat math parses `balance`, and fee-as-balance corrupted both.
-  const routedBtc = totalOutSats != null ? (totalOutSats / 100000000).toFixed(6) : null;
+  const routedBtc = totalOutSats != null ? satsToBtc(totalOutSats) : null;
   return {
     id: `tx_${txId}`,
     label,
     type: isCoinJoin ? 'mixer' : 'hop',
-    balance: routedBtc != null ? `${routedBtc} BTC` : `${((metrics?.feeSat || 0) / 100000000).toFixed(6)} BTC Fee`,
+    balance: routedBtc != null ? `${routedBtc} BTC` : `${satsToBtc(metrics?.feeSat || 0)} BTC Fee`,
     risk: isCoinJoin ? 'high' : (!conservation?.valid ? 'medium' : 'low'),
     entityName,
     details: {
@@ -25,7 +27,6 @@ export function buildTxHubNode({ txId, metrics, isCoinJoin, conservation, depth 
       rbfStatus: metrics?.isRbfSignaled ? 'Replaceable fee' : 'Final fee',
       confirmations: metrics?.blockConfirmation || 'Unconfirmed',
       riskReason: isCoinJoin ? 'Mixing across inputs — the trail stops here.' : metrics?.riskReason || '',
-      device: 'Bitcoin network',
       isCoinJoin,
       conservation,
       entropy: metrics?.entropy,
@@ -35,7 +36,7 @@ export function buildTxHubNode({ txId, metrics, isCoinJoin, conservation, depth 
 }
 
 export function buildInputNode({ addr, scriptStd, satoshis }) {
-  const valBtc = ((satoshis || 0) / 100000000).toFixed(6);
+  const valBtc = satsToBtc(satoshis);
   return {
     id: `in_${addr}`,
     label: 'Source Wallet',
@@ -49,8 +50,7 @@ export function buildInputNode({ addr, scriptStd, satoshis }) {
       ipLog: 'Network broadcaster',
       kycStatus: 'UNREGISTERED',
       scriptStandard: scriptStd,
-      riskReason: `Input from earlier funds (${scriptStd}).`,
-      device: 'Wallet software'
+      riskReason: `Input from earlier funds (${scriptStd}).`
     }
   };
 }
@@ -75,7 +75,6 @@ export function buildOutputNode({ outNodeId, addr, valBtc, scriptStd, cls, tx, l
       kycStatus: cls.kycStatus,
       scriptStandard: scriptStd,
       riskReason: cls.riskReason,
-      device: cls.device,
       heuristicScore: cls.heuristics?.weightedScore,
       heuristicConfidence: cls.confidence,
       heuristicBreakdown: cls.heuristics?.breakdown,

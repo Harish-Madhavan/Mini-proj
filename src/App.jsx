@@ -24,29 +24,12 @@ function RouteFallback() {
   );
 }
 import {
-  Shield,
-  Layers,
-  GitMerge,
-  Network,
-  ShieldAlert,
-  FileText,
-  Globe,
   Radio,
   Wifi,
   WifiOff,
   Command
 } from 'lucide-react';
-
-const NAV_ITEMS = [
-  { id: 'dashboard', path: '/dashboard', label: 'Dashboard', icon: Shield },
-  { id: 'trace', path: '/trace', label: 'Tracing', icon: Layers },
-  { id: 'osint', path: '/osint', label: 'Notices', icon: Globe },
-  { id: 'clustering', path: '/clustering', label: 'Clustering', icon: GitMerge },
-  { id: 'syndicate', path: '/syndicate', label: 'Linked cases', icon: Network },
-  { id: 'risk', path: '/risk', label: 'Risk', icon: ShieldAlert },
-  { id: 'watchlist', path: '/watchlist', label: 'Watchlist', icon: Radio },
-  { id: 'report', path: '/report', label: 'Report', icon: FileText }
-];
+import { NAV_ITEMS } from './constants/navigation';
 
 function AppContent() {
   const { 
@@ -79,10 +62,6 @@ function AppContent() {
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [navigate]);
-
-  const handleNavClick = (itemPath) => {
-    navigate(itemPath);
-  };
 
   return (
     <div className="app-container">
@@ -181,7 +160,7 @@ function AppContent() {
           return (
             <button
               key={item.id}
-              onClick={() => handleNavClick(item.path)}
+              onClick={() => navigate(item.path)}
               className={`nav-item ${isActive ? 'active' : ''}`}
               aria-current={isActive ? 'page' : undefined}
               aria-label={`Go to ${item.label}`}

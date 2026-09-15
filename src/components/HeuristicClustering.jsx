@@ -20,6 +20,18 @@ import { validateBtcAddress, exportToCsv } from '../utils/forensicUtils';
 import { computeAddressClusters, detectPeelingChain, feeFingerprintSimilarity, estimatePoolReceived } from '../utils/clusteringAlgorithms';
 import { downloadJson } from '../utils/download';
 
+function StatBox({ label, value, valueColor = '#fff', sub = null }) {
+  return (
+    <div style={{ backgroundColor: 'rgba(5, 8, 16, 0.8)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+      <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.75rem' }}>{label}</span>
+      <strong style={{ fontSize: '1.1rem', color: valueColor }}>{value}</strong>
+      {sub && (
+        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.7rem', marginTop: '0.15rem' }}>{sub}</span>
+      )}
+    </div>
+  );
+}
+
 export default function HeuristicClustering() {
   const { activeCase } = useCase();
   const { showToast } = useToast();
@@ -318,19 +330,15 @@ export default function HeuristicClustering() {
 
             {/* Metrics Breakdown */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', fontSize: '0.85rem' }}>
-              <div style={{ backgroundColor: 'rgba(5, 8, 16, 0.8)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-                <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.75rem' }}>Addresses:</span>
-                <strong style={{ fontSize: '1.1rem', color: '#fff' }}>{clusteringResult.addressCount}</strong>
-              </div>
-              <div style={{ backgroundColor: 'rgba(5, 8, 16, 0.8)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-                <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.75rem' }}>Received:</span>
-                <strong style={{ fontSize: '1.1rem', color: 'var(--primary)' }}>{clusteringResult.totalBalance}</strong>
-                <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.7rem', marginTop: '0.15rem' }}>
-                  {clusteringResult.observedTxCount > 0
-                    ? `Across ${clusteringResult.observedTxCount} checked transaction${clusteringResult.observedTxCount === 1 ? '' : 's'}`
-                    : 'No history fetched'}
-                </span>
-              </div>
+              <StatBox label="Addresses:" value={clusteringResult.addressCount} />
+              <StatBox
+                label="Received:"
+                value={clusteringResult.totalBalance}
+                valueColor="var(--primary)"
+                sub={clusteringResult.observedTxCount > 0
+                  ? `Across ${clusteringResult.observedTxCount} checked transaction${clusteringResult.observedTxCount === 1 ? '' : 's'}`
+                  : 'No history fetched'}
+              />
             </div>
 
             {/* Heuristics Applied */}

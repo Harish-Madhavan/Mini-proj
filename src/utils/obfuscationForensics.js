@@ -9,6 +9,7 @@
 
 import { scanCaseStructuring } from './structuringAnalysis';
 import { exchangeDepositConfidence } from './traceHeuristics';
+import { parseBtcAmount } from './forensicUtils';
 
 // Known bridge/swap router fingerprints & prefixes
 export const KNOWN_SWAP_ROUTERS = [
@@ -104,7 +105,7 @@ function linkEndpoints(l) {
   return {
     src: typeof l.source === 'object' ? l.source.id : l.source,
     tgt: typeof l.target === 'object' ? l.target.id : l.target,
-    val: parseFloat(String(l.value || '0').replace(/[^0-9.]/g, '')) || 0
+    val: parseBtcAmount(l.value)
   };
 }
 
@@ -264,7 +265,7 @@ export function scanCaseSweeps(nodes = [], links = []) {
   if (!nodes?.length || !links?.length) {
     return { detected: false, sweeps: [], confidence: 0 };
   }
-  const parseSats = (v) => Math.round((parseFloat(String(v || '0').replace(/[^0-9.]/g, '')) || 0) * 1e8);
+  const parseSats = (v) => Math.round(parseBtcAmount(v) * 1e8);
   const inEdges = new Map();
   const outEdges = new Map();
   nodes.forEach(n => { inEdges.set(n.id, []); outEdges.set(n.id, []); });

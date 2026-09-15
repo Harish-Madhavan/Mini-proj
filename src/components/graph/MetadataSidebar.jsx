@@ -34,14 +34,18 @@ import { tagKnownEntity, getExplorerUrls } from '../../utils/knownEntities';
 import { useWatchlist } from '../../hooks/useWatchlist';
 import { useEndpointProfile } from '../../hooks/useEndpointProfile';
 import { getFeeTier } from '../../utils/traceHeuristics';
+import { ENDPOINT_PROFILE_LABELS } from '../../utils/bitcoinApi';
 
-const ENDPOINT_PROFILE_LABELS = {
-  SINGLE_USE_DEPOSIT: 'Single-use deposit',
-  DRAINED_PASS_THROUGH: 'Drained — moved on',
-  ACTIVE_REUSED_WALLET: 'Active reused wallet',
-  DORMANT_HOLDER: 'Dormant holder',
-  UNPROFILED: 'Unprofiled',
-};
+function KVRow({ icon, label, children }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+      <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}>
+        {icon}{label}:
+      </span>
+      <span style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.3rem', textAlign: 'right' }}>{children}</span>
+    </div>
+  );
+}
 
 export default function MetadataSidebar({ 
   selectedNode, 
@@ -58,6 +62,7 @@ export default function MetadataSidebar({
   const [newNoteText, setNewNoteText] = useState('');
   const [showNotesSection, setShowNotesSection] = useState(false);
   const [showScriptDetails, setShowScriptDetails] = useState(false);
+  const [showHeuristics, setShowHeuristics] = useState(false);
   const endpointProfile = useEndpointProfile(
     selectedNode?.details?.address,
     selectedNode?.type === 'receiver'
@@ -83,7 +88,7 @@ export default function MetadataSidebar({
   const watched = isWatched(details.address);
   const knownTag = tagKnownEntity(details.address);
   const explorer = getExplorerUrls(details.address || selectedNode?.id);
-  const feeTier = details.feeRateSatVb ? getFeeTier(details.feeRateSatVb.replace(/[^0-9.]/g,'')) : null;
+  const feeTier = details.feeRateSatVb ? getFeeTier(details.feeRateSatVb) : null;
   const feeReplaceable = /Replaceable|RBF Enabled/.test(details.rbfStatus || '');
 
   const taintInfo = useMemo(() => {
@@ -210,19 +215,12 @@ export default function MetadataSidebar({
             )}
           </div>
 
-          {/* Flow metrics */}
           {centralityMetrics && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.75rem' }}>
-              <div style={{ backgroundColor: 'rgba(5, 8, 16, 0.6)', padding: '0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-                <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.65rem' }}>In / out</span>
-                <strong style={{ color: '#fff' }}>{centralityMetrics.inDegree} in • {centralityMetrics.outDegree} out</strong>
-              </div>
-              <div style={{ backgroundColor: 'rgba(5, 8, 16, 0.6)', padding: '0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-                <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.65rem' }}>Hub</span>
-                <strong style={{ color: centralityMetrics.isHub ? '#f59e0b' : 'var(--text-secondary)' }}>
-                  {centralityMetrics.isHub ? 'Busy hub' : 'No'}
-                </strong>
-              </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', fontSize: '0.75rem', padding: '0 0.1rem' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Flow:</span>
+              <strong style={{ color: centralityMetrics.isHub ? '#f59e0b' : '#fff' }}>
+                {centralityMetrics.inDegree} in · {centralityMetrics.outDegree} out{centralityMetrics.isHub ? ' · hub' : ''}
+              </strong>
             </div>
           )}
           {/* Flow signals */}
@@ -263,60 +261,42 @@ export default function MetadataSidebar({
 
           {/* Details */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', fontSize: '0.825rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Type:</span>
-              <span style={{ fontWeight: 600, textTransform: 'capitalize' }}>{selectedNode.type}</span>
-            </div>
+            <KVRow label="Type">
+              <span style={{ textTransform: 'capitalize' }}>{selectedNode.type}</span>
+            </KVRow>
 
             {details.scriptStandard && (
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                  <FileCode size={13} style={{ color: 'var(--primary)' }} /> Address type:
-                </span>
-                <span style={{ fontWeight: 600, color: 'var(--primary)' }}>{details.scriptStandard}</span>
-              </div>
+              <KVRow icon={<FileCode size={13} style={{ color: 'var(--primary)' }} />} label="Address type">
+                <span style={{ color: 'var(--primary)' }}>{details.scriptStandard}</span>
+              </KVRow>
             )}
 
             {details.feeRateSatVb && (
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                  <Zap size={13} style={{ color: '#f59e0b' }} /> Fee:
-                </span>
-                <span style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.3rem' }}>{details.feeRateSatVb}{details.vsize ? ` · ${details.vsize}` : ''}{feeReplaceable ? ' · can be replaced' : ''} {feeTier && <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', borderRadius: '3px', backgroundColor: `${feeTier.color}18`, color: feeTier.color }}>{feeTier.label}</span>}</span>
-              </div>
+              <KVRow icon={<Zap size={13} style={{ color: '#f59e0b' }} />} label="Fee">
+                <>{details.feeRateSatVb}{details.vsize ? ` · ${details.vsize}` : ''}{feeReplaceable ? ' · can be replaced' : ''} {feeTier && <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', borderRadius: '3px', backgroundColor: `${feeTier.color}18`, color: feeTier.color }}>{feeTier.label}</span>}</>
+              </KVRow>
             )}
             {details.blockHeight != null && (
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}><Timer size={12} /> Block:</span>
-                <span style={{ fontWeight: 600, fontFamily: 'monospace' }}>#{details.blockHeight}</span>
-              </div>
+              <KVRow icon={<Timer size={12} />} label="Block">
+                <span style={{ fontFamily: 'monospace' }}>Block {details.blockHeight}</span>
+              </KVRow>
             )}
 
             {details.confirmations && (
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                  <CheckCircle2 size={13} style={{ color: '#10b981' }} /> Confirmation:
-                </span>
-                <span style={{ fontWeight: 600 }}>{details.confirmations}</span>
-              </div>
+              <KVRow icon={<CheckCircle2 size={13} style={{ color: '#10b981' }} />} label="Status">
+                {details.confirmations}
+              </KVRow>
             )}
 
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Last seen:</span>
-              <span style={{ fontWeight: 600 }}>{details.lastActive}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Network:</span>
-              <span style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                <MapPin size={12} style={{ color: '#ef4444' }} /> {details.ipLog}
-              </span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Identity check:</span>
-              <span style={{ fontWeight: 600, color: selectedNode.type === 'receiver' ? '#10b981' : 'var(--text-muted)' }}>
+            <KVRow label="Last seen:">{details.lastActive}</KVRow>
+            <KVRow icon={<MapPin size={12} style={{ color: '#ef4444' }} />} label="Network">
+              {details.ipLog}
+            </KVRow>
+            <KVRow label="Identity check">
+              <span style={{ color: selectedNode.type === 'receiver' ? '#10b981' : 'var(--text-muted)' }}>
                 {details.kycStatus}
               </span>
-            </div>
+            </KVRow>
 
             {/* Script details panel */}
             {scriptAnalysis && (
@@ -349,35 +329,50 @@ export default function MetadataSidebar({
             {/* Heuristic Breakdown — weighted change vs payment */}
             {details.heuristicBreakdown && (
               <div style={{ marginTop: '0.5rem', backgroundColor: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.18)', borderRadius: '6px', padding: '0.75rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}><BarChart3 size={13} /> Score breakdown: {details.heuristicScore != null ? `${details.heuristicScore > 0 ? '+' : ''}${details.heuristicScore}` : '—'} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>({(details.heuristicConfidence*100).toFixed(0)}% confidence)</span></span>
-                  <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem', borderRadius: '3px', backgroundColor: details.heuristicScore > 1 ? 'rgba(16,185,129,0.15)' : details.heuristicScore < -1 ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.06)', color: details.heuristicScore > 1 ? '#10b981' : details.heuristicScore < -1 ? '#ef4444' : 'var(--text-muted)' }}>{details.heuristicScore > 1 ? 'Payment' : details.heuristicScore < -1 ? 'Change' : 'Ambiguous'}</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.4rem' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}><BarChart3 size={13} /> Score: {details.heuristicScore != null ? `${details.heuristicScore > 0 ? '+' : ''}${details.heuristicScore}` : '—'} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>({(details.heuristicConfidence*100).toFixed(0)}%)</span></span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                    <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem', borderRadius: '3px', backgroundColor: details.heuristicScore > 1 ? 'rgba(16,185,129,0.15)' : details.heuristicScore < -1 ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.06)', color: details.heuristicScore > 1 ? '#10b981' : details.heuristicScore < -1 ? '#ef4444' : 'var(--text-muted)' }}>{details.heuristicScore > 1 ? 'Payment' : details.heuristicScore < -1 ? 'Change' : 'Ambiguous'}</span>
+                    <button
+                      onClick={() => setShowHeuristics(!showHeuristics)}
+                      className="btn btn-outline"
+                      type="button"
+                      aria-expanded={showHeuristics}
+                      style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem' }}
+                    >
+                      {showHeuristics ? "Hide" : "Why"}
+                    </button>
+                  </span>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                  {[
-                    ['Address type', details.heuristicBreakdown.scriptScore],
-                    ['Reuse', details.heuristicBreakdown.reuseScore],
-                    ['Round amount', details.heuristicBreakdown.roundnessScore],
-                    ['Position', details.heuristicBreakdown.positionScore],
-                    ['Spent', details.heuristicBreakdown.spentScore],
-                    ...(details.heuristicBreakdown.fingerprintScore != null ? [['Pattern', details.heuristicBreakdown.fingerprintScore]] : []),
-                    ...(details.heuristicBreakdown.feeScore != null ? [['Fee', details.heuristicBreakdown.feeScore]] : []),
-                    ...(details.heuristicBreakdown.identityScore ? [['Identity', details.heuristicBreakdown.identityScore]] : []),
-                  ].map(([label, val]) => (
-                    <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.7rem' }}>
-                      <span style={{ width: '70px', color: 'var(--text-muted)' }}>{label}</span>
-                      <div style={{ flex: 1, height: '6px', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
-                        <div style={{ width: `${Math.min(100, Math.abs(val)*20)}%`, marginLeft: val < 0 ? 'auto' : undefined, height: '100%', backgroundColor: val > 0 ? '#10b981' : val < 0 ? '#ef4444' : 'var(--text-muted)' }} />
-                      </div>
-                      <span style={{ width: '36px', textAlign: 'right', color: val > 0 ? '#10b981' : val < 0 ? '#ef4444' : 'var(--text-muted)', fontWeight: 600 }}>{val > 0 ? `+${val}` : val}</span>
+                {showHeuristics && (
+                  <>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', marginTop: '0.4rem' }}>
+                      {[
+                        ['Address type', details.heuristicBreakdown.scriptScore],
+                        ['Reuse', details.heuristicBreakdown.reuseScore],
+                        ['Round amount', details.heuristicBreakdown.roundnessScore],
+                        ['Position', details.heuristicBreakdown.positionScore],
+                        ['Spent', details.heuristicBreakdown.spentScore],
+                        ...(details.heuristicBreakdown.fingerprintScore != null ? [['Pattern', details.heuristicBreakdown.fingerprintScore]] : []),
+                        ...(details.heuristicBreakdown.feeScore != null ? [['Fee', details.heuristicBreakdown.feeScore]] : []),
+                        ...(details.heuristicBreakdown.identityScore ? [['Identity', details.heuristicBreakdown.identityScore]] : []),
+                      ].map(([label, val]) => (
+                        <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.7rem' }}>
+                          <span style={{ width: '70px', color: 'var(--text-muted)' }}>{label}</span>
+                          <div style={{ flex: 1, height: '6px', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
+                            <div style={{ width: `${Math.min(100, Math.abs(val)*20)}%`, marginLeft: val < 0 ? 'auto' : undefined, height: '100%', backgroundColor: val > 0 ? '#10b981' : val < 0 ? '#ef4444' : 'var(--text-muted)' }} />
+                          </div>
+                          <span style={{ width: '36px', textAlign: 'right', color: val > 0 ? '#10b981' : val < 0 ? '#ef4444' : 'var(--text-muted)', fontWeight: 600 }}>{val > 0 ? `+${val}` : val}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-                {details.heuristicBreakdown.dwellBlocks != null && (
-                  <div style={{ marginTop: '0.4rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>Spent {details.heuristicBreakdown.dwellBlocks} blocks after the parent</div>
-                )}
-                {details.exchangeConf != null && (
-                  <div style={{ marginTop: '0.4rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>Exchange likelihood: <strong style={{ color: details.exchangeConf > 0.4 ? '#f59e0b' : 'var(--text-secondary)' }}>{(details.exchangeConf*100).toFixed(0)}%</strong></div>
+                    {details.heuristicBreakdown.dwellBlocks != null && (
+                      <div style={{ marginTop: '0.4rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>Spent {details.heuristicBreakdown.dwellBlocks} blocks after the parent</div>
+                    )}
+                    {details.exchangeConf != null && (
+                      <div style={{ marginTop: '0.4rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>Exchange likelihood: <strong style={{ color: details.exchangeConf > 0.4 ? '#f59e0b' : 'var(--text-secondary)' }}>{(details.exchangeConf*100).toFixed(0)}%</strong></div>
+                    )}
+                  </>
                 )}
               </div>
             )}

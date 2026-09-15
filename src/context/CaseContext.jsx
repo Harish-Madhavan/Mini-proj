@@ -12,6 +12,7 @@ import { useToast } from '../hooks/useToast';
 import { CaseContext } from './CaseContextObject';
 import { safeGetItem, safeSetItem, safeRemoveItem } from '../utils/storage';
 import { downloadJson } from '../utils/download';
+import { satsToBtc } from '../utils/forensicUtils';
 
 const MAX_SCENARIOS = 50;
 
@@ -249,7 +250,7 @@ export function CaseProvider({ children }) {
         const existingNodes = [...s.nodes];
         const existingLinks = [...s.links];
         const newTxNodeId = `tx_${firstTx.txid}`;
-        const txValue = `${((firstTx.vout[0]?.value || 0) / 100000000).toFixed(4)} BTC`;
+        const txValue = `${satsToBtc(firstTx.vout[0]?.value || 0, 4)} BTC`;
         if (!existingLinks.some(l => l.source === `out_${address}` && l.target === newTxNodeId)) {
           existingLinks.push({ source: `out_${address}`, target: newTxNodeId, value: txValue, timestamp: 'On-chain' });
         }

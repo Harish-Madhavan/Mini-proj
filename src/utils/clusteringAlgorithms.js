@@ -9,6 +9,8 @@
  * 5. Cluster Confidence & Entity Pivot Extraction.
  */
 
+import { cyrb53Hex } from './forensicUtils';
+
 /**
  * Disjoint Set Union (Union-Find) data structure.
  * Supports nearly O(1) amortized operations via path compression and rank optimization.
@@ -17,17 +19,15 @@ export class DisjointSetUnion {
   constructor() {
     this.parent = new Map();
     this.rank = new Map();
-    this.metadata = new Map();
   }
 
   /**
    * Register a new element in the disjoint set if not already present.
    */
-  makeSet(x, data = null) {
+  makeSet(x) {
     if (!this.parent.has(x)) {
       this.parent.set(x, x);
       this.rank.set(x, 0);
-      this.metadata.set(x, data || { address: x, totalBalance: 0, txCount: 0 });
     }
   }
 
@@ -155,24 +155,6 @@ export function calculateCoinJoinEntropy(outputs = []) {
  * @param {Array<Object>} transactionHistory - List of transactions with vin arrays
  * @returns {Object} Comprehensive cluster analysis report
  */
-/**
- * Stable 53-bit string hash (cyrb53) rendered as fixed-width hex.
- * Unlike `(seed << 5)` accumulation it cannot overflow to -2^31 (where
- * Math.abs is a no-op) and always yields the same digest length.
- */
-function stableClusterHash(str) {
-  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
-  for (let i = 0; i < str.length; i++) {
-    const ch = str.charCodeAt(i);
-    h1 = Math.imul(h1 ^ ch, 2654435761);
-    h2 = Math.imul(h2 ^ ch, 1597334677);
-  }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return (h2 >>> 0).toString(16).padStart(8, '0').toUpperCase() +
-    (h1 >>> 0).toString(16).padStart(8, '0').toUpperCase();
-}
-
 export function computeAddressClusters(addresses = [], transactionHistory = []) {
   if (!addresses || addresses.length === 0) {
     return null;
@@ -213,7 +195,7 @@ export function computeAddressClusters(addresses = [], transactionHistory = []) 
   const clusters = dsu.getClusters();
 
   // Generate deterministic cluster identifier
-  const clusterHash = stableClusterHash([...addresses].sort().join('|')).slice(0, 8);
+  const clusterHash = cyrb53Hex([...addresses].sort().join('|')).slice(0, 8);
 
   // Script type and format analysis
   const hasSegwit = addresses.some(a => a.startsWith('bc1q') || a.startsWith('bc1p'));

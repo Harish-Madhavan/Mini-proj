@@ -114,8 +114,7 @@ export function createAlgorithmicTraceCase(searchVal, scenarios) {
           lastActive: "Active now",
           ipLog: "Bitcoin network",
           kycStatus: "UNKNOWN OWNER (ON-CHAIN)",
-          riskReason: "Where the traced money starts.",
-          device: "Wallet software"
+          riskReason: "Where the traced money starts."
         }
       },
       {
@@ -130,8 +129,7 @@ export function createAlgorithmicTraceCase(searchVal, scenarios) {
           lastActive: "Forwarded",
           ipLog: "Intermediate Relay",
           kycStatus: "UNREGISTERED",
-          riskReason: "Middle step splitting the main funds.",
-          device: "N/A"
+          riskReason: "Middle step splitting the main funds."
         }
       },
       {
@@ -150,8 +148,7 @@ export function createAlgorithmicTraceCase(searchVal, scenarios) {
           email: `compliance@gateway.io`,
           phone: "Exchange",
           kycDocumentId: `SUBPOENA ELIGIBLE`,
-          riskReason: "Exchange account where the traced payments end.",
-          device: "Exchange website"
+          riskReason: "Exchange account where the traced payments end."
         }
       }
     ],
