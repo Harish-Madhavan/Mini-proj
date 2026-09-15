@@ -2,27 +2,30 @@
  * Shared node/link builders to deduplicate bitcoinApi format/trace logic
  */
 
-export function buildTxHubNode({ txId, metrics, isCoinJoin, conservation, depth = null }) {
-  const label = isCoinJoin ? `CoinJoin: ${txId.slice(0, 6)}...` : `Tx: ${txId.slice(0, 8)}...`;
-  const entityName = isCoinJoin ? 'CoinJoin Privacy Mixer Round' : depth != null ? `Hop Hub (Depth ${depth})` : 'On-Chain Tx Hub';
+export function buildTxHubNode({ txId, metrics, isCoinJoin, conservation, depth = null, totalOutSats = null }) {
+  const label = isCoinJoin ? `Mixing: ${txId.slice(0, 6)}...` : `Transaction ${txId.slice(0, 8)}...`;
+  const entityName = isCoinJoin ? 'Mixing round' : depth != null ? `Step hub (depth ${depth})` : 'Transaction hub';
+  // Balance is routed volume (sum of outputs), never the miner fee — downstream
+  // taint/fiat math parses `balance`, and fee-as-balance corrupted both.
+  const routedBtc = totalOutSats != null ? (totalOutSats / 100000000).toFixed(6) : null;
   return {
     id: `tx_${txId}`,
     label,
     type: isCoinJoin ? 'mixer' : 'hop',
-    balance: `${((metrics?.feeSat || 0) / 100000000).toFixed(6)} BTC Fee`,
+    balance: routedBtc != null ? `${routedBtc} BTC` : `${((metrics?.feeSat || 0) / 100000000).toFixed(6)} BTC Fee`,
     risk: isCoinJoin ? 'high' : (!conservation?.valid ? 'medium' : 'low'),
     entityName,
     details: {
       address: txId,
-      lastActive: metrics?.blockTime ? new Date(metrics.blockTime * 1000).toISOString().split('T')[0] : (metrics?.blockConfirmation || 'Mempool'),
-      ipLog: 'Bitcoin P2P Network',
-      kycStatus: isCoinJoin ? 'PRIVACY MIXER (COINJOIN)' : 'ON-CHAIN TRANSACTION',
-      feeRateSatVb: metrics ? `${metrics.feeRateSatVb} sat/vB` : 'N/A',
-      vsize: metrics ? `${metrics.vsize} vB` : 'N/A',
-      rbfStatus: metrics?.isRbfSignaled ? 'RBF Enabled' : 'Final (No RBF)',
+      lastActive: metrics?.blockTime ? new Date(metrics.blockTime * 1000).toISOString().split('T')[0] : (metrics?.blockConfirmation || 'Waiting area'),
+      ipLog: 'Bitcoin network',
+      kycStatus: isCoinJoin ? 'MIXED FUNDS' : 'ON-CHAIN RECORD',
+      feeRateSatVb: metrics ? `${metrics.feeRateSatVb} satoshis per byte` : 'N/A',
+      vsize: metrics ? `${metrics.vsize} bytes` : 'N/A',
+      rbfStatus: metrics?.isRbfSignaled ? 'Replaceable fee' : 'Final fee',
       confirmations: metrics?.blockConfirmation || 'Unconfirmed',
-      riskReason: isCoinJoin ? 'CoinJoin mixing across inputs — taint broken.' : metrics?.riskReason || '',
-      device: 'Bitcoin Protocol',
+      riskReason: isCoinJoin ? 'Mixing across inputs — the trail stops here.' : metrics?.riskReason || '',
+      device: 'Bitcoin network',
       isCoinJoin,
       conservation,
       entropy: metrics?.entropy,
@@ -42,12 +45,43 @@ export function buildInputNode({ addr, scriptStd, satoshis }) {
     entityName: `Origin Wallet (${addr.slice(0, 6)}...)`,
     details: {
       address: addr,
-      lastActive: 'Spent UTXO',
-      ipLog: 'P2P Broadcast Node',
+      lastActive: 'Already spent',
+      ipLog: 'Network broadcaster',
       kycStatus: 'UNREGISTERED',
       scriptStandard: scriptStd,
-      riskReason: `Input UTXO contributor (${scriptStd}).`,
-      device: 'Bitcoin Client'
+      riskReason: `Input from earlier funds (${scriptStd}).`,
+      device: 'Wallet software'
+    }
+  };
+}
+
+/**
+ * Shared classified-output node builder used by both formatBlockstreamTx and
+ * traceEndReceiver — one shape, no drift. Callers pass lastActive since the
+ * single-tx formatter dates unspent holders while the tracer uses a static label.
+ */
+export function buildOutputNode({ outNodeId, addr, valBtc, scriptStd, cls, tx, lastActive }) {
+  return {
+    id: outNodeId,
+    label: cls.label,
+    type: cls.nodeType,
+    balance: `${valBtc} BTC`,
+    risk: cls.risk,
+    entityName: cls.entityName,
+    details: {
+      address: addr,
+      lastActive,
+      ipLog: cls.ipLog,
+      kycStatus: cls.kycStatus,
+      scriptStandard: scriptStd,
+      riskReason: cls.riskReason,
+      device: cls.device,
+      heuristicScore: cls.heuristics?.weightedScore,
+      heuristicConfidence: cls.confidence,
+      heuristicBreakdown: cls.heuristics?.breakdown,
+      blockHeight: tx.status?.block_height || null,
+      blockTime: tx.status?.block_time || null,
+      exchangeConf: cls.exchangeConf,
     }
   };
 }
@@ -55,20 +89,20 @@ export function buildInputNode({ addr, scriptStd, satoshis }) {
 export function buildOpReturnNode({ txId, index, payload }) {
   return {
     id: `op_${txId}_${index}`,
-    label: 'OP_RETURN Data',
+    label: 'Embedded message',
     type: 'hop',
     balance: '0 BTC',
     risk: 'medium',
-    entityName: 'Embedded OP_RETURN Payload',
+    entityName: 'Embedded on-chain message',
     details: {
       address: `OP_RETURN:${payload.rawHex.slice(0, 16)}...`,
-      lastActive: 'On-chain Payload',
+      lastActive: 'On-chain message',
       ipLog: 'N/A',
-      kycStatus: 'NULL DATA SCRIPT',
-      scriptStandard: 'OP_RETURN (Unspendable)',
+      kycStatus: 'DATA NOTE',
+      scriptStandard: 'Embedded data (unspendable)',
       opReturnHex: payload.rawHex,
-      opReturnDecoded: payload.decodedText || 'Binary Payload',
-      riskReason: `Null-data: ${payload.decodedText ? `"${payload.decodedText}"` : payload.rawHex.slice(0, 32)}`
+      opReturnDecoded: payload.decodedText || 'Binary content',
+      riskReason: `Message data: ${payload.decodedText ? `"${payload.decodedText}"` : payload.rawHex.slice(0, 32)}`
     }
   };
 }

@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { 
-  DisjointSetUnion, 
-  calculateCoinJoinEntropy, 
-  computeAddressClusters, 
-  detectPeelingChain 
+import {
+  DisjointSetUnion,
+  calculateCoinJoinEntropy,
+  computeAddressClusters,
+  detectPeelingChain,
+  estimatePoolReceived
 } from './clusteringAlgorithms';
 
 describe('clusteringAlgorithms', () => {
@@ -96,6 +97,25 @@ describe('clusteringAlgorithms', () => {
       expect(analysis.confidenceScore).toBeGreaterThanOrEqual(80);
       expect(analysis.coSpentTransactions.length).toBe(2);
       expect(analysis.clustersCount).toBe(2); // ['addr_1', 'addr_2', 'addr_3'] and ['addr_solo']
+    });
+  });
+
+  describe('estimatePoolReceived', () => {
+    it('credits only pool outputs and reports coverage', () => {
+      const txs = [
+        { vout: [{ scriptpubkey_address: 'addr_1', value: 1000000 }, { scriptpubkey_address: 'outsider', value: 500000 }] },
+        { vout: [{ scriptpubkey_address: 'addr_2', value: 2000000 }] },
+        { vin: [] }, // tx without outputs contributes nothing
+      ];
+      const r = estimatePoolReceived(['addr_1', 'addr_2'], txs);
+      expect(r.totalSats).toBe(3000000);
+      expect(r.perAddressSats).toEqual({ addr_1: 1000000, addr_2: 2000000 });
+      expect(r.observedTxCount).toBe(3);
+    });
+
+    it('returns zeros for empty or missing history', () => {
+      expect(estimatePoolReceived(['a'], [])).toEqual({ totalSats: 0, perAddressSats: {}, observedTxCount: 0 });
+      expect(estimatePoolReceived(['a'], null).totalSats).toBe(0);
     });
   });
 

@@ -8,7 +8,7 @@ export const API_CONFIG = {
 export const APP_METADATA = {
   TITLE: 'AEGISTRACE',
   SUBTITLE: 'NCB Blockchain Forensics Terminal',
-  SYSTEM_VERSION: 'AegisTrace NCB System V2.8.4 - SIH1675 Live Blockchain Explorer'
+  SYSTEM_VERSION: 'AegisTrace · SIH1675'
 };
 
 export const TRACE_CONFIG = {

@@ -1,30 +1,43 @@
-import React, { useRef, useState, useEffect } from 'react';
-import { 
-  FileText, 
-  Printer, 
-  UserCheck, 
-  GitBranch, 
-  Trash2, 
-  Lock, 
-  LockOpen, 
-  Award, 
-  Upload, 
-  Download, 
-  Clock, 
-  Stamp 
+import React, { useRef, useState, useEffect, useMemo } from 'react';
+import {
+  FileText,
+  Printer,
+  UserCheck,
+  GitBranch,
+  Trash2,
+  Lock,
+  LockOpen,
+  Award,
+  Upload,
+  Download,
+  Clock,
+  Stamp,
+  Copy
 } from 'lucide-react';
 import { useCase } from '../hooks/useCase';
 import { useToast } from '../hooks/useToast';
-import { ZONAL_UNITS, WATERMARK_OPTIONS } from '../constants/legalConstants';
+import { ZONAL_UNITS, WATERMARK_OPTIONS, generateSection65BCertificateText } from '../constants/legalConstants';
 import { convertBtcToFiat } from '../utils/forensicUtils';
 import { downloadText } from '../utils/download';
 import { calculateTaintMap, formatTaintPct } from '../utils/taintAnalysis';
+import { generateForensicNarrative } from '../utils/narrativeGenerator';
+import { buildChainOfCustody, verifyChainOfCustody } from '../utils/chainOfCustody';
+import { useEndpointProfile } from '../hooks/useEndpointProfile';
+
+const ENDPOINT_PROFILE_LABELS = {
+  SINGLE_USE_DEPOSIT: 'Single-use deposit',
+  DRAINED_PASS_THROUGH: 'Drained pass-through (funds moved on)',
+  ACTIVE_REUSED_WALLET: 'Active reused wallet',
+  DORMANT_HOLDER: 'Dormant holder',
+  UNPROFILED: 'Unprofiled',
+};
 
 export default function ReportGenerator() {
   const { activeCase } = useCase();
   const { showToast } = useToast();
 
   const canvasRef = useRef(null);
+  const [reportType, setReportType] = useState('ndps_section67'); // 'ndps_section67' | 'evidence_section65b'
   const [isDrawing, setIsDrawing] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
   const [integrityHash, setIntegrityHash] = useState('');
@@ -33,7 +46,7 @@ export default function ReportGenerator() {
   const [bureauZone, setBureauZone] = useState('NCB Head Office, New Delhi');
   const [watermark, setWatermark] = useState(WATERMARK_OPTIONS[0].value);
   const [investigatorNotes, setInvestigatorNotes] = useState(
-    'Transaction graph exhibits structured peeling chain hops terminating in an FIU-registered domestic crypto exchange. Section 67 NDPS notice issuance approved.'
+    'The trail runs through several middle wallets to a domestic exchange. Section 67 notice approved.'
   );
 
   useEffect(() => {
@@ -70,6 +83,12 @@ export default function ReportGenerator() {
     return () => { cancelled = true; };
   }, [activeCase, bureauZone, officerBadge]);
 
+  const narrative = useMemo(() => generateForensicNarrative(activeCase), [activeCase]);
+  const custody = useMemo(() => buildChainOfCustody(activeCase), [activeCase]);
+  const custodyVerification = useMemo(() => verifyChainOfCustody(custody.events), [custody]);
+  const reportReceiverAddress = activeCase?.nodes?.find(n => n.type === 'receiver')?.details?.address;
+  const endpointProfile = useEndpointProfile(reportReceiverAddress, true);
+
   if (!activeCase) return <div style={{ color: 'var(--text-secondary)' }}>Select a case first.</div>;
 
   const receiverNode = activeCase.nodes.find(n => n.type === 'receiver');
@@ -79,6 +98,11 @@ export default function ReportGenerator() {
   const fiatVal = convertBtcToFiat(suspectNode?.balance || activeCase.nodes[0]?.balance || '0 BTC');
   const taintMap = activeCase.nodes.length > 1 ? calculateTaintMap(activeCase.nodes, activeCase.links) : null;
   const receiverTaint = receiverNode && taintMap ? taintMap.get(receiverNode.id) : null;
+
+  const shortRef = (ref) => {
+    if (!ref || typeof ref !== 'string' || ref.length <= 18) return ref || 'N/A';
+    return `${ref.slice(0, 10)}...${ref.slice(-6)}`;
+  };
 
   const getCoordinates = (e) => {
     const canvas = canvasRef.current;
@@ -124,7 +148,7 @@ export default function ReportGenerator() {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    showToast("Cleared signature pad.", "info");
+    showToast("Signature cleared.", "info");
   };
 
   const handleImageUpload = (e) => {
@@ -138,7 +162,7 @@ export default function ReportGenerator() {
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        showToast("Signature/Stamp image loaded.", "success");
+        showToast("Image loaded.", "success");
       };
       img.src = event.target.result;
     };
@@ -147,13 +171,13 @@ export default function ReportGenerator() {
   };
 
   const handlePrint = () => {
-    showToast("Opening print dialog for PDF export...", "info");
+    showToast("Opening print...", "info");
     window.print();
   };
 
-  const handleExportMarkdown = () => {
+  const getReportMarkdown = () => {
     const notesList = activeCase.notesList || [];
-    const md = `# NARCOTICS CONTROL BUREAU (NCB) — FORENSIC REPORT
+    return `# NARCOTICS CONTROL BUREAU (NCB) — FORENSIC REPORT
 **Issuing Zonal Unit:** ${bureauZone}  
 **Classification:** ${watermark}  
 **Case Title:** ${activeCase.title}  
@@ -163,40 +187,91 @@ export default function ReportGenerator() {
 
 ---
 
-## 1. Executive Forensic Summary
-- **Target Entity:** ${activeCase.suspectName}
-- **Blockchain Protocol:** ${activeCase.currency}
-- **Traced Seizure Volume:** ${suspectNode?.balance || 'N/A'} (≈ ${fiatVal.formattedUsd} / ${fiatVal.formattedInr})
-- **Threat Level Index:** ${activeCase.riskScore}%
+## 1. Summary
+- **Starting wallet:** ${activeCase.suspectName}
+- **Currency:** ${activeCase.currency}
+- **Amount traced:** ${suspectNode?.balance || 'N/A'} (≈ ${fiatVal.formattedUsd} / ${fiatVal.formattedInr})
+- **Risk score:** ${activeCase.riskScore}%
 
-## 2. On-Chain Transaction Pathing
-${activeCase.links.map((link, i) => `${i + 1}. \`${link.source}\` ➔ \`${link.target}\` | **${link.value}** (${link.timestamp || 'On-chain'})`).join('\n')}
+## 2. Transaction steps
+${(activeCase.links || []).map((link, i) => `${i + 1}. \`${link.source}\` ➔ \`${link.target}\` | **${link.value}** (${link.timestamp || 'On-chain'})`).join('\n')}
 
-## 3. End Receiver Technical Attribution
-- **Target Endpoint Entity:** ${receiverNode?.entityName || 'Unresolved'}
-- **Deposit Address:** \`${receiverNode?.details?.address || 'N/A'}\`
-- **KYC Status:** ${receiverNode?.details?.kycStatus || 'N/A'}
-- **Settled Value:** ${receiverNode?.balance || 'N/A'}
+## 3. End receiver
+- **Endpoint:** ${receiverNode?.entityName || 'Unresolved'}
+- **Address:** \`${receiverNode?.details?.address || 'N/A'}\`
+- **Identity check:** ${receiverNode?.details?.kycStatus || 'N/A'}
+- **Amount:** ${receiverNode?.balance || 'N/A'}
 
-## 4. Case Investigator Field Notes Log (${notesList.length} Entries)
+## 4. Field notes (${notesList.length} entries)
 ${notesList.length > 0 ? notesList.map((n, i) => `${i + 1}. [${new Date(n.timestamp).toLocaleString()}] **${n.author}:** ${n.content}`).join('\n') : '*No specific field notes recorded for this case.*'}
 
-## 5. Investigating Officer Remarks
+## 5. Findings
+**${narrative?.headline || 'Standard on-chain flow'}**
+${narrative?.summary || ''}
+**Findings:**
+${(narrative?.findings || []).map(f => `- ${f}`).join('\n')}
+**Limits:**
+${(narrative?.limitations || []).map(l => `- ${l}`).join('\n')}
+
+## 6. Chain of Custody (Hash-Sealed)
+- Transfers sealed: ${custody.eventCount} · Verification: ${custodyVerification.valid ? `INTACT (${custodyVerification.checkedEvents} events)` : `BROKEN at seq ${custodyVerification.brokenAtSeq} — ${custodyVerification.reason}`}
+- Terminal seal: \`${custody.terminalHash || 'N/A'}\`
+${custody.gaps.length > 0 ? custody.gaps.map(g => `- Gap after seq ${g.afterSeq} [${g.kind}]: ${g.note}`).join('\n') : '- No custody gaps flagged.'}
+
+## 7. Officer remarks
 ${investigatorNotes}
 
 ---
-**Attesting Officer:** ${officerName} [Badge: ${officerBadge}]  
+**Officer:** ${officerName} [Badge: ${officerBadge}]  
 *Narcotics Control Bureau, Ministry of Home Affairs, Government of India*
 `;
+  };
 
+  const handleExportMarkdown = () => {
+    const md = getReportMarkdown();
     downloadText(md, `NCB-Forensic-Report-${activeCase.id.toUpperCase()}.md`);
-    showToast("Downloaded Forensic Report Markdown document.", "success");
+    showToast("Report downloaded.", "success");
+  };
+
+  const handleCopyMarkdown = () => {
+    const md = getReportMarkdown();
+    navigator.clipboard.writeText(md);
+    showToast("Report copied.", "success");
+  };
+
+  const getSection65BText = () => {
+    return generateSection65BCertificateText({
+      zonalUnit: bureauZone,
+      firNumber: `NCB/NDPS/CR-${activeCase.id.slice(-4).toUpperCase()}/2026`,
+      caseTitle: activeCase.title,
+      officerName,
+      officerBadge,
+      integrityHash,
+      nodesCount: activeCase.nodes?.length || 0,
+      hopsCount: activeCase.links?.length || 0,
+      initialTxHash: activeCase.initialTxHash,
+      targetExchange: receiverNode?.entityName || 'Domestic exchange',
+      depositAddress: receiverNode?.details?.address || 'N/A',
+      totalSeizedBtc: suspectNode?.balance || '0.0000 BTC'
+    });
+  };
+
+  const handleExportSection65B = () => {
+    const text = getSection65BText();
+    downloadText(text, `NCB-Section65B-Certificate-${activeCase.id.toUpperCase()}.txt`);
+    showToast("Certificate downloaded.", "success");
+  };
+
+  const handleCopySection65B = () => {
+    const text = getSection65BText();
+    navigator.clipboard.writeText(text);
+    showToast("Certificate copied.", "success");
   };
 
   const toggleLock = () => {
     const nextLocked = !isLocked;
     setIsLocked(nextLocked);
-    showToast(nextLocked ? "Report integrity seal locked." : "Report form unlocked for editing.", nextLocked ? "success" : "info");
+    showToast(nextLocked ? "Report locked." : "Report unlocked.", nextLocked ? "success" : "info");
   };
 
   const getRefCode = () => {
@@ -207,31 +282,195 @@ ${investigatorNotes}
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '3fr 1.5fr', gap: '1.5rem' }}>
-      
-      {/* Report Sheet */}
-      <div className="glass-panel" id="printable-area" style={{ position: 'relative', padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.5rem', backgroundColor: '#ffffff', color: '#0f172a', borderRadius: '8px', overflow: 'hidden' }}>
-        
-        {/* Subtle Watermark on Printable Area */}
-        <div className="report-watermark">
-          {watermark}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      {/* Statutory Format Switcher */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', gap: '0.35rem', backgroundColor: 'rgba(15, 23, 42, 0.75)', padding: '0.25rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+          <button
+            onClick={() => setReportType('ndps_section67')}
+            className={`btn ${reportType === 'ndps_section67' ? 'btn-primary' : 'btn-outline'}`}
+            type="button"
+            style={{ fontSize: '0.75rem', padding: '0.35rem 0.85rem' }}
+          >
+            Section 67 NDPS Forensic Report
+          </button>
+          <button
+            onClick={() => setReportType('evidence_section65b')}
+            className={`btn ${reportType === 'evidence_section65b' ? 'btn-primary' : 'btn-outline'}`}
+            type="button"
+            style={{ fontSize: '0.75rem', padding: '0.35rem 0.85rem' }}
+          >
+            Section 65B Evidence Act Certificate (BSA 2023)
+          </button>
         </div>
 
-        {/* Report Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #0f172a', paddingBottom: '1rem', position: 'relative', zIndex: 1 }}>
-          <div>
-            <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', textTransform: 'uppercase' }}>Narcotics Control Bureau (NCB)</h2>
-            <p style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569', letterSpacing: '0.05em', textTransform: 'uppercase', marginTop: '0.2rem' }}>
-              {bureauZone} | Government of India
-            </p>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '0.25rem 0.5rem', borderRadius: '4px', backgroundColor: '#fee2e2', color: '#991b1b' }}>
-              {watermark.split('—')[0].trim()}
-            </span>
-            <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.4rem' }}>Case Ref: {getRefCode()}-{activeCase.id.toUpperCase()}</p>
-          </div>
+        <div style={{ display: 'flex', gap: '0.4rem' }}>
+          {reportType === 'evidence_section65b' ? (
+            <>
+              <button
+                onClick={handleCopySection65B}
+                className="btn btn-outline"
+                type="button"
+                style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
+              >
+                <Copy size={13} /> Copy Affidavit
+              </button>
+              <button
+                onClick={handleExportSection65B}
+                className="btn btn-primary"
+                type="button"
+                style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem' }}
+              >
+                <Download size={13} /> Download Certificate (.txt)
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={handleCopyMarkdown}
+                className="btn btn-outline"
+                type="button"
+                style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
+              >
+                <Copy size={13} /> Copy Markdown
+              </button>
+              <button
+                onClick={handleExportMarkdown}
+                className="btn btn-outline"
+                type="button"
+                style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
+              >
+                <Download size={13} /> Export .md
+              </button>
+            </>
+          )}
         </div>
+      </div>
+
+      <div className="responsive-split-grid" style={{ display: 'grid', gridTemplateColumns: '3fr 1.5fr', gap: '1.5rem' }}>
+        
+        {/* Report Sheet */}
+        <div className="glass-panel" id="printable-area" style={{ position: 'relative', padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.5rem', backgroundColor: '#ffffff', color: '#0f172a', borderRadius: '8px', overflow: 'hidden' }}>
+          
+          {/* Subtle Watermark on Printable Area */}
+          <div className="report-watermark">
+            {watermark}
+          </div>
+
+          {reportType === 'evidence_section65b' ? (
+            /* SECTION 65B EVIDENCE ACT AFFIDAVIT VIEW */
+            <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: '1.2rem', fontFamily: 'Georgia, serif', lineHeight: '1.6' }}>
+              <div style={{ textAlign: 'center', borderBottom: '2px solid #0f172a', paddingBottom: '1rem' }}>
+                <h2 style={{ fontSize: '1.15rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.02em', color: '#0f172a' }}>
+                  BEFORE THE SPECIAL COURT FOR NDPS CASES / SESSIONS COURT
+                </h2>
+                <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#334155', marginTop: '0.2rem' }}>
+                  GOVERNMENT OF INDIA, NARCOTICS CONTROL BUREAU
+                </h3>
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>
+                  ZONAL UNIT: {bureauZone.toUpperCase()}
+                </span>
+                <div style={{ marginTop: '0.5rem', display: 'inline-block', backgroundColor: '#fee2e2', color: '#991b1b', padding: '0.2rem 0.6rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700 }}>
+                  CERTIFICATE UNDER SECTION 65B OF THE INDIAN EVIDENCE ACT, 1872
+                  <br />(READ WITH SECTION 63 OF THE BHARATIYA SAKSHYA ADHINIYAM, 2023)
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#334155', borderBottom: '1px solid #e2e8f0', paddingBottom: '0.5rem' }}>
+                <span><strong>CRIME / FIR REF:</strong> NCB/NDPS/CR-{activeCase.id.slice(-4).toUpperCase()}/2026</span>
+                <span><strong>DATE:</strong> {new Date().toISOString().split('T')[0]}</span>
+              </div>
+
+              <div style={{ fontSize: '0.85rem', color: '#1e293b', textAlign: 'justify' }}>
+                <p style={{ marginBottom: '0.75rem' }}>
+                  I, <strong>{officerName}</strong>, Badge No. <strong>{officerBadge}</strong>, currently serving at {bureauZone}, do hereby solemnly affirm and state on oath as under:
+                </p>
+
+                <p style={{ marginBottom: '0.75rem' }}>
+                  <strong>1. Authority & Competence:</strong> That I am the Investigating Officer / Certified Cyber Forensic Examiner in the investigation titled <em>"{activeCase.title}"</em> and am fully authorized to extract, preserve, and certify electronic records pertaining to on-chain cryptocurrency fund flows.
+                </p>
+
+                <p style={{ marginBottom: '0.75rem' }}>
+                  <strong>2. System Integrity (Section 65B(2) / Section 63(2)):</strong> The electronic transaction trace was generated using the AegisTrace Forensic Suite operating on an isolated, secured NCB Cyber Forensic Workstation. The workstation was operating properly and free from any operational malfunctions or tampering throughout the material period.
+                </p>
+
+                <p style={{ marginBottom: '0.75rem' }}>
+                  <strong>3. Manifest & Integrity Hash:</strong> The complete transaction flow consisting of {activeCase.nodes?.length || 0} nodes and {activeCase.links?.length || 0} validated transaction steps has been sealed under SHA-256 digest:
+                </p>
+
+                <div style={{ backgroundColor: '#f1f5f9', border: '1px solid #cbd5e1', padding: '0.5rem 0.75rem', borderRadius: '4px', fontFamily: 'monospace', fontSize: '0.75rem', color: '#0f172a', margin: '0.5rem 0' }}>
+                  {integrityHash}
+                </div>
+
+                <p style={{ marginTop: '0.75rem' }}>
+                  <strong>4. End receiver:</strong> The transaction path demonstrates direct fund movement ending at an exchange-held deposit address <code style={{ fontFamily: 'monospace', backgroundColor: '#e2e8f0', padding: '0.1rem 0.3rem', borderRadius: '3px' }}>{receiverNode?.details?.address || 'N/A'}</code> attributed to <strong>{receiverNode?.entityName || 'Domestic exchange'}</strong> with settled value of <strong>{receiverNode?.balance || '0 BTC'}</strong>.
+                </p>
+              </div>
+
+              {/* Manifest Table */}
+              <div>
+                <h4 style={{ fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', marginBottom: '0.4rem' }}>
+                  EXHIBIT SCHEDULE — CRYPTOGRAPHIC NODE MANIFEST
+                </h4>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem', border: '1px solid #cbd5e1' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: '#f8fafc', textAlign: 'left', borderBottom: '1px solid #cbd5e1' }}>
+                      <th style={{ padding: '0.35rem', border: '1px solid #cbd5e1' }}>Ex. #</th>
+                      <th style={{ padding: '0.35rem', border: '1px solid #cbd5e1' }}>Node Entity</th>
+                      <th style={{ padding: '0.35rem', border: '1px solid #cbd5e1' }}>On-Chain Identifier / Address</th>
+                      <th style={{ padding: '0.35rem', border: '1px solid #cbd5e1' }}>Value</th>
+                      <th style={{ padding: '0.35rem', border: '1px solid #cbd5e1' }}>Forensic Role</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeCase.nodes.map((n, i) => (
+                      <tr key={n.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                        <td style={{ padding: '0.35rem', border: '1px solid #cbd5e1', fontWeight: 600 }}>Ex-{i + 1}</td>
+                        <td style={{ padding: '0.35rem', border: '1px solid #cbd5e1' }}>{n.entityName || n.label}</td>
+                        <td style={{ padding: '0.35rem', border: '1px solid #cbd5e1', fontFamily: 'monospace' }}>
+                          {n.details?.address ? `${n.details.address.slice(0, 10)}...${n.details.address.slice(-8)}` : n.id}
+                        </td>
+                        <td style={{ padding: '0.35rem', border: '1px solid #cbd5e1', fontWeight: 600 }}>{n.balance}</td>
+                        <td style={{ padding: '0.35rem', border: '1px solid #cbd5e1' }}>{n.type.toUpperCase()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ marginTop: '1rem', borderTop: '1px solid #cbd5e1', paddingTop: '0.75rem', fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+                <div>
+                  <p><strong>Place:</strong> {bureauZone.split(',')[0]}</p>
+                  <p><strong>Date:</strong> {new Date().toISOString().split('T')[0]}</p>
+                  <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>Digitally sealed under Section 65B IEA / Section 63 BSA 2023</p>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ borderBottom: '1px solid #0f172a', width: '180px', marginBottom: '0.25rem' }}></div>
+                  <strong style={{ display: 'block' }}>{officerName}</strong>
+                  <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Investigating Officer / Deponent</span>
+                  <br />
+                  <span style={{ fontSize: '0.7rem', color: '#64748b' }}>{bureauZone}</span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* SECTION 67 NDPS STANDARD REPORT VIEW */
+            <>
+              {/* Report Header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #0f172a', paddingBottom: '1rem', position: 'relative', zIndex: 1 }}>
+                <div>
+                  <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', textTransform: 'uppercase' }}>Narcotics Control Bureau (NCB)</h2>
+                  <p style={{ fontSize: '0.8rem', fontWeight: 600, color: '#475569', letterSpacing: '0.05em', textTransform: 'uppercase', marginTop: '0.2rem' }}>
+                    {bureauZone} | Government of India
+                  </p>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '0.25rem 0.5rem', borderRadius: '4px', backgroundColor: '#fee2e2', color: '#991b1b' }}>
+                    {watermark.split('—')[0].trim()}
+                  </span>
+                  <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.4rem' }}>Case Ref: {getRefCode()}-{activeCase.id.toUpperCase()}</p>
+                </div>
+              </div>
 
         {/* Forensic Metadata summary */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', borderBottom: '1px solid #e2e8f0', paddingBottom: '1rem', fontSize: '0.85rem', position: 'relative', zIndex: 1 }}>
@@ -253,33 +492,52 @@ ${investigatorNotes}
           </div>
         </div>
 
+        {/* Investigative Narrative */}
+        {narrative && (
+          <div style={{ position: 'relative', zIndex: 1, border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0.85rem', backgroundColor: '#f8fafc' }}>
+            <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
+              <FileText size={15} /> SUMMARY
+            </h4>
+            <p style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.3rem' }}>{narrative.headline}</p>
+            <p style={{ fontSize: '0.8rem', color: '#334155', marginBottom: '0.5rem' }}>{narrative.summary}</p>
+            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#065f46', textTransform: 'uppercase' }}>Findings</span>
+            <ul style={{ margin: '0.2rem 0 0.5rem 1rem', padding: 0, fontSize: '0.78rem', color: '#1e293b' }}>
+              {narrative.findings.map((f, i) => <li key={i} style={{ marginBottom: '0.2rem' }}>{f}</li>)}
+            </ul>
+            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#991b1b', textTransform: 'uppercase' }}>Limits of this analysis</span>
+            <ul style={{ margin: '0.2rem 0 0 1rem', padding: 0, fontSize: '0.78rem', color: '#475569' }}>
+              {narrative.limitations.map((l, i) => <li key={i} style={{ marginBottom: '0.2rem' }}>{l}</li>)}
+            </ul>
+          </div>
+        )}
+
         {/* Transaction Flow Details */}
         <div style={{ position: 'relative', zIndex: 1 }}>
           <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-            <GitBranch size={16} /> ON-CHAIN TRANSACTION HOPS INDEX
+            <GitBranch size={16} /> TRANSACTION STEPS
           </h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             {/* Suspect Node */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', backgroundColor: '#f8fafc', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-              <span style={{ padding: '0.15rem 0.4rem', borderRadius: '3px', backgroundColor: '#fca5a5', color: '#991b1b', fontWeight: 700 }}>Origin Input</span>
-              <span style={{ fontFamily: 'monospace', flex: 1 }}>{suspectNode?.details.address}</span>
-              <strong style={{ color: '#0f172a' }}>{suspectNode?.balance}</strong>
+              <span style={{ padding: '0.15rem 0.4rem', borderRadius: '3px', backgroundColor: '#fca5a5', color: '#991b1b', fontWeight: 700 }}>Start</span>
+              <span style={{ fontFamily: 'monospace', flex: 1 }}>{suspectNode?.details?.address || suspectNode?.id || 'N/A'}</span>
+              <strong style={{ color: '#0f172a' }}>{suspectNode?.balance || '0 BTC'}</strong>
             </div>
 
             {/* Mixer */}
             {mixer && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', backgroundColor: '#f8fafc', padding: '0.5rem', borderRadius: '4px', border: '1px dashed #e2e8f0' }}>
-                <span style={{ padding: '0.15rem 0.4rem', borderRadius: '3px', backgroundColor: '#ddd6fe', color: '#5b21b6', fontWeight: 700 }}>Mixer Script</span>
-                <span style={{ fontFamily: 'monospace', flex: 1 }}>{mixer.details.address}</span>
+                <span style={{ padding: '0.15rem 0.4rem', borderRadius: '3px', backgroundColor: '#ddd6fe', color: '#5b21b6', fontWeight: 700 }}>Mixing</span>
+                <span style={{ fontFamily: 'monospace', flex: 1 }}>{mixer.details?.address || mixer.id}</span>
                 <strong style={{ color: '#0f172a' }}>{mixer.balance}</strong>
               </div>
             )}
 
-            {/* Hops */}
+            {/* Steps */}
             {hops.map((hop, idx) => (
               <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', backgroundColor: '#f8fafc', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                <span style={{ padding: '0.15rem 0.4rem', borderRadius: '3px', backgroundColor: '#e2e8f0', color: '#475569', fontWeight: 700 }}>Transit Hop #{idx + 1}</span>
-                <span style={{ fontFamily: 'monospace', flex: 1 }}>{hop.details.address}</span>
+                <span style={{ padding: '0.15rem 0.4rem', borderRadius: '3px', backgroundColor: '#e2e8f0', color: '#475569', fontWeight: 700 }}>Step #{idx + 1}</span>
+                <span style={{ fontFamily: 'monospace', flex: 1 }}>{hop.details?.address || hop.id}</span>
                 <strong style={{ color: '#0f172a' }}>{hop.balance}</strong>
               </div>
             ))}
@@ -287,8 +545,8 @@ ${investigatorNotes}
             {/* Receiver Node */}
             {receiverNode && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem', backgroundColor: '#ecfdf5', padding: '0.5rem', borderRadius: '4px', border: '1px solid #059669' }}>
-                <span style={{ padding: '0.15rem 0.4rem', borderRadius: '3px', backgroundColor: '#a7f3d0', color: '#065f46', fontWeight: 700 }}>End Receiver</span>
-                <span style={{ fontFamily: 'monospace', flex: 1 }}>{receiverNode.details.address}</span>
+                <span style={{ padding: '0.15rem 0.4rem', borderRadius: '3px', backgroundColor: '#a7f3d0', color: '#065f46', fontWeight: 700 }}>End receiver</span>
+                <span style={{ fontFamily: 'monospace', flex: 1 }}>{receiverNode.details?.address || receiverNode.id}</span>
                 <strong style={{ color: '#065f46' }}>{receiverNode.balance}</strong>
               </div>
             )}
@@ -299,29 +557,38 @@ ${investigatorNotes}
         {receiverNode && (
           <div style={{ border: '1px solid #10b981', backgroundColor: '#f0fdf4', borderRadius: '6px', padding: '0.85rem', position: 'relative', zIndex: 1 }}>
             <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#065f46', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
-              <UserCheck size={16} /> END RECEIVER ATTRIBUTION SUMMARY
+              <UserCheck size={16} /> END RECEIVER
             </h4>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.8rem' }}>
               <div>
-                <span style={{ color: '#64748b', display: 'block' }}>Target Endpoint Entity:</span>
+                <span style={{ color: '#64748b', display: 'block' }}>Endpoint:</span>
                 <strong style={{ color: '#0f172a' }}>{receiverNode.entityName}</strong>
               </div>
               <div>
-                <span style={{ color: '#64748b', display: 'block' }}>On-Chain Script Status:</span>
+                <span style={{ color: '#64748b', display: 'block' }}>Identity check:</span>
                 <strong style={{ color: '#0f172a' }}>{receiverNode.details.kycStatus}</strong>
               </div>
               <div>
-                <span style={{ color: '#64748b', display: 'block' }}>Address Reference:</span>
+                <span style={{ color: '#64748b', display: 'block' }}>Address:</span>
                 <span style={{ fontFamily: 'monospace', color: '#0f172a' }}>{receiverNode.details.address}</span>
               </div>
               <div>
-                <span style={{ color: '#64748b', display: 'block' }}>Settled Value:</span>
+                <span style={{ color: '#64748b', display: 'block' }}>Amount:</span>
                 <strong style={{ color: '#065f46' }}>{receiverNode.balance}</strong>
               </div>
+              {endpointProfile.status === 'ready' && endpointProfile.profile && (
+                <div>
+                  <span style={{ color: '#64748b', display: 'block' }}>Past activity:</span>
+                  <strong style={{ color: '#0f172a' }}>
+                    {ENDPOINT_PROFILE_LABELS[endpointProfile.profile.profile] || endpointProfile.profile.profile}
+                    {' '}({(endpointProfile.profile.totalReceivedSats / 1e8).toFixed(4)} BTC in · {endpointProfile.profile.txCount} txs{endpointProfile.profile.isAggregator ? ' · aggregator' : ''})
+                  </strong>
+                </div>
+              )}
               {receiverTaint != null && (
                 <div>
-                  <span style={{ color: '#64748b', display: 'block' }}>Taint from Origin:</span>
-                  <strong style={{ color: receiverTaint >= 0.5 ? '#b91c1c' : '#065f46' }}>{formatTaintPct(receiverTaint)} {receiverTaint >= 0.35 ? '· Actionable linkage' : '· Low linkage'}</strong>
+                  <span style={{ color: '#64748b', display: 'block' }}>Traced funds:</span>
+                  <strong style={{ color: receiverTaint >= 0.5 ? '#b91c1c' : '#065f46' }}>{formatTaintPct(receiverTaint)} {receiverTaint >= 0.35 ? '· Strong link' : '· Weak link'}</strong>
                 </div>
               )}
               <div>
@@ -332,44 +599,82 @@ ${investigatorNotes}
           </div>
         )}
 
-        {/* Case Timeline Chronology Log Table */}
+        {/* Timeline */}
         <div style={{ position: 'relative', zIndex: 1 }}>
           <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
-            <Clock size={15} /> CASE CHRONOLOGY & FORENSIC EVENT LOG
+            <Clock size={15} /> TIMELINE
           </h4>
           <table style={{ width: '100%', fontSize: '0.75rem', borderCollapse: 'collapse', border: '1px solid #e2e8f0' }}>
             <thead>
               <tr style={{ backgroundColor: '#f1f5f9', color: '#334155', textAlign: 'left' }}>
-                <th style={{ padding: '0.4rem', border: '1px solid #e2e8f0' }}>Stage</th>
-                <th style={{ padding: '0.4rem', border: '1px solid #e2e8f0' }}>Action / Evidence Event</th>
+                <th style={{ padding: '0.4rem', border: '1px solid #e2e8f0' }}>Step</th>
+                <th style={{ padding: '0.4rem', border: '1px solid #e2e8f0' }}>What happened</th>
                 <th style={{ padding: '0.4rem', border: '1px solid #e2e8f0' }}>Status</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0', fontWeight: 600 }}>1. Intelligence Input</td>
-                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0' }}>Initial suspect wallet flagged in narcotics investigation.</td>
-                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0', color: '#059669', fontWeight: 600 }}>Verified</td>
+                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0', fontWeight: 600 }}>1. Start</td>
+                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0' }}>Starting wallet noted.</td>
+                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0', color: '#059669', fontWeight: 600 }}>Done</td>
               </tr>
               <tr>
-                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0', fontWeight: 600 }}>2. Outspend Tracing</td>
-                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0' }}>Recursive forward tracing through {hops.length} peeling chain transit hops.</td>
-                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0', color: '#059669', fontWeight: 600 }}>Traced</td>
+                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0', fontWeight: 600 }}>2. Tracing</td>
+                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0' }}>Followed the money through {hops.length} middle steps.</td>
+                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0', color: '#059669', fontWeight: 600 }}>Done</td>
               </tr>
               <tr>
-                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0', fontWeight: 600 }}>3. Terminal Resolution</td>
-                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0' }}>Terminal deposit point identified at {receiverNode?.entityName || 'Exchange Endpoint'}.</td>
-                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0', color: '#0284c7', fontWeight: 600 }}>Subpoena Ready</td>
+                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0', fontWeight: 600 }}>3. End point</td>
+                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0' }}>Final deposit found at {receiverNode?.entityName || 'exchange'}.</td>
+                <td style={{ padding: '0.4rem', border: '1px solid #e2e8f0', color: '#0284c7', fontWeight: 600 }}>Ready for notice</td>
               </tr>
             </tbody>
           </table>
         </div>
 
-        {/* Case Field Notes Log */}
+        {/* Chain of custody */}
+        {custody.eventCount > 0 && (
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
+              <Lock size={15} /> CHAIN OF CUSTODY
+              <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '0.15rem 0.45rem', borderRadius: '3px', backgroundColor: custodyVerification.valid ? '#dcfce7' : '#fee2e2', color: custodyVerification.valid ? '#166534' : '#991b1b' }}>
+                {custodyVerification.valid ? `Verified · ${custodyVerification.checkedEvents} events` : `Broken at seq ${custodyVerification.brokenAtSeq}`}
+              </span>
+            </h4>
+            <table style={{ width: '100%', fontSize: '0.72rem', borderCollapse: 'collapse', border: '1px solid #e2e8f0' }}>
+              <thead>
+                <tr style={{ backgroundColor: '#f1f5f9', color: '#334155', textAlign: 'left' }}>
+                  <th style={{ padding: '0.35rem', border: '1px solid #e2e8f0' }}>#</th>
+                  <th style={{ padding: '0.35rem', border: '1px solid #e2e8f0' }}>Transfer</th>
+                  <th style={{ padding: '0.35rem', border: '1px solid #e2e8f0' }}>BTC</th>
+                  <th style={{ padding: '0.35rem', border: '1px solid #e2e8f0' }}>Seal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {custody.events.map(e => (
+                  <tr key={e.seq}>
+                    <td style={{ padding: '0.35rem', border: '1px solid #e2e8f0', fontWeight: 600 }}>{e.seq}</td>
+                    <td style={{ padding: '0.35rem', border: '1px solid #e2e8f0', fontFamily: 'monospace' }}>
+                      {shortRef(e.from)} → {shortRef(e.to)}{e.approximateOrder ? ' *' : ''}
+                    </td>
+                    <td style={{ padding: '0.35rem', border: '1px solid #e2e8f0', fontWeight: 600 }}>{e.amountBtc.toFixed(4)}</td>
+                    <td style={{ padding: '0.35rem', border: '1px solid #e2e8f0', fontFamily: 'monospace' }}>{e.eventHash.slice(0, 8)}…</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mono-addr" style={{ fontSize: '0.7rem', color: '#475569', marginTop: '0.3rem' }}>
+              Terminal seal: {custody.terminalHash}
+              {custody.gaps.length > 0 && ` · ${custody.gaps.length} gap flag${custody.gaps.length === 1 ? '' : 's'}: ${custody.gaps.map(g => g.note).join(' ')}`}
+            </p>
+          </div>
+        )}
+
+        {/* Field notes */}
         {activeCase.notesList && activeCase.notesList.length > 0 && (
           <div style={{ position: 'relative', zIndex: 1, backgroundColor: '#f8fafc', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
             <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '0.3rem' }}>
-              FIELD INVESTIGATOR LOG ENTRIES ({activeCase.notesList.length}):
+              FIELD NOTES ({activeCase.notesList.length}):
             </span>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
               {activeCase.notesList.map((n, i) => (
@@ -382,9 +687,9 @@ ${investigatorNotes}
           </div>
         )}
 
-        {/* Officer Remarks Field */}
+        {/* Officer remarks */}
         <div style={{ position: 'relative', zIndex: 1 }}>
-          <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '0.2rem' }}>INVESTIGATING OFFICER REMARKS:</label>
+          <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '0.2rem' }}>OFFICER REMARKS:</label>
           <textarea
             rows={2}
             disabled={isLocked}
@@ -406,14 +711,14 @@ ${investigatorNotes}
         {/* Dynamic Signature */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '1rem', fontSize: '0.85rem', borderTop: '1px solid #e2e8f0', paddingTop: '1rem', position: 'relative', zIndex: 1 }}>
           <div>
-            <span style={{ color: '#64748b', display: 'block', fontSize: '0.75rem', textTransform: 'uppercase' }}>Evidence Integrity Cryptographic Hash</span>
+            <span style={{ color: '#64748b', display: 'block', fontSize: '0.75rem', textTransform: 'uppercase' }}>Integrity hash</span>
             <span className="mono-addr" style={{ fontSize: '0.75rem', fontWeight: 700, color: '#1e293b', wordBreak: 'break-all' }}>
               {integrityHash}
             </span>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem' }}>
-            <span style={{ color: '#64748b', fontSize: '0.75rem' }}>Officer Signature & Official Seal</span>
+            <span style={{ color: '#64748b', fontSize: '0.75rem' }}>Signature</span>
             
             <div style={{ position: 'relative', border: isLocked ? 'none' : '1px dashed #cbd5e1', borderRadius: '4px', backgroundColor: '#f8fafc' }}>
               <canvas
@@ -469,19 +774,20 @@ ${investigatorNotes}
             </div>
           </div>
         </div>
-
-      </div>
+      </>
+    )}
+  </div>
 
       {/* Options Panel */}
       <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', height: 'fit-content' }}>
-        <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <FileText style={{ color: 'var(--primary)' }} size={18} /> Report Controls
-        </h3>
+          <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <FileText style={{ color: 'var(--primary)' }} size={18} /> Controls
+          </h3>
 
         {/* Watermark selection */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
           <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-            <Stamp size={13} /> Document Watermark
+            <Stamp size={13} /> Watermark
           </label>
           <select
             value={watermark}
@@ -499,7 +805,7 @@ ${investigatorNotes}
         {/* Bureau selection */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
           <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-            <Award size={13} /> Issuing Zonal Office
+            <Award size={13} /> Office
           </label>
           <select 
             value={bureauZone}
@@ -514,9 +820,9 @@ ${investigatorNotes}
           </select>
         </div>
 
-        {/* Officer Badge ID */}
+        {/* Badge */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-          <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Officer Badge ID</label>
+          <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Badge</label>
           <input
             type="text"
             disabled={isLocked}
@@ -538,15 +844,24 @@ ${investigatorNotes}
           }}
         >
           {isLocked ? <Lock size={14} /> : <LockOpen size={14} />}
-          {isLocked ? "Unlock Report Form" : "Lock Integrity Seal"}
+          {isLocked ? "Unlock" : "Lock"}
         </button>
         
+        <button
+          onClick={handleCopyMarkdown}
+          className="btn btn-outline"
+          style={{ justifyContent: 'center' }}
+          title="Copy formatted forensic report Markdown to clipboard"
+        >
+          <Copy size={14} /> Copy text
+        </button>
+
         <button
           onClick={handleExportMarkdown}
           className="btn btn-outline"
           style={{ justifyContent: 'center' }}
         >
-          <Download size={14} /> Export Markdown Dossier
+          <Download size={14} /> Export text
         </button>
 
         <button
@@ -554,10 +869,11 @@ ${investigatorNotes}
           className="btn btn-primary"
           style={{ justifyContent: 'center' }}
         >
-          <Printer size={16} /> Print / Save as PDF
+          <Printer size={16} /> Print / PDF
         </button>
       </div>
 
     </div>
+  </div>
   );
 }

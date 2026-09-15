@@ -18,11 +18,15 @@ import {
   Eye,
   EyeOff,
   GitCommit,
-  AlertTriangle
+  AlertTriangle,
+  Flame,
+  Table,
+  X
 } from 'lucide-react';
 import NodeRenderer from './NodeRenderer';
 import { useToast } from '../../hooks/useToast';
 import { findCriticalMoneyTrail, detectCircularFlows } from '../../utils/graphAlgorithms';
+import { calculateTaintMap, calculateEdgeTaintMap, generateTaintLedger } from '../../utils/taintAnalysis';
 
 export default function GraphCanvas({
   activeCase,
@@ -62,6 +66,15 @@ export default function GraphCanvas({
   const { showToast } = useToast();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showCriticalTrail, setShowCriticalTrail] = useState(false);
+  const [showTaintHeatmap, setShowTaintHeatmap] = useState(false);
+  const [taintModel, setTaintModel] = useState('proportionate');
+  const [showTaintLedger, setShowTaintLedger] = useState(false);
+
+  const TAINT_MODEL_LABELS = {
+    proportionate: 'Shared',
+    fifo: 'Oldest first',
+    poison: 'Full spread',
+  };
 
   // Compute critical trail and circular flows
   const criticalTrail = useMemo(() => {
@@ -73,6 +86,22 @@ export default function GraphCanvas({
     if (!activeCase?.nodes?.length || !activeCase?.links?.length) return [];
     return detectCircularFlows(activeCase.nodes, activeCase.links);
   }, [activeCase]);
+
+  // Compute taint maps
+  const taintMap = useMemo(() => {
+    if (!activeCase?.nodes?.length) return new Map();
+    return calculateTaintMap(activeCase.nodes, activeCase.links, [], taintModel);
+  }, [activeCase, taintModel]);
+
+  const edgeTaintMap = useMemo(() => {
+    if (!activeCase?.nodes?.length || !activeCase?.links?.length) return new Map();
+    return calculateEdgeTaintMap(activeCase.nodes, activeCase.links, taintMap);
+  }, [activeCase, taintMap]);
+
+  const taintLedger = useMemo(() => {
+    if (!activeCase?.nodes?.length) return [];
+    return generateTaintLedger(activeCase.nodes, activeCase.links, taintMap);
+  }, [activeCase, taintMap]);
 
   const handleZoomIn = () => setZoom(prev => Math.min(prev + 0.15, 3.0));
   const handleZoomOut = () => setZoom(prev => Math.max(prev - 0.15, 0.5));
@@ -88,19 +117,38 @@ export default function GraphCanvas({
     if (!activeCase?.nodes?.length) return;
     setZoom(1.05);
     setPanOffset({ x: 0, y: 0 });
-    showToast("Fitted graph nodes to viewport center.", "info");
+    showToast("Graph centered.", "info");
   };
 
-  // Keyboard shortcut for ESC to exit fullscreen
+  // Keyboard shortcuts for canvas ergonomics (+, -, 0, Space, ESC)
   useEffect(() => {
     const handleKeyDown = (e) => {
+      // Don't intercept if user is typing in an input or textarea
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target?.tagName)) return;
+
       if (e.key === 'Escape' && isFullscreen) {
         setIsFullscreen(false);
+      } else if (e.key === '+' || e.key === '=') {
+        e.preventDefault();
+        setZoom(prev => Math.min(prev + 0.15, 3.0));
+      } else if (e.key === '-' || e.key === '_') {
+        e.preventDefault();
+        setZoom(prev => Math.max(prev - 0.15, 0.5));
+      } else if (e.key === '0') {
+        e.preventDefault();
+        setZoom(1.0);
+        setPanOffset({ x: 0, y: 0 });
+        setCustomPositions({});
+        showToast("Graph layout reset to center.", "info");
+      } else if (e.key === ' ' && !e.repeat) {
+        e.preventDefault();
+        if (playbackStep === null) setPlaybackStep(0);
+        setIsPlaying(prev => !prev);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isFullscreen]);
+  }, [isFullscreen, playbackStep, setIsPlaying, setPlaybackStep, setCustomPositions, setPanOffset, setZoom, showToast]);
 
   const handleMouseDown = (e) => {
     if (e.target.tagName === 'svg' || e.target.id === 'bg-panner') {
@@ -176,7 +224,7 @@ export default function GraphCanvas({
         a.setAttribute('download', `aegistrace-${activeCase.id}-graph.png`);
         a.setAttribute('href', imgURI);
         a.click();
-        showToast("Exported transaction flow graph as PNG image!", "success");
+        showToast("Graph saved as PNG.", "success");
       };
       img.src = url;
     } catch (err) {
@@ -195,7 +243,7 @@ export default function GraphCanvas({
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <h3 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Interactive Fund Flow Tracing</h3>
             <span className="badge-pill badge-pill-info">
-              {activeCase.nodes?.length || 0} Nodes • {activeCase.links?.length || 0} Hops
+              {activeCase.nodes?.length || 0} nodes · {activeCase.links?.length || 0} links
             </span>
           </div>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Pan canvas, scroll to zoom, drag nodes to re-position.</p>
@@ -222,7 +270,7 @@ export default function GraphCanvas({
           >
             <option value="all">All Types</option>
             <option value="suspect">Suspect / Input</option>
-            <option value="hop">Hop / Hub</option>
+            <option value="hop">Step / hub</option>
             <option value="receiver">End Receiver</option>
             <option value="mixer">Mixer</option>
           </select>
@@ -239,7 +287,7 @@ export default function GraphCanvas({
               title={isPlaying ? "Pause Flow Playback" : "Play Chronological Flow"}
             >
               {isPlaying ? <Pause size={12} /> : <Play size={12} />}
-              {isPlaying ? "Pause" : playbackStep !== null ? `Hop ${playbackStep + 1}/${activeCase.links?.length || 0}` : "Play Flow"}
+              {isPlaying ? "Pause" : playbackStep !== null ? `Step ${playbackStep + 1}/${activeCase.links?.length || 0}` : "Play"}
             </button>
 
             {playbackStep !== null && (
@@ -307,8 +355,53 @@ export default function GraphCanvas({
             title="Highlight Maximum-Value Money Flow Path from Source to Destination"
           >
             <GitCommit size={13} aria-hidden="true" />
-            {showCriticalTrail ? "Critical Trail Active" : "Critical Money Trail"}
+            {showCriticalTrail ? "Main trail on" : "Main trail"}
           </button>
+
+          <button
+            onClick={() => {
+              const next = !showTaintHeatmap;
+              setShowTaintHeatmap(next);
+              if (next) showToast(`Fund trace on (${TAINT_MODEL_LABELS[taintModel]}).`, "info");
+            }}
+            className={`btn ${showTaintHeatmap ? 'btn-danger pulse-glow-border' : 'btn-outline'}`}
+            type="button"
+            aria-pressed={showTaintHeatmap}
+            aria-label="Toggle fund tracing"
+            style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+            title="Show each wallet's share of traced funds"
+          >
+            <Flame size={13} style={{ color: showTaintHeatmap ? '#ef4444' : 'inherit' }} />
+            {showTaintHeatmap ? "Trace on" : "Trace"}
+          </button>
+
+          {showTaintHeatmap && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+              <select
+                value={taintModel}
+                onChange={(e) => {
+                  setTaintModel(e.target.value);
+                  showToast(`Tracing method: ${TAINT_MODEL_LABELS[e.target.value]}.`, "info");
+                }}
+                className="select-field"
+                style={{ fontSize: '0.725rem', padding: '0.2rem 0.4rem', height: '28px' }}
+                title="How traced funds spread across outputs"
+              >
+                <option value="proportionate">Shared</option>
+                <option value="fifo">Oldest first</option>
+                <option value="poison">Full spread</option>
+              </select>
+              <button
+                onClick={() => setShowTaintLedger(true)}
+                className="btn btn-outline"
+                type="button"
+                style={{ fontSize: '0.725rem', padding: '0.2rem 0.45rem', height: '28px', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                title="Open fund tracing ledger"
+              >
+                <Table size={12} /> Ledger
+              </button>
+            </div>
+          )}
 
           <button
             onClick={() => setHighlightReceiver(!highlightReceiver)}
@@ -317,8 +410,8 @@ export default function GraphCanvas({
             aria-pressed={highlightReceiver}
             aria-label="Toggle end receiver highlight"
           >
-            <Sparkles size={14} aria-hidden="true" /> 
-            {highlightReceiver ? "Receiver Located" : "Locate End Receiver"}
+            <Sparkles size={14} aria-hidden="true" />
+            {highlightReceiver ? "Receiver on" : "End receiver"}
           </button>
         </div>
       </div>
@@ -338,8 +431,8 @@ export default function GraphCanvas({
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             <AlertTriangle size={15} style={{ color: '#ef4444' }} />
-            <strong>Smurfing / Circular Washing Alert:</strong>
-            <span>Detected {detectedCycles.length} round-trip transaction cycle(s) routing back to previous nodes.</span>
+            <strong>Circular flow:</strong>
+            <span>{detectedCycles.length} cycle{detectedCycles.length === 1 ? '' : 's'} returning to earlier nodes.</span>
           </div>
           <span style={{ fontSize: '0.7rem', color: '#f87171', fontWeight: 600 }}>High Obfuscation Indicator</span>
         </div>
@@ -381,15 +474,15 @@ export default function GraphCanvas({
               border: '1px solid var(--border-color)',
               boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
             }}>
-              <button onClick={handleZoomIn} type="button" style={{ padding: '6px', border: 'none', background: 'none', color: 'var(--text-primary)', cursor: 'pointer' }} title="Zoom In" aria-label="Zoom In"><ZoomIn size={16} aria-hidden="true" /></button>
+              <button onClick={handleZoomIn} type="button" style={{ padding: '6px', border: 'none', background: 'none', color: 'var(--text-primary)', cursor: 'pointer' }} title="Zoom In (+)" aria-label="Zoom In"><ZoomIn size={16} aria-hidden="true" /></button>
               
               <span aria-live="polite" style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--primary)', padding: '2px 0' }}>
                 {Math.round(zoom * 100)}%
               </span>
 
-              <button onClick={handleZoomOut} type="button" style={{ padding: '6px', border: 'none', background: 'none', color: 'var(--text-primary)', cursor: 'pointer' }} title="Zoom Out" aria-label="Zoom Out"><ZoomOut size={16} aria-hidden="true" /></button>
-              <button onClick={handleCenterFit} type="button" style={{ padding: '6px', border: 'none', background: 'none', color: '#10b981', cursor: 'pointer' }} title="Center & Fit View" aria-label="Center and Fit View"><Focus size={15} aria-hidden="true" /></button>
-              <button onClick={resetView} type="button" style={{ padding: '6px', border: 'none', background: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }} title="Reset Layout" aria-label="Reset Zoom and Pan"><Activity size={14} aria-hidden="true" /></button>
+              <button onClick={handleZoomOut} type="button" style={{ padding: '6px', border: 'none', background: 'none', color: 'var(--text-primary)', cursor: 'pointer' }} title="Zoom Out (-)" aria-label="Zoom Out"><ZoomOut size={16} aria-hidden="true" /></button>
+              <button onClick={handleCenterFit} type="button" style={{ padding: '6px', border: 'none', background: 'none', color: '#10b981', cursor: 'pointer' }} title="Center View" aria-label="Center View"><Focus size={15} aria-hidden="true" /></button>
+              <button onClick={resetView} type="button" style={{ padding: '6px', border: 'none', background: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }} title="Reset Layout (0)" aria-label="Reset Layout"><Activity size={14} aria-hidden="true" /></button>
             </div>
 
             {/* End Receiver Forensic Highlight Banner Card */}
@@ -409,10 +502,10 @@ export default function GraphCanvas({
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
                   <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#eab308', letterSpacing: '0.05em', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                    <Sparkles size={14} /> End Receiver Identified
+                    <Sparkles size={14} /> End receiver found
                   </span>
                   <span style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem', backgroundColor: 'rgba(16, 185, 129, 0.15)', color: '#10b981', borderRadius: '4px', fontWeight: 700 }}>
-                    {activeCase.nodes.find(n => n.type === 'receiver')?.details.kycStatus || 'TERMINAL UTXO'}
+                    {activeCase.nodes.find(n => n.type === 'receiver')?.details.kycStatus || 'No end receiver yet'}
                   </span>
                 </div>
                 {activeCase.nodes.filter(n => n.type === 'receiver').map((rec, idx) => (
@@ -420,7 +513,7 @@ export default function GraphCanvas({
                     <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff' }}>{rec.entityName}</div>
                     <div className="mono-addr" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0.2rem 0' }}>{rec.details.address}</div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginTop: '0.25rem' }}>
-                      <span style={{ color: 'var(--text-muted)' }}>Settled Value:</span>
+                      <span style={{ color: 'var(--text-muted)' }}>Amount:</span>
                       <strong style={{ color: '#10b981' }}>{rec.balance}</strong>
                     </div>
                   </div>
@@ -444,7 +537,7 @@ export default function GraphCanvas({
                     gap: '0.25rem'
                   }}
                 >
-                  Draft NDPS Subpoena Notice <ChevronRight size={14} />
+                  Draft notice <ChevronRight size={14} />
                 </button>
               </div>
             )}
@@ -471,6 +564,12 @@ export default function GraphCanvas({
                 <marker id="arrow-glow" viewBox="0 0 10 10" refX="18" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
                   <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--primary)" />
                 </marker>
+                <marker id="arrow-taint-high" viewBox="0 0 10 10" refX="18" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#ef4444" />
+                </marker>
+                <marker id="arrow-taint-med" viewBox="0 0 10 10" refX="18" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b" />
+                </marker>
               </defs>
 
               {/* Transform group for panning and zooming */}
@@ -487,6 +586,9 @@ export default function GraphCanvas({
                   searchFilter={searchFilter}
                   typeFilter={typeFilter}
                   draggingNodeId={draggingNodeId}
+                  showTaintHeatmap={showTaintHeatmap}
+                  taintMap={taintMap}
+                  edgeTaintMap={edgeTaintMap}
                   onNodeMouseDown={handleNodeMouseDown}
                   onSelectNode={onSelectNode}
                 />
@@ -507,22 +609,145 @@ export default function GraphCanvas({
           borderRadius: '6px',
           border: '1px solid var(--border-color)',
           fontSize: '0.75rem',
-          backdropFilter: 'blur(4px)'
+          backdropFilter: 'blur(4px)',
+          flexWrap: 'wrap'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-            <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444' }}></span>
-            <span>Suspect / Input</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-            <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#3b82f6' }}></span>
-            <span>Output / Hop</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-            <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }}></span>
-            <span>Exchange Deposit</span>
-          </div>
+          {showTaintHeatmap ? (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444' }}></span>
+                <span style={{ color: '#ef4444', fontWeight: 600 }}>High (&gt;75%)</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#f59e0b' }}></span>
+                <span style={{ color: '#f59e0b', fontWeight: 600 }}>Medium (35-75%)</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }}></span>
+                <span style={{ color: '#10b981', fontWeight: 600 }}>Low (5-35%)</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#94a3b8' }}></span>
+                <span style={{ color: '#94a3b8' }}>Clean (&lt;5%)</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444' }}></span>
+                <span>Start / input</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#3b82f6' }}></span>
+                <span>Output / step</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }}></span>
+                <span>Exchange</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
+
+      {/* Fund tracing ledger modal */}
+      {showTaintLedger && (
+        <div 
+          role="dialog"
+          aria-modal="true"
+          aria-label="Fund tracing ledger"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(2, 6, 23, 0.85)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 9999,
+            padding: '1rem'
+          }}
+        >
+          <div className="glass-panel" style={{ width: '100%', maxWidth: '850px', maxHeight: '85vh', display: 'flex', flexDirection: 'column', gap: '1rem', padding: '1.5rem', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Flame style={{ color: '#ef4444' }} size={22} />
+                <div>
+                  <h3 style={{ fontSize: '1.15rem', fontWeight: 700 }}>Fund tracing ledger</h3>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                    Method: <strong style={{ color: '#fff' }}>{TAINT_MODEL_LABELS[taintModel]}</strong> • Case: {activeCase.id} ({activeCase.title})
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowTaintLedger(false)}
+                className="btn btn-outline"
+                type="button"
+                style={{ padding: '0.35rem 0.5rem' }}
+                aria-label="Close ledger"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                    <th style={{ padding: '0.5rem' }}>#</th>
+                    <th style={{ padding: '0.5rem' }}>Entity / Node</th>
+                    <th style={{ padding: '0.5rem' }}>Bitcoin Address</th>
+                    <th style={{ padding: '0.5rem' }}>Total Balance</th>
+                    <th style={{ padding: '0.5rem' }}>Traced satoshis</th>
+                    <th style={{ padding: '0.5rem' }}>Share</th>
+                    <th style={{ padding: '0.5rem' }}>Level</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {taintLedger.map((row) => (
+                    <tr key={row.nodeId} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                      <td style={{ padding: '0.5rem', color: 'var(--text-muted)' }}>{row.index}</td>
+                      <td style={{ padding: '0.5rem', fontWeight: 600 }}>{row.label}</td>
+                      <td style={{ padding: '0.5rem' }} className="mono-addr">{row.address ? `${row.address.slice(0, 8)}...${row.address.slice(-8)}` : row.nodeId}</td>
+                      <td style={{ padding: '0.5rem' }}>{row.balance}</td>
+                      <td style={{ padding: '0.5rem', fontFamily: 'monospace', color: row.taintedSats > 0 ? '#ef4444' : 'var(--text-muted)' }}>
+                        {row.taintedSats.toLocaleString()} satoshis
+                      </td>
+                      <td style={{ padding: '0.5rem', fontWeight: 700, color: row.tier.color }}>
+                        {row.taintPct}
+                      </td>
+                      <td style={{ padding: '0.5rem' }}>
+                        <span style={{ 
+                          padding: '0.15rem 0.45rem', 
+                          borderRadius: '4px', 
+                          fontSize: '0.7rem', 
+                          fontWeight: 700, 
+                          backgroundColor: row.tier.bg, 
+                          color: row.tier.color 
+                        }}>
+                          {row.tier.label}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '0.5rem', borderTop: '1px solid var(--border-color)', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+              <span>Record of traced fund shares per wallet.</span>
+              <button
+                onClick={() => setShowTaintLedger(false)}
+                className="btn btn-primary"
+                type="button"
+                style={{ fontSize: '0.75rem', padding: '0.35rem 0.8rem' }}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

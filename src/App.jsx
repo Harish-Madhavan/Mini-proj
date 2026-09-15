@@ -11,22 +11,25 @@ const Dashboard = lazy(() => import('./components/Dashboard'));
 const GraphExplorer = lazy(() => import('./components/GraphExplorer'));
 const OSINTIntegrator = lazy(() => import('./components/OSINTIntegrator'));
 const HeuristicClustering = lazy(() => import('./components/HeuristicClustering'));
+const SyndicateMap = lazy(() => import('./components/SyndicateMap'));
 const RiskAnalyzer = lazy(() => import('./components/RiskAnalyzer'));
 const ReportGenerator = lazy(() => import('./components/ReportGenerator'));
+const WatchlistMonitor = lazy(() => import('./components/WatchlistMonitor'));
 
 function RouteFallback() {
   return (
     <div className="glass-panel" style={{ padding: '2rem', display: 'flex', justifyContent: 'center', alignItems: 'center', color: 'var(--text-secondary)' }} aria-busy="true" aria-live="polite">
-      <span className="mono-addr" style={{ fontSize: '0.85rem' }}>Loading forensic module…</span>
+      <span className="mono-addr" style={{ fontSize: '0.85rem' }}>Loading…</span>
     </div>
   );
 }
-import { 
-  Shield, 
-  Layers, 
-  GitMerge, 
-  ShieldAlert, 
-  FileText, 
+import {
+  Shield,
+  Layers,
+  GitMerge,
+  Network,
+  ShieldAlert,
+  FileText,
   Globe,
   Radio,
   Wifi,
@@ -36,18 +39,20 @@ import {
 
 const NAV_ITEMS = [
   { id: 'dashboard', path: '/dashboard', label: 'Dashboard', icon: Shield },
-  { id: 'trace', path: '/trace', label: 'Fund Tracing Explorer', icon: Layers },
-  { id: 'osint', path: '/osint', label: 'OSINT & Subpoenas', icon: Globe },
-  { id: 'clustering', path: '/clustering', label: 'Wallet Clustering', icon: GitMerge },
-  { id: 'risk', path: '/risk', label: 'AI Risk Grading', icon: ShieldAlert },
-  { id: 'report', path: '/report', label: 'Forensic Report', icon: FileText }
+  { id: 'trace', path: '/trace', label: 'Tracing', icon: Layers },
+  { id: 'osint', path: '/osint', label: 'Notices', icon: Globe },
+  { id: 'clustering', path: '/clustering', label: 'Clustering', icon: GitMerge },
+  { id: 'syndicate', path: '/syndicate', label: 'Linked cases', icon: Network },
+  { id: 'risk', path: '/risk', label: 'Risk', icon: ShieldAlert },
+  { id: 'watchlist', path: '/watchlist', label: 'Watchlist', icon: Radio },
+  { id: 'report', path: '/report', label: 'Report', icon: FileText }
 ];
 
 function AppContent() {
   const { 
     activeCase, 
     liveMode, 
-    setLiveMode 
+    toggleLiveMode 
   } = useCase();
 
   const navigate = useNavigate();
@@ -62,7 +67,7 @@ function AppContent() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setIsCommandOpen(prev => !prev);
-      } else if (e.altKey && ['1', '2', '3', '4', '5', '6'].includes(e.key)) {
+      } else if (e.altKey && ['1', '2', '3', '4', '5', '6', '7', '8'].includes(e.key)) {
         e.preventDefault();
         const index = parseInt(e.key, 10) - 1;
         if (NAV_ITEMS[index]) {
@@ -99,11 +104,17 @@ function AppContent() {
               AEGISTRACE
             </h1>
             <p style={{ fontSize: '0.725rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-              <span>NCB Blockchain Forensics Terminal</span>
+              <span>NCB blockchain forensics</span>
               <span>•</span>
-              <span style={{ color: 'var(--risk-low)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-                <span className="live-beacon"></span> Live Connected
-              </span>
+              {liveMode ? (
+                <span style={{ color: 'var(--risk-low)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <span className="live-beacon"></span> Mainnet Active
+                </span>
+              ) : (
+                <span style={{ color: 'var(--risk-medium)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <span className="live-beacon" style={{ backgroundColor: '#f59e0b' }}></span> Local Sandbox (Offline)
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -135,25 +146,28 @@ function AppContent() {
           </button>
 
           <button
-            onClick={() => setLiveMode(!liveMode)}
-            className={`btn ${liveMode ? 'btn-outline' : ''}`}
+            onClick={toggleLiveMode}
+            className={`btn ${liveMode ? 'btn-outline' : 'btn-warning'}`}
             type="button"
             aria-pressed={liveMode}
-            aria-label={liveMode ? 'Switch to local mode' : 'Switch to mainnet connected mode'}
+            aria-label={liveMode ? 'Switch to offline mode' : 'Switch to live data mode'}
             style={{
               fontSize: '0.775rem',
               padding: '0.35rem 0.75rem'
             }}
+            title={liveMode ? "Live blockchain data on. Switch to offline mode." : "Offline mode. Switch to live data."}
           >
             {liveMode ? <Wifi size={13} aria-hidden="true" /> : <WifiOff size={13} aria-hidden="true" />}
-            {liveMode ? "Mainnet Connected" : "Local Mode"}
+            {liveMode ? "Live data" : "Offline"}
           </button>
           
           <div className="glass-panel" style={{ padding: '0.35rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.775rem', borderRadius: '8px' }}>
-            <span style={{ color: 'var(--text-muted)' }}>Query:</span>
-            <strong style={{ color: 'var(--primary)' }}>{activeCase.title}</strong>
-            <span style={{ fontSize: '0.675rem', backgroundColor: 'rgba(255,255,255,0.06)', padding: '0.1rem 0.3rem', borderRadius: '4px', color: 'var(--text-muted)' }}>
-              {activeCase.currency}
+            <span style={{ color: 'var(--text-muted)' }}>Case:</span>
+            <strong style={{ color: 'var(--primary)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={activeCase.title}>
+              {activeCase.title}
+            </strong>
+            <span style={{ fontSize: '0.675rem', backgroundColor: 'rgba(255,255,255,0.06)', padding: '0.1rem 0.35rem', borderRadius: '4px', color: 'var(--text-muted)' }}>
+              {activeCase.nodes?.length || 0} nodes · {activeCase.links?.length || 0} links
             </span>
           </div>
         </div>
@@ -190,7 +204,9 @@ function AppContent() {
               <Route path="/trace" element={<GraphExplorer />} />
               <Route path="/osint" element={<OSINTIntegrator />} />
               <Route path="/clustering" element={<HeuristicClustering />} />
+              <Route path="/syndicate" element={<SyndicateMap />} />
               <Route path="/risk" element={<RiskAnalyzer />} />
+              <Route path="/watchlist" element={<WatchlistMonitor />} />
               <Route path="/report" element={<ReportGenerator />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
@@ -201,7 +217,7 @@ function AppContent() {
       {/* Footer information */}
       <footer className="footer-bar" role="contentinfo">
         <span>{APP_METADATA.SYSTEM_VERSION}</span>
-        <span>Secure Session | Token Encryption: Active</span>
+        <span>Local session</span>
       </footer>
 
     </div>

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { createLiveTxCase, createAddressTraceCase, createAlgorithmicTraceCase } from './caseHelpers';
+import { 
+  createLiveTxCase, 
+  createAddressTraceCase, 
+  createAlgorithmicTraceCase, 
+  createCustomInvestigationCase 
+} from './caseHelpers';
 import { SCENARIOS } from '../data/scenarios';
 
 describe('caseHelpers utilities', () => {
@@ -39,5 +44,19 @@ describe('caseHelpers utilities', () => {
     expect(result1.scenarios[0].nodes.length).toBe(3);
     expect(result1.scenarios[0].links.length).toBe(2);
     expect(result1.scenarios[0].currency).toBe('BTC');
+  });
+
+  it('should create a valid custom investigation case', () => {
+    const custom = createCustomInvestigationCase({
+      title: 'Special Syndicate Alpha',
+      amount: '3.2000 BTC',
+      suspectAddress: 'bc1qcustomsuspect12345'
+    });
+
+    expect(custom.id).toMatch(/^case-custom-/);
+    expect(custom.title).toBe('Special Syndicate Alpha');
+    expect(custom.nodes.length).toBe(3);
+    expect(custom.links.length).toBe(2);
+    expect(custom.nodes[0].balance).toBe('3.2000 BTC');
   });
 });

@@ -5,8 +5,8 @@
 
 // Minimal demonstrator set (real deployments would load from FIU/OFAC feed)
 export const KNOWN_ENTITIES = [
-  { pattern: 'bc1qxy2k', label: 'NCB Demo: Monitored Suspect', category: 'watchlist', risk: 'high', note: 'Flagged in demo scenario — treat as high-priority' },
-  { pattern: '3E8t', label: 'Exchange Deposit (General)', category: 'exchange', risk: 'low', note: 'P2SH custodial pattern — verify KYC via VASP directory' },
+  { pattern: 'bc1qxy2k', label: 'Watched address', category: 'watchlist', risk: 'high', note: 'Saved for watching' },
+  { pattern: '3E8t', label: 'Exchange Deposit (General)', category: 'exchange', risk: 'low', note: 'Script-address pattern — verify identity via exchange directory' },
   { pattern: 'bc1p', label: 'Taproot Wallet', category: 'taproot', risk: 'info', note: 'BIP341 — may be exchange, multisig, or self-custody' },
   // Wasabi / JoinMarket coordinators leave equal-output fingerprints, not address — handled in CoinJoin detector
   { pattern: '1A1zP', label: 'Genesis (Educational)', category: 'historical', risk: 'low', note: 'Historical/educational — not tainted' },
@@ -20,7 +20,7 @@ export function tagKnownEntity(address) {
   }
   // Heuristic exchange tag for custodial-looking addresses (not in curated list but matches deposit script in traceHeuristics)
   if (trimmed.startsWith('3') || trimmed.startsWith('bc1p')) {
-    return { label: 'Potential Custodial Deposit', category: 'exchange-heuristic', risk: 'medium', note: 'Matches exchange script pattern — corroborate with subpoena' };
+    return { label: 'Possible exchange deposit', category: 'exchange-heuristic', risk: 'medium', note: 'Matches exchange address pattern — confirm with a notice' };
   }
   return null;
 }

@@ -91,12 +91,14 @@ export function computeLayeredGraphLayout(nodes = [], links = [], bounds = { wid
   }
   // If cycles prevented full topo, fall back to type-based rank for remaining nodes
   if (topo.length < nodes.length) {
-    const unranked = nodes.filter(n => !topo.includes(n.id));
-    // Place unranked at max rank + 1 bucketed by type
+    const topoSet = new Set(topo);
+    const unranked = nodes.filter(n => !topoSet.has(n.id));
+    // Place unranked past the ranked layers, bucketed by type so receivers
+    // stay rightmost and tx/mixer hubs sit one layer before them
     const maxRank = Math.max(0, ...Array.from(rank.values()));
     unranked.forEach(n => {
       if (n.type === 'receiver') rank.set(n.id, maxRank + 2);
-      else if (n.type === 'mixer' || n.id.startsWith('tx_')) rank.set(n.id, Math.min(maxRank + 1, maxRank));
+      else if (n.type === 'mixer' || n.id.startsWith('tx_')) rank.set(n.id, maxRank + 1);
       else rank.set(n.id, maxRank + 1);
     });
   }
@@ -138,11 +140,39 @@ export function computeLayeredGraphLayout(nodes = [], links = [], bounds = { wid
  * Find critical money trail — longest value path from source to sink.
  * Uses DP on DAG when graph is acyclic (O(V+E)), else Max-Heap search.
  */
+function parseLinkValue(value) {
+  return parseFloat(String(value || '0').replace(/[^0-9.]/g, '')) || 0;
+}
+
 export function findCriticalMoneyTrail(nodes = [], links = [], startNodeId = null, endNodeId = null) {
   if (!nodes.length || !links.length) return { path: [], totalValue: 0, linkIndices: [] };
 
-  const start = startNodeId || nodes.find(n => n.type === 'suspect' || n.id.startsWith('in_'))?.id || nodes[0].id;
-  const end = endNodeId || nodes.find(n => n.type === 'receiver' || n.id.startsWith('out_'))?.id || nodes[nodes.length - 1].id;
+  // Default endpoints: highest-outflow source and highest-inflow sink, so the
+  // trail follows the dominant money flow rather than whichever node the
+  // formatter happened to emit first.
+  const outflow = new Map();
+  const inflow = new Map();
+  links.forEach(l => {
+    const src = typeof l.source === 'object' ? l.source.id : l.source;
+    const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+    const v = parseLinkValue(l.value);
+    outflow.set(src, (outflow.get(src) || 0) + v);
+    inflow.set(tgt, (inflow.get(tgt) || 0) + v);
+  });
+  const pickMax = (candidates, volumes, fallbackId) => {
+    let best = null;
+    let bestVol = -1;
+    for (const n of candidates) {
+      const v = volumes.get(n.id) || 0;
+      if (v > bestVol) { bestVol = v; best = n.id; }
+    }
+    return best || fallbackId;
+  };
+
+  const start = startNodeId
+    || pickMax(nodes.filter(n => n.type === 'suspect' || n.id.startsWith('in_')), outflow, nodes[0].id);
+  const end = endNodeId
+    || pickMax(nodes.filter(n => n.type === 'receiver' || n.id.startsWith('out_')), inflow, nodes[nodes.length - 1].id);
 
   const idSet = new Set(nodes.map(n => n.id));
   const adj = new Map();
@@ -302,21 +332,26 @@ export function detectCircularFlows(nodes = [], links = []) {
 export function computeNodeCentralityMetrics(nodes = [], links = []) {
   const metrics = {};
   nodes.forEach(n => {
-    metrics[n.id] = { inDegree: 0, outDegree: 0, totalDegree: 0, throughputBtc: 0, throughputShare: 0, isHub: false };
+    metrics[n.id] = { inDegree: 0, outDegree: 0, totalDegree: 0, inBtc: 0, outBtc: 0, throughputBtc: 0, throughputShare: 0, isHub: false };
   });
   let totalVolume = 0;
   links.forEach(l => {
     const src = typeof l.source === 'object' ? l.source.id : l.source;
     const tgt = typeof l.target === 'object' ? l.target.id : l.target;
-    const val = parseFloat(String(l.value || '0').replace(/[^0-9.]/g, '')) || 0;
+    const val = parseLinkValue(l.value);
     totalVolume += val;
-    if (metrics[src]) { metrics[src].outDegree++; metrics[src].totalDegree++; metrics[src].throughputBtc += val; }
-    if (metrics[tgt]) { metrics[tgt].inDegree++; metrics[tgt].totalDegree++; metrics[tgt].throughputBtc += val; }
+    if (metrics[src]) { metrics[src].outDegree++; metrics[src].totalDegree++; metrics[src].outBtc += val; }
+    if (metrics[tgt]) { metrics[tgt].inDegree++; metrics[tgt].totalDegree++; metrics[tgt].inBtc += val; }
   });
   Object.keys(metrics).forEach(id => {
     const m = metrics[id];
-    m.throughputBtc = parseFloat(m.throughputBtc.toFixed(4));
-    m.throughputShare = totalVolume > 0 ? parseFloat((m.throughputBtc / totalVolume).toFixed(3)) : 0;
+    m.inBtc = parseFloat(m.inBtc.toFixed(4));
+    m.outBtc = parseFloat(m.outBtc.toFixed(4));
+    // Throughput counts both directions, so normalize against 2x total volume
+    // — otherwise per-node shares sum to ~200% and every mid-chain hop looks
+    // like a dominant hub.
+    m.throughputBtc = parseFloat((m.inBtc + m.outBtc).toFixed(4));
+    m.throughputShare = totalVolume > 0 ? parseFloat((m.throughputBtc / (2 * totalVolume)).toFixed(3)) : 0;
     m.isHub = m.totalDegree >= 3 || (m.inDegree >= 2 && m.outDegree >= 1) || m.throughputShare > 0.3;
   });
   return metrics;

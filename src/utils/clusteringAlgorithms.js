@@ -82,6 +82,13 @@ export class DisjointSetUnion {
 }
 
 /**
+ * Standard CoinJoin pool denominations in satoshis (Wasabi 1.0 / Whirlpool).
+ * Mirrors COINJOIN_POOLS_SATS in obfuscationForensics (kept local so this
+ * module stays dependency-free).
+ */
+const STANDARD_MIX_POOLS_SATS = new Set([500000, 1000000, 5000000, 10000000, 50000000]);
+
+/**
  * Calculate Shannon Entropy of transaction outputs to measure mixing quality / anonymity set.
  * H(X) = - sum(p(x) * log2(p(x))) where p(x) = val / sum(val)
  * Higher entropy -> higher privacy / obfuscation (equal-value splits).
@@ -112,13 +119,25 @@ export function calculateCoinJoinEntropy(outputs = []) {
   const maxPossibleEntropy = Math.log2(validOutputs.length);
   const anonymityRatio = maxPossibleEntropy > 0 ? (entropy / maxPossibleEntropy) : 0;
 
-  // Check for equal-denomination outputs
+  // Check for equal-denomination outputs. A coincidental pair inside a large
+  // batch is NOT mixing (cf. real 8-in-147-out batch with one triple that the
+  // old >=2 rule misflagged): the dominant group must OWN a substantial share
+  // of outputs. False positives are costlier than misses here — a false mix
+  // HALTS the trace and poisons taint, while a missed mix merely traces through.
   const valueFrequencies = {};
   validOutputs.forEach(o => {
     valueFrequencies[o.value] = (valueFrequencies[o.value] || 0) + 1;
   });
-  const maxEqualOutputs = Math.max(0, ...Object.values(valueFrequencies));
-  const isCoinJoin = maxEqualOutputs >= 2 && anonymityRatio > 0.85;
+  let modalValue = 0;
+  let maxEqualOutputs = 0;
+  for (const [val, count] of Object.entries(valueFrequencies)) {
+    if (count > maxEqualOutputs) { maxEqualOutputs = count; modalValue = Number(val); }
+  }
+  const dominantShare = validOutputs.length > 0 ? maxEqualOutputs / validOutputs.length : 0;
+  // Pool lane is share-gated too: a handful of round-denomination outputs
+  // inside a large batch (payroll, faucet drips) is not a CoinJoin.
+  const isCoinJoin = (maxEqualOutputs >= 3 && dominantShare >= 0.2)
+    || (maxEqualOutputs >= 2 && dominantShare >= 0.1 && STANDARD_MIX_POOLS_SATS.has(modalValue));
 
   return {
     entropy: parseFloat(entropy.toFixed(3)),
@@ -136,6 +155,24 @@ export function calculateCoinJoinEntropy(outputs = []) {
  * @param {Array<Object>} transactionHistory - List of transactions with vin arrays
  * @returns {Object} Comprehensive cluster analysis report
  */
+/**
+ * Stable 53-bit string hash (cyrb53) rendered as fixed-width hex.
+ * Unlike `(seed << 5)` accumulation it cannot overflow to -2^31 (where
+ * Math.abs is a no-op) and always yields the same digest length.
+ */
+function stableClusterHash(str) {
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (h2 >>> 0).toString(16).padStart(8, '0').toUpperCase() +
+    (h1 >>> 0).toString(16).padStart(8, '0').toUpperCase();
+}
+
 export function computeAddressClusters(addresses = [], transactionHistory = []) {
   if (!addresses || addresses.length === 0) {
     return null;
@@ -143,6 +180,7 @@ export function computeAddressClusters(addresses = [], transactionHistory = []) 
 
   const dsu = new DisjointSetUnion();
   addresses.forEach(addr => dsu.makeSet(addr));
+  const addressSet = new Set(addresses);
 
   const coSpentTransactions = [];
   const sharedTxFrequency = {};
@@ -154,7 +192,7 @@ export function computeAddressClusters(addresses = [], transactionHistory = []) 
       .map(v => v.prevout?.scriptpubkey_address || v.address)
       .filter(Boolean);
 
-    const relevantInputs = inputAddrs.filter(addr => addresses.includes(addr));
+    const relevantInputs = inputAddrs.filter(addr => addressSet.has(addr));
 
     if (relevantInputs.length >= 2) {
       coSpentTransactions.push({
@@ -175,43 +213,40 @@ export function computeAddressClusters(addresses = [], transactionHistory = []) 
   const clusters = dsu.getClusters();
 
   // Generate deterministic cluster identifier
-  let seed = 0;
-  addresses.forEach(a => {
-    for (let i = 0; i < a.length; i++) seed = (seed << 5) - seed + a.charCodeAt(i);
-  });
-  const clusterHash = Math.abs(seed).toString(16).toUpperCase().padStart(6, '0');
+  const clusterHash = stableClusterHash([...addresses].sort().join('|')).slice(0, 8);
 
   // Script type and format analysis
   const hasSegwit = addresses.some(a => a.startsWith('bc1q') || a.startsWith('bc1p'));
   const hasLegacy = addresses.some(a => a.startsWith('1'));
   const hasP2SH = addresses.some(a => a.startsWith('3'));
 
-  // Calculate multi-dimensional cluster confidence score
-  let confidence = 80;
+  // Confidence must be *earned* by on-chain evidence: a pool with zero
+  // co-spends is an unproven hypothesis, not an 80% attribution.
+  let confidence = 50;
   if (coSpentTransactions.length > 0) {
-    confidence += Math.min(15, coSpentTransactions.length * 5);
+    confidence += Math.min(30, coSpentTransactions.length * 15);
   }
   if (hasSegwit && !hasLegacy) confidence += 4;
   if (addresses.length >= 3) confidence += 3;
-  confidence = Math.min(99, Math.max(65, confidence));
+  confidence = Math.min(99, Math.max(30, confidence));
 
   const heuristicsApplied = [];
   if (coSpentTransactions.length > 0) {
-    heuristicsApplied.push(`Blockchain Verified CIOH: ${coSpentTransactions.length} co-spending transaction inputs`);
+    heuristicsApplied.push(`Verified: ${coSpentTransactions.length} joint transactions`);
   } else {
-    heuristicsApplied.push(`Common Input Ownership Heuristic (CIOH pattern over ${addresses.length} addresses)`);
+    heuristicsApplied.push(`Shared-spending pattern across ${addresses.length} addresses`);
   }
 
   if (hasSegwit && !hasLegacy) {
-    heuristicsApplied.push("Homogeneous SegWit (Bech32/Bech32m) Script Alignment");
+    heuristicsApplied.push("Same address type (SegWit)");
   } else if (hasLegacy) {
-    heuristicsApplied.push("Legacy Base58 P2PKH Pattern Alignment");
+    heuristicsApplied.push("Same address type (legacy)");
   } else if (hasP2SH) {
-    heuristicsApplied.push("P2SH Multi-Signature / Nested SegWit Alignment");
+    heuristicsApplied.push("Same address type (script)");
   }
 
-  heuristicsApplied.push("Peeling Chain Change Output Reuse Heuristic");
-  heuristicsApplied.push("Time-Lock Delta & Gas Fee Preference Correlation");
+  heuristicsApplied.push("Change reuse pattern");
+  heuristicsApplied.push("Timing and fee pattern");
 
   return {
     clusterId: `CLUS-BTC-${clusterHash}`,
@@ -223,6 +258,73 @@ export function computeAddressClusters(addresses = [], transactionHistory = []) 
     coSpentTransactions,
     addresses: [...addresses]
   };
+}
+
+/**
+ * Effective fee rate of a transaction in sat/vB.
+ */
+export function txFeeRateSatVb(tx) {
+  if (!tx || !Number.isFinite(tx.fee)) return null;
+  const vsize = tx.weight ? Math.ceil(tx.weight / 4) : (tx.vsize || tx.size || 0);
+  if (!vsize || vsize <= 0) return null;
+  return tx.fee / vsize;
+}
+
+/**
+ * Fee-fingerprint similarity: wallets betray themselves through fee habits —
+ * the same operator's transactions cluster around preferred sat/vB tiers and
+ * input counts even when addresses never co-spend. Compares two transactions
+ * and returns a same-wallet likelihood.
+ *
+ * @returns {{ similarity: number, verdict: 'SAME_WALLET_LIKELY'|'INCONCLUSIVE'|'DISTINCT_WALLETS', rateA: number|null, rateB: number|null }}
+ */
+export function feeFingerprintSimilarity(txA, txB) {
+  const rateA = txFeeRateSatVb(txA);
+  const rateB = txFeeRateSatVb(txB);
+  if (rateA == null || rateB == null || rateA <= 0 || rateB <= 0) {
+    return { similarity: 0, verdict: 'INCONCLUSIVE', rateA, rateB };
+  }
+
+  // Log-distance: fee tiers are multiplicative (1 / 10 / 100 sat/vB regimes)
+  const logDist = Math.abs(Math.log10(rateA) - Math.log10(rateB));
+  const rateComponent = Math.max(0, 1 - logDist / 1.5); // 1.5 orders of magnitude apart => unrelated
+
+  // Structural bonus: same input-count class (single / few / batch) suggests one wallet's coin selection
+  const classOf = (n) => (n <= 1 ? 0 : n <= 3 ? 1 : 2);
+  const insA = (txA.vin || []).length;
+  const insB = (txB.vin || []).length;
+  const structureBonus = classOf(insA) === classOf(insB) ? 0.15 : -0.1;
+
+  const similarity = parseFloat(Math.min(1, Math.max(0, 0.15 + rateComponent * 0.7 + structureBonus)).toFixed(2));
+  const verdict = similarity >= 0.7 ? 'SAME_WALLET_LIKELY' : similarity >= 0.4 ? 'INCONCLUSIVE' : 'DISTINCT_WALLETS';
+  return { similarity, verdict, rateA: parseFloat(rateA.toFixed(2)), rateB: parseFloat(rateB.toFixed(2)) };
+}
+
+/**
+ * Measure funds received by an address pool across fetched transactions.
+ * Credits only (outputs paying pool addresses) — never netted, because
+ * address-history windows are partial and unseen older credits would push
+ * naive balances negative. Returns observed coverage alongside the total so
+ * callers can say "received X across N checked transactions" instead of
+ * inventing a balance.
+ *
+ * @returns {{ totalSats: number, perAddressSats: object, observedTxCount: number }}
+ */
+export function estimatePoolReceived(addresses = [], transactions = []) {
+  const pool = new Set(addresses);
+  const perAddressSats = {};
+  let totalSats = 0;
+  const txs = Array.isArray(transactions) ? transactions : [];
+  for (const tx of txs) {
+    for (const o of tx?.vout || []) {
+      const addr = o?.scriptpubkey_address;
+      if (addr && pool.has(addr) && Number.isFinite(o.value) && o.value > 0) {
+        totalSats += o.value;
+        perAddressSats[addr] = (perAddressSats[addr] || 0) + o.value;
+      }
+    }
+  }
+  return { totalSats, perAddressSats, observedTxCount: txs.length };
 }
 
 /**
@@ -314,13 +416,15 @@ export function detectPeelingChain(transactions = []) {
     ? parseFloat((peelPercentages.reduce((a, b) => a + b, 0) / peelPercentages.length).toFixed(1))
     : 0;
 
+  // Population std-dev of peel percentages, computed once and reused below
+  const peelStdDev = peelPercentages.length > 1
+    ? parseFloat((Math.sqrt(peelPercentages.reduce((s, v) => s + Math.pow(v - avgPeel, 2), 0) / peelPercentages.length)).toFixed(1))
+    : 0;
+
   // Confidence: base 60 + hops, plus consistency bonus (low variance in peel %), plus decay consistency
   let confidence = 0;
   if (isPeeling) {
-    const variance = peelPercentages.length > 1
-      ? Math.sqrt(peelPercentages.reduce((s, v) => s + Math.pow(v - avgPeel, 2), 0) / peelPercentages.length)
-      : 0;
-    const consistencyBonus = variance < 8 ? 12 : variance < 15 ? 6 : 0;
+    const consistencyBonus = peelStdDev < 8 ? 12 : peelStdDev < 15 ? 6 : 0;
     const decayBonus = hopDetails.length >= 3 && hopDetails.every((h, i) => i === 0 || h.changeValue <= hopDetails[i - 1].changeValue) ? 8 : 0;
     confidence = Math.min(96, 58 + peelingHopCount * 9 + consistencyBonus + decayBonus);
   }
@@ -330,6 +434,6 @@ export function detectPeelingChain(transactions = []) {
     hopCount: peelingHopCount,
     averagePeelPercent: avgPeel,
     confidence,
-    details: { hops: hopDetails, variance: peelPercentages.length > 1 ? parseFloat((Math.sqrt(peelPercentages.reduce((s, v) => s + Math.pow(v - avgPeel, 2), 0) / peelPercentages.length)).toFixed(1)) : 0 }
+    details: { hops: hopDetails, variance: peelStdDev }
   };
 }

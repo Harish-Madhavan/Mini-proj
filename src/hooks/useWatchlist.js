@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { safeGetItem, safeSetItem } from '../utils/storage';
+import { isJoinableAddress } from '../utils/syndicateAnalysis';
 
 const STORAGE_KEY = 'aegistrace_watchlist';
 const MAX_WATCH = 100;
@@ -20,27 +21,26 @@ export function useWatchlist() {
   }, [watchlist]);
 
   const toggle = useCallback((address) => {
-    if (!address || typeof address !== 'string') return false;
+    // Returns 'added' | 'removed' | 'invalid' | 'full'. Decided BEFORE
+    // setState: reading a flag written inside the updater always returns the
+    // stale value, since updaters run async during re-render.
+    if (!isJoinableAddress(address)) return 'invalid';
     const trimmed = address.trim();
-    if (!trimmed) return false;
-    let nextWatched = false;
-    setWatchlist(prev => {
-      if (prev.includes(trimmed)) {
-        nextWatched = false;
-        return prev.filter(a => a !== trimmed);
-      }
-      if (prev.length >= MAX_WATCH) return prev;
-      nextWatched = true;
-      return [...prev, trimmed];
-    });
-    return nextWatched;
-  }, []);
+    if (watchlist.includes(trimmed)) {
+      setWatchlist(prev => prev.filter(a => a !== trimmed));
+      return 'removed';
+    }
+    if (watchlist.length >= MAX_WATCH) return 'full';
+    setWatchlist(prev => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
+    return 'added';
+  }, [watchlist]);
 
   const add = useCallback((address) => {
-    if (!address) return;
+    if (!isJoinableAddress(address)) return false;
     const t = address.trim();
-    if (!t || watchlist.includes(t) || watchlist.length >= MAX_WATCH) return;
-    setWatchlist(prev => [...prev, t]);
+    if (watchlist.includes(t) || watchlist.length >= MAX_WATCH) return false;
+    setWatchlist(prev => (prev.includes(t) ? prev : [...prev, t]));
+    return true;
   }, [watchlist]);
 
   const remove = useCallback((address) => {

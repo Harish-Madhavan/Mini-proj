@@ -2,7 +2,12 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { SCENARIOS } from '../data/scenarios';
 import { traceEndReceiver, fetchAddressTxs, formatBlockstreamTx } from '../utils/bitcoinApi';
-import { createLiveTxCase, createAddressTraceCase, createAlgorithmicTraceCase } from '../utils/caseHelpers';
+import { 
+  createLiveTxCase, 
+  createAddressTraceCase, 
+  createAlgorithmicTraceCase, 
+  createCustomInvestigationCase 
+} from '../utils/caseHelpers';
 import { useToast } from '../hooks/useToast';
 import { CaseContext } from './CaseContextObject';
 import { safeGetItem, safeSetItem, safeRemoveItem } from '../utils/storage';
@@ -35,14 +40,8 @@ export function CaseProvider({ children }) {
 
   const [activeCaseId, setActiveCaseId] = useState(() => {
     const saved = safeGetItem('aegistrace_activeCaseId', null);
-    // safeGetItem already parses; if string saved directly fallback to raw localStorage string
     if (typeof saved === 'string' && saved) return saved;
-    try {
-      const raw = localStorage.getItem('aegistrace_activeCaseId');
-      return raw ? JSON.parse(raw) : SCENARIOS[0].id;
-    } catch {
-      return SCENARIOS[0].id;
-    }
+    return SCENARIOS[0].id;
   });
 
   const [liveMode, setLiveMode] = useState(true);
@@ -54,11 +53,7 @@ export function CaseProvider({ children }) {
   }, [scenarios]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('aegistrace_activeCaseId', JSON.stringify(activeCaseId));
-    } catch (e) {
-      console.warn("Could not save activeCaseId to localStorage", e);
-    }
+    safeSetItem('aegistrace_activeCaseId', activeCaseId);
   }, [activeCaseId]);
 
   const activeCase = useMemo(() => scenarios.find(s => s.id === activeCaseId) || scenarios[0] || SCENARIOS[0], [scenarios, activeCaseId]);
@@ -67,7 +62,7 @@ export function CaseProvider({ children }) {
     try {
       const filename = `aegistrace-cases-export-${new Date().toISOString().slice(0, 10)}.json`;
       downloadJson(scenarios, filename);
-      showToast("Case investigation data exported successfully!", "success");
+      showToast("Cases exported.", "success");
     } catch (err) {
       showToast(`Export failed: ${err.message}`, "error");
     }
@@ -92,11 +87,11 @@ export function CaseProvider({ children }) {
         if (valid.length < jsonObj.length) showToast(`Skipped ${jsonObj.length - valid.length} invalid case(s).`, "warning");
         setScenarios(valid);
         setActiveCaseId(valid[0].id);
-        showToast(`Imported ${valid.length} investigation case(s) successfully!`, "success");
+        showToast(`Imported ${valid.length} case(s).`, "success");
       } else if (isValidCaseShape(jsonObj)) {
         setScenarios(prev => [jsonObj, ...prev.filter(s => s.id !== jsonObj.id)].slice(0, MAX_SCENARIOS));
         setActiveCaseId(jsonObj.id);
-        showToast(`Case "${jsonObj.title || jsonObj.id}" imported successfully!`, "success");
+        showToast(`Imported case "${jsonObj.title || jsonObj.id}".`, "success");
       } else {
         showToast("Invalid case file format: missing id/nodes/links.", "error");
       }
@@ -108,114 +103,33 @@ export function CaseProvider({ children }) {
   const handleDeleteCase = useCallback((caseIdToDelete) => {
     setScenarios(prev => {
       if (prev.length <= 1) {
-        showToast("Cannot delete the only remaining case in session.", "warning");
+        showToast("Cannot delete the last case.", "warning");
         return prev;
       }
       const updated = prev.filter(s => s.id !== caseIdToDelete);
       if (activeCaseId === caseIdToDelete && updated[0]) {
         setActiveCaseId(updated[0].id);
       }
-      showToast("Case removed from active session.", "info");
+      showToast("Case removed.", "info");
       return updated;
     });
   }, [activeCaseId, showToast]);
 
   const handleCreateCustomCase = useCallback((newCaseData) => {
-    const caseId = `case-custom-${Date.now().toString(36)}`;
-    const suspectAddr = newCaseData.suspectAddress || 'bc1q999customtargetaddressforensicset';
-    const amount = newCaseData.amount || '5.5000 BTC';
-    const receiverAddr = newCaseData.receiverAddress || 'bc1qdepositaddressforensictarget999';
-
-    const customCase = {
-      id: caseId,
-      title: newCaseData.title || `Custom Case ${caseId.slice(-6).toUpperCase()}`,
-      currency: "BTC",
-      initialTxHash: newCaseData.txHash || "custom_tx_hash_placeholder",
-      suspectName: newCaseData.suspectName || "Custom Target Entity",
-      description: newCaseData.description || "Manually assembled forensic investigation case.",
-      riskScore: newCaseData.riskScore || 85,
-      nodes: [
-        {
-          id: "custom_suspect",
-          label: "Origin Input",
-          type: "suspect",
-          entityName: newCaseData.suspectName || "Target Suspect",
-          balance: amount,
-          risk: "critical",
-          details: {
-            address: suspectAddr,
-            ipLog: "103.241.12.89 (P2P Broadcast)",
-            lastActive: "Recent On-Chain Activity",
-            kycStatus: "UNREGISTERED NON-KYC",
-            scriptStandard: "Native SegWit (v0 P2WPKH)",
-            riskReason: "Originating wallet identified in initial intelligence dossier."
-          }
-        },
-        {
-          id: "custom_hop_1",
-          label: "Layering Hop 1",
-          type: "hop",
-          entityName: "Transit Peeling Node",
-          balance: amount,
-          risk: "medium",
-          details: {
-            address: `bc1qhop${Date.now().toString(36)}transithopaddr`,
-            ipLog: "P2P Relay Peer",
-            lastActive: "Structured Routing",
-            kycStatus: "UNLINKED UTXO",
-            scriptStandard: "SegWit Script",
-            riskReason: "Peeling chain change address for value obfuscation."
-          }
-        },
-        {
-          id: "custom_receiver",
-          label: "Exchange Terminal",
-          type: "receiver",
-          entityName: newCaseData.targetExchange || "WazirX India Deposit Point",
-          balance: amount,
-          risk: "low",
-          details: {
-            address: receiverAddr,
-            ipLog: "122.161.49.5 (Gateway Login)",
-            lastActive: "Active Deposit Point",
-            kycStatus: "SUBPOENA READY (KYC ON FILE)",
-            ownerName: "Attributed User Record",
-            kycDocumentId: "NCB-SUBPOENA-REF",
-            scriptStandard: "Pay-to-Script-Hash",
-            riskReason: "Terminal deposit endpoint resolving to FIU-registered exchange KYC."
-          }
-        }
-      ],
-      links: [
-        {
-          source: "custom_suspect",
-          target: "custom_hop_1",
-          value: amount,
-          timestamp: "Block Confirmed"
-        },
-        {
-          source: "custom_hop_1",
-          target: "custom_receiver",
-          value: amount,
-          timestamp: "Settlement Confirmed"
-        }
-      ]
-    };
-
-    setScenarios(prev => [customCase, ...prev]);
-    setActiveCaseId(caseId);
+    const customCase = createCustomInvestigationCase(newCaseData);
+    setScenarios(prev => [customCase, ...prev].slice(0, MAX_SCENARIOS));
+    setActiveCaseId(customCase.id);
     setActiveTab('trace');
-    showToast(`Created investigation case "${customCase.title}"`, "success");
+    showToast(`Created case "${customCase.title}"`, "success");
   }, [setActiveTab, showToast]);
 
   const handleResetCases = useCallback(() => {
-    if (window.confirm("Reset all investigation traces to default state?")) {
+    if (window.confirm("Reset all cases?")) {
       setScenarios(SCENARIOS);
       setActiveCaseId(SCENARIOS[0].id);
       safeRemoveItem('aegistrace_scenarios');
       safeRemoveItem('aegistrace_activeCaseId');
-      try { localStorage.removeItem('aegistrace_activeCaseId'); } catch { /* ignore */ }
-      showToast("Reset all investigation traces to defaults.", "info");
+      showToast("Cases reset.", "info");
     }
   }, [showToast]);
 
@@ -233,46 +147,68 @@ export function CaseProvider({ children }) {
     });
     setActiveTab('trace');
     if (reasonMessage) {
-      showToast(`Mainnet Note: ${reasonMessage}. Generated algorithmic trace model.`, "warning");
+      showToast(`Note: ${reasonMessage}. Made an offline estimate.`, "warning");
     } else {
-      showToast(`Generated algorithmic trace for query: ${searchVal.slice(0, 12)}...`, "info");
+      showToast(`Made an offline estimate for: ${searchVal.slice(0, 12)}...`, "info");
     }
   }, [setActiveTab, showToast]);
+
+  const toggleLiveMode = useCallback(() => {
+    setLiveMode(prev => {
+      const next = !prev;
+      showToast(
+        next ? "Live data on." : "Offline mode on.",
+        next ? "success" : "info"
+      );
+      return next;
+    });
+  }, [showToast]);
 
   const handleSearch = useCallback(async (searchVal) => {
     const trimmed = searchVal.trim();
     if (!trimmed) return;
 
-    setIsLoadingLive(true);
     setActiveTab('trace');
+
+    // If in offline mode, immediately produce an offline estimate
+    if (!liveMode) {
+      generateAlgorithmicTrace(trimmed, "Offline mode is on");
+      return;
+    }
+
+    setIsLoadingLive(true);
 
     try {
       if (trimmed.length === 64 && /^[0-9a-fA-F]+$/.test(trimmed)) {
-        showToast(`Tracing Tx outspends on Bitcoin mainnet (depth: ${traceDepth})...`, "info", 2500);
+        showToast(`Tracing live (depth: ${traceDepth})...`, "info", 2500);
         const formatted = await traceEndReceiver(trimmed, traceDepth);
+        if (!formatted.nodes?.length) {
+          throw new Error(`No trace data for ${trimmed.slice(0, 12)}...`);
+        }
         setScenarios(prev => {
           const res = createLiveTxCase(trimmed, formatted, prev);
           queueMicrotask(() => setActiveCaseId(res.newCaseId));
           return res.scenarios.slice(0, MAX_SCENARIOS);
         });
-        setLiveMode(true);
-        showToast("Mainnet transaction trace completed!", "success");
+        showToast("Trace complete.", "success");
       } 
       else if (trimmed.startsWith('bc1') || trimmed.startsWith('1') || trimmed.startsWith('3')) {
-        showToast("Querying address history on Bitcoin mainnet...", "info", 2500);
+        showToast("Looking up address history...", "info", 2500);
         const txs = await fetchAddressTxs(trimmed);
         if (txs && txs.length > 0) {
           const latestTx = txs[0];
           const formatted = await traceEndReceiver(latestTx.txid, traceDepth);
+          if (!formatted.nodes?.length) {
+            throw new Error(`No trace data for ${trimmed.slice(0, 12)}...`);
+          }
           setScenarios(prev => {
             const res = createAddressTraceCase(trimmed, txs.length, latestTx.txid, formatted, prev);
             queueMicrotask(() => setActiveCaseId(res.newCaseId));
             return res.scenarios.slice(0, MAX_SCENARIOS);
           });
-          setLiveMode(true);
-          showToast("Mainnet address trace completed!", "success");
+          showToast("Trace complete.", "success");
         } else {
-          generateAlgorithmicTrace(trimmed, "No outgoing transactions found on mainnet");
+          generateAlgorithmicTrace(trimmed, "No outgoing transactions found");
         }
       } else {
         generateAlgorithmicTrace(trimmed);
@@ -283,19 +219,25 @@ export function CaseProvider({ children }) {
     } finally {
       setIsLoadingLive(false);
     }
-  }, [traceDepth, generateAlgorithmicTrace, setActiveTab, showToast]);
+  }, [liveMode, traceDepth, generateAlgorithmicTrace, setActiveTab, showToast]);
 
   const handleExpandAddress = useCallback(async (address) => {
     if (!address || typeof address !== 'string' || address.trim().length < 10) {
       showToast("Invalid address for expansion.", "warning");
       return;
     }
+
+    if (!liveMode) {
+      showToast("Address expansion needs live data mode.", "warning");
+      return;
+    }
+
     setIsLoadingLive(true);
     try {
       showToast(`Fetching outgoing transactions for ${address.slice(0, 8)}...`, "info", 2500);
       const txs = await fetchAddressTxs(address);
       if (!txs || txs.length === 0) {
-        showToast("No outgoing transactions found for this address on Bitcoin Mainnet.", "warning");
+        showToast("No outgoing transactions found for this address.", "warning");
         return;
       }
 
@@ -319,13 +261,13 @@ export function CaseProvider({ children }) {
         });
         return { ...s, nodes: existingNodes, links: existingLinks };
       }));
-      showToast("Expanded address hops successfully!", "success");
+      showToast("Address expanded.", "success");
     } catch (err) {
       showToast(`Error expanding address: ${err.message}`, "error");
     } finally {
       setIsLoadingLive(false);
     }
-  }, [activeCase?.id, showToast]);
+  }, [liveMode, activeCase?.id, showToast]);
 
   const handleAddCaseNote = useCallback((noteText, author = "Investigating Officer") => {
     if (!noteText || !noteText.trim()) return;
@@ -337,12 +279,12 @@ export function CaseProvider({ children }) {
       content: trimmed
     };
     setScenarios(prev => prev.map(s => s.id === activeCase.id ? { ...s, notesList: [newNote, ...(s.notesList || [])].slice(0, 100) } : s));
-    showToast("Added field note to active case log.", "success");
+    showToast("Note added.", "success");
   }, [activeCase?.id, showToast]);
 
   const handleDeleteCaseNote = useCallback((noteId) => {
     setScenarios(prev => prev.map(s => s.id === activeCase.id ? { ...s, notesList: (s.notesList || []).filter(n => n.id !== noteId) } : s));
-    showToast("Removed field note.", "info");
+    showToast("Note removed.", "info");
   }, [activeCase?.id, showToast]);
 
   const value = {
@@ -356,6 +298,7 @@ export function CaseProvider({ children }) {
     setTraceDepth,
     setActiveTab,
     setLiveMode,
+    toggleLiveMode,
     handleExportCase,
     handleImportCase,
     handleDeleteCase,

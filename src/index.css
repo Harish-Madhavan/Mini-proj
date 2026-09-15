@@ -326,6 +326,13 @@ body {
 
 .moving-dash {
   stroke-dasharray: 4;
+  animation: dash-flow 0.6s linear infinite;
+}
+
+@keyframes dash-flow {
+  to {
+    stroke-dashoffset: -8;
+  }
 }
 
 .pulse-glow-border {
@@ -442,4 +449,22 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Responsive split-screen layouts */
+@media (max-width: 1080px) {
+  .responsive-split-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Minimalist interaction transitions */
+.btn, .input-field, .select-field, .nav-item {
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+/* Polished monospace rendering for crypto hashes and addresses */
+.mono-addr {
+  letter-spacing: -0.01em;
+  font-feature-settings: "zero" 1;
 }

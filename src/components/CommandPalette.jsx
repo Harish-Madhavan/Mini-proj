@@ -1,16 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Search, 
-  Layers, 
-  Globe, 
-  GitMerge, 
-  ShieldAlert, 
-  FileText, 
-  LayoutDashboard, 
-  Sparkles, 
-  Terminal, 
-  Zap, 
-  X 
+import {
+  Search,
+  Layers,
+  Globe,
+  GitMerge,
+  Network,
+  ShieldAlert,
+  FileText,
+  LayoutDashboard,
+  Terminal,
+  Zap,
+  X
 } from 'lucide-react';
 import { useCase } from '../hooks/useCase';
 
@@ -21,17 +21,19 @@ export default function CommandPalette({ isOpen, onClose }) {
 
   const navigationItems = [
     { label: 'Go to Dashboard', path: 'dashboard', icon: LayoutDashboard, category: 'Navigation', shortcut: '1' },
-    { label: 'Go to Fund Tracing Explorer', path: 'trace', icon: Layers, category: 'Navigation', shortcut: '2' },
-    { label: 'Go to OSINT & Subpoenas', path: 'osint', icon: Globe, category: 'Navigation', shortcut: '3' },
-    { label: 'Go to Wallet Clustering', path: 'clustering', icon: GitMerge, category: 'Navigation', shortcut: '4' },
-    { label: 'Go to AI Risk Grading', path: 'risk', icon: ShieldAlert, category: 'Navigation', shortcut: '5' },
-    { label: 'Go to Forensic Evidence Report', path: 'report', icon: FileText, category: 'Navigation', shortcut: '6' }
+    { label: 'Go to Tracing', path: 'trace', icon: Layers, category: 'Navigation', shortcut: '2' },
+    { label: 'Go to Notices', path: 'osint', icon: Globe, category: 'Navigation', shortcut: '3' },
+    { label: 'Go to Clustering', path: 'clustering', icon: GitMerge, category: 'Navigation', shortcut: '4' },
+    { label: 'Go to Linked cases', path: 'syndicate', icon: Network, category: 'Navigation', shortcut: '5' },
+    { label: 'Go to Risk', path: 'risk', icon: ShieldAlert, category: 'Navigation', shortcut: '6' },
+    { label: 'Go to Watchlist', path: 'watchlist', icon: Terminal, category: 'Navigation', shortcut: '7' },
+    { label: 'Go to Report', path: 'report', icon: FileText, category: 'Navigation', shortcut: '8' }
   ];
 
   const caseItems = scenarios.map(c => ({
-    label: `Switch Case: ${c.title}`,
+    label: `Open case: ${c.title}`,
     id: c.id,
-    category: 'Active Cases',
+    category: 'Cases',
     currency: c.currency,
     icon: Terminal
   }));
@@ -89,7 +91,7 @@ export default function CommandPalette({ isOpen, onClose }) {
   if (!isOpen) return null;
 
   return (
-    <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 1000 }} role="presentation">
+    <div className="modal-backdrop" onClick={onClose} style={{ zIndex: 10002 }} role="presentation">
       <div 
         className="modal-content" 
         onClick={(e) => e.stopPropagation()} 
@@ -109,7 +111,7 @@ export default function CommandPalette({ isOpen, onClose }) {
           <input
             type="text"
             autoFocus
-            placeholder="Type a command, navigate, or search BTC tx/address..."
+            placeholder="Type a command, or search a transaction/address..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             style={{ 
@@ -139,7 +141,7 @@ export default function CommandPalette({ isOpen, onClose }) {
                 className="btn btn-primary" 
                 style={{ marginTop: '0.75rem', fontSize: '0.8rem' }}
               >
-                <Zap size={13} /> Run Mainnet Trace for "{query.slice(0, 16)}..."
+                <Zap size={13} /> Trace "{query.slice(0, 16)}..."
               </button>
             </div>
           ) : (
@@ -202,8 +204,8 @@ export default function CommandPalette({ isOpen, onClose }) {
             <span>↵ Select</span>
             <span>ESC Close</span>
           </div>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'var(--primary)' }}>
-            <Sparkles size={11} /> AegisTrace Command Engine
+          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+            {filteredItems.length} result{filteredItems.length === 1 ? '' : 's'}
           </span>
         </div>
       </div>

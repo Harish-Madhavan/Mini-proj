@@ -130,75 +130,75 @@ export function decodeScriptPubkey(hexOrAddress) {
 
   const trimmed = hexOrAddress.trim();
 
-  // Handle Bech32 / Native SegWit (P2WPKH / P2WSH)
+  // Native SegWit addresses (bc1q)
   if (trimmed.startsWith('bc1q')) {
     const isWsh = trimmed.length > 50;
     return {
-      type: isWsh ? 'P2WSH (Witness Script Hash)' : 'P2WPKH (Native SegWit)',
-      standard: 'BIP141 / BIP173',
+      type: isWsh ? 'SegWit script (P2WSH)' : 'Native SegWit (P2WPKH)',
+      standard: 'SegWit standard',
       witnessVersion: 0,
       hrp: 'bc (Mainnet)',
-      programLength: isWsh ? '32 bytes (SHA-256)' : '20 bytes (HASH160)',
-      asm: isWsh ? `OP_0 <32-byte-witness-script-hash>` : `OP_0 <20-byte-key-hash>`,
-      securityRating: isWsh ? 'Quantum-resistant (256-bit hash)' : 'Standard SegWit (160-bit hash)',
-      spendRequirement: 'Requires 0x00 version byte followed by witness execution stack.'
+      programLength: isWsh ? '32 bytes' : '20 bytes',
+      asm: isWsh ? `OP_0 <32-byte-script-hash>` : `OP_0 <20-byte-key-hash>`,
+      securityRating: isWsh ? 'Very strong locking' : 'Standard locking',
+      spendRequirement: 'Needs the matching witness data to spend.'
     };
   }
 
-  // Handle Bech32m / Taproot (P2TR)
+  // Taproot addresses (bc1p)
   if (trimmed.startsWith('bc1p')) {
     return {
-      type: 'P2TR (Taproot / Schnorr)',
-      standard: 'BIP341 / BIP342 (BIP350 Bech32m)',
+      type: 'Taproot (P2TR)',
+      standard: 'Taproot standard',
       witnessVersion: 1,
       hrp: 'bc (Mainnet)',
-      programLength: '32 bytes (x-only Schnorr Public Key)',
-      asm: `OP_1 <32-byte-x-only-pubkey>`,
-      securityRating: 'Top-tier Privacy (Key path & Script path indistinguishable)',
-      spendRequirement: 'Schnorr signature over 32-byte internal key or Merkle branch script execution.'
+      programLength: '32 bytes',
+      asm: `OP_1 <32-byte-public-key>`,
+      securityRating: 'Hides whether a key or a script spent it',
+      spendRequirement: 'Needs a valid signature for the key, or the hidden script.'
     };
   }
 
-  // Handle Base58check Legacy P2PKH (starts with 1)
+  // Legacy addresses (starts with 1)
   if (trimmed.startsWith('1')) {
     return {
-      type: 'P2PKH (Pay-to-Public-Key-Hash)',
-      standard: 'Legacy Base58Check',
+      type: 'Legacy (P2PKH)',
+      standard: 'Legacy standard',
       witnessVersion: 'Non-witness (Legacy)',
       hrp: 'Base58 (Version 0x00)',
-      programLength: '20 bytes (RIPEMD160)',
+      programLength: '20 bytes',
       asm: `OP_DUP OP_HASH160 <20-byte-pubkey-hash> OP_EQUALVERIFY OP_CHECKSIG`,
-      securityRating: 'Legacy Standard (ECDSA secp256k1)',
-      spendRequirement: 'Valid ECDSA signature and 33/65-byte public key on scriptSig stack.'
+      securityRating: 'Older signature style',
+      spendRequirement: 'Needs the matching signature and public key.'
     };
   }
 
-  // Handle Base58check P2SH (starts with 3)
+  // Script addresses (starts with 3)
   if (trimmed.startsWith('3')) {
     return {
-      type: 'P2SH (Pay-to-Script-Hash / Multi-Sig)',
-      standard: 'BIP16 Base58Check',
+      type: 'Script address (P2SH)',
+      standard: 'Script-hash standard',
       witnessVersion: 'Nested or Legacy',
       hrp: 'Base58 (Version 0x05)',
-      programLength: '20 bytes (Script Hash)',
-      asm: `OP_HASH160 <20-byte-redeem-script-hash> OP_EQUAL`,
-      securityRating: 'Multi-Signature or Nested SegWit Gateway',
-      spendRequirement: 'Redeem script hash preimage matching Hash160, followed by nested opcode execution.'
+      programLength: '20 bytes',
+      asm: `OP_HASH160 <20-byte-script-hash> OP_EQUAL`,
+      securityRating: 'Shared or exchange-controlled address',
+      spendRequirement: 'Needs the hidden script plus its required signatures.'
     };
   }
 
-  // Handle Pay-to-PubKey (P2PK) hex or pubkey
+  // Bare public keys (early P2PK format)
   if (trimmed.startsWith('04') || trimmed.startsWith('02') || trimmed.startsWith('03') || trimmed.includes('P2PK')) {
     const isUncompressed = trimmed.startsWith('04') && trimmed.length >= 130;
     return {
-      type: 'P2PK (Pay-to-PubKey - Satoshi Genesis Era)',
-      standard: 'Original Bitcoin Protocol (v0.1)',
+      type: 'Early public key (P2PK)',
+      standard: 'Original early format',
       witnessVersion: 'Non-witness',
-      hrp: 'Raw Secp256k1 Curve Point',
+      hrp: 'Raw public key point',
       programLength: isUncompressed ? '65 bytes (Uncompressed)' : '33 bytes (Compressed)',
       asm: `<pubkey> OP_CHECKSIG`,
-      securityRating: 'Historical Direct Public Key Exposure',
-      spendRequirement: 'Valid ECDSA signature pushed directly to stack matching public key.'
+      securityRating: 'Public key visible on chain',
+      spendRequirement: 'Needs a signature matching the public key.'
     };
   }
 
@@ -214,14 +214,14 @@ export function decodeScriptPubkey(hexOrAddress) {
     }
 
     return {
-      type: 'OP_RETURN (Null Data Unspendable)',
-      standard: 'BIP65 Data Carrier',
+      type: 'OP_RETURN (embedded message)',
+      standard: 'Data carrier standard',
       witnessVersion: 'Unspendable Script',
       hrp: 'Script Opcode 0x6a',
       programLength: `${Math.floor(hexData.length / 2)} bytes`,
       asm: `OP_RETURN ${hexData}`,
       decodedText: asciiText || 'Binary / Non-ASCII payload',
-      securityRating: 'Provably Unspendable (Pruned from UTXO set)',
+      securityRating: 'Provably unspendable (removed from circulation)',
       spendRequirement: 'Cannot be spent. Used for timestamps, notary proofs, and metadata anchoring.'
     };
   }
@@ -231,14 +231,14 @@ export function decodeScriptPubkey(hexOrAddress) {
   const tokenAsm = tokens.map(t => t.isData ? `<${t.hex}>` : t.opcode).join(' ');
 
   return {
-    type: 'Custom / Non-Standard Script',
-    standard: 'On-chain Script Bytecode',
+    type: 'Custom script',
+    standard: 'On-chain code',
     witnessVersion: 'Unknown',
-    hrp: 'Hex Bytecode',
+    hrp: 'Raw code',
     programLength: `${Math.floor(trimmed.length / 2)} bytes`,
     asm: tokenAsm || `OP_UNKNOWN: ${trimmed.slice(0, 32)}...`,
     tokens,
     securityRating: 'Non-standard script template',
-    spendRequirement: 'Evaluates according to custom Bitcoin Script execution rules.'
+    spendRequirement: 'Follows custom on-chain rules.'
   };
 }

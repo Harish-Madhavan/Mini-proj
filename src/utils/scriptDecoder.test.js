@@ -36,7 +36,7 @@ describe('scriptDecoder', () => {
   it('decodes OP_RETURN null data scripts', () => {
     const op = decodeScriptPubkey('6a48656c6c6f20426974636f696e');
     expect(op.type).toContain('OP_RETURN');
-    expect(op.securityRating).toContain('Provably Unspendable');
+    expect(op.securityRating).toContain('Provably unspendable');
   });
 
   it('decodes raw P2PK pubkey curve points', () => {

@@ -88,7 +88,7 @@ export default function GraphExplorer() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: '1.5rem', minHeight: '500px' }}>
+      <div className="responsive-split-grid" style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: '1.5rem', minHeight: '500px' }}>
         <GraphCanvas
           activeCase={activeCase}
           selectedNode={selectedNode}

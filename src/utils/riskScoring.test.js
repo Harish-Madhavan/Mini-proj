@@ -34,7 +34,7 @@ describe('riskScoring engine', () => {
     expect(result.threatBadge.level).toBe('LOW');
   });
 
-  it('applies KYC discount when destination resolves to regulated exchange', () => {
+  it('applies identity discount when destination resolves to regulated exchange', () => {
     const withoutKycNodes = [
       { id: 'suspect', type: 'suspect' },
       { id: 'hop', type: 'hop' },
@@ -43,7 +43,7 @@ describe('riskScoring engine', () => {
     const withKycNodes = [
       { id: 'suspect', type: 'suspect' },
       { id: 'hop', type: 'hop' },
-      { id: 'receiver', type: 'receiver', details: { kycStatus: 'KYC VERIFIED' } }
+      { id: 'receiver', type: 'receiver', details: { kycStatus: 'IDENTITY VERIFIED' } }
     ];
 
     const scoreNoKyc = calculateForensicRiskScore(withoutKycNodes).riskScore;

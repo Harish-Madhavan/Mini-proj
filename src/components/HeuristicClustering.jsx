@@ -1,22 +1,23 @@
 import React, { useState } from 'react';
-import { 
-  GitMerge, 
-  HelpCircle, 
-  Shuffle, 
-  UserCheck, 
-  PlusCircle, 
+import {
+  GitMerge,
+  HelpCircle,
+  Shuffle,
+  UserCheck,
+  PlusCircle,
   Trash2,
   ChevronRight,
   Download,
   Upload,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  Fingerprint
 } from 'lucide-react';
-import { fetchAddressTxs } from '../utils/bitcoinApi';
+import { fetchAddressTxs, fetchTx } from '../utils/bitcoinApi';
 import { useCase } from '../hooks/useCase';
 import { useToast } from '../hooks/useToast';
 import { validateBtcAddress, exportToCsv } from '../utils/forensicUtils';
-import { computeAddressClusters, detectPeelingChain } from '../utils/clusteringAlgorithms';
+import { computeAddressClusters, detectPeelingChain, feeFingerprintSimilarity, estimatePoolReceived } from '../utils/clusteringAlgorithms';
 import { downloadJson } from '../utils/download';
 
 export default function HeuristicClustering() {
@@ -31,29 +32,56 @@ export default function HeuristicClustering() {
   const [newAddr, setNewAddr] = useState('');
   const [clusteringResult, setClusteringResult] = useState(null);
   const [isClustering, setIsClustering] = useState(false);
+  const [feeTxA, setFeeTxA] = useState('');
+  const [feeTxB, setFeeTxB] = useState('');
+  const [feeResult, setFeeResult] = useState(null);
+  const [isComparingFees, setIsComparingFees] = useState(false);
+
+  const caseTxIds = (activeCase?.nodes || [])
+    .filter(n => typeof n.id === 'string' && n.id.startsWith('tx_'))
+    .map(n => n.id.slice(3));
+
+  const handleCompareFees = async () => {
+    const a = feeTxA.trim();
+    const b = feeTxB.trim();
+    if (!/^[0-9a-fA-F]{64}$/.test(a) || !/^[0-9a-fA-F]{64}$/.test(b)) {
+      showToast('Both inputs must be 64-character transaction IDs.', 'warning');
+      return;
+    }
+    setIsComparingFees(true);
+    setFeeResult(null);
+    try {
+      const [txA, txB] = await Promise.all([fetchTx(a), fetchTx(b)]);
+      setFeeResult({ txidA: a, txidB: b, ...feeFingerprintSimilarity(txA, txB) });
+    } catch (err) {
+      showToast(`Fee comparison failed: ${err.message}`, 'error');
+    } finally {
+      setIsComparingFees(false);
+    }
+  };
 
   const handleAddAddress = () => {
     const trimmed = newAddr.trim();
     if (!trimmed) return;
 
     if (suspectAddresses.includes(trimmed)) {
-      showToast("Address is already in the clustering set.", "warning");
+      showToast("Address already added.", "warning");
       return;
     }
 
     const validation = validateBtcAddress(trimmed);
     if (!validation.isValid) {
-      showToast(`Address format notice: ${validation.error}`, "warning");
+      showToast(`Address warning: ${validation.error}`, "warning");
     }
 
     setSuspectAddresses([...suspectAddresses, trimmed]);
     setNewAddr('');
-    showToast(`Added ${validation.type} address to pool.`, "info");
+    showToast(`Added ${validation.type} address.`, "info");
   };
 
   const handleImportFromGraph = () => {
     if (!activeCase?.nodes?.length) {
-      showToast("No nodes available in active case graph.", "warning");
+      showToast("No addresses in the open case.", "warning");
       return;
     }
 
@@ -66,13 +94,13 @@ export default function HeuristicClustering() {
     const newlyAdded = uniqueAddrs.length - suspectAddresses.length;
 
     setSuspectAddresses(uniqueAddrs);
-    showToast(`Imported ${newlyAdded} unique addresses from active case graph!`, "success");
+    showToast(`Imported ${newlyAdded} addresses from the open case.`, "success");
   };
 
   const handleRemoveAddress = (index) => {
     const updated = suspectAddresses.filter((_, i) => i !== index);
     setSuspectAddresses(updated);
-    showToast("Removed address from set.", "info");
+    showToast("Address removed.", "info");
   };
 
   const runClustering = async () => {
@@ -80,7 +108,6 @@ export default function HeuristicClustering() {
     setClusteringResult(null);
 
     const addrs = suspectAddresses;
-    const count = addrs.length;
     const transactions = [];
 
     // Check if any of the addresses are real BTC addresses and fetch live transactions
@@ -107,21 +134,22 @@ export default function HeuristicClustering() {
 
     if (peelingAnalysis.isPeelingChain) {
       clusterAnalysis.heuristicsApplied.push(
-        `Active Peeling Chain Detected (${peelingAnalysis.hopCount} hops, avg peel ${peelingAnalysis.averagePeelPercent}%)`
+        `Split pattern (${peelingAnalysis.hopCount} steps, average ${peelingAnalysis.averagePeelPercent}%)`
       );
     }
 
-    const baseVal = parseFloat(activeCase?.nodes[0]?.balance || "14.85") * (count / 3);
-    const totalBtc = baseVal.toFixed(4);
+    // Received funds come from the fetched histories — never invented from
+    // unrelated case balances.
+    const { totalSats, observedTxCount } = estimatePoolReceived(addrs, transactions);
 
     setTimeout(() => {
       setIsClustering(false);
       setClusteringResult({
         ...clusterAnalysis,
-        totalBalance: `${totalBtc} BTC`,
-        primaryWalletEntity: "Target Entity / Unidentified Syndicate Alpha"
+        totalBalance: observedTxCount > 0 ? `${(totalSats / 1e8).toFixed(4)} BTC` : 'No history',
+        observedTxCount,
       });
-      showToast(`Clustering complete: Cluster ID ${clusterAnalysis.clusterId}`, "success");
+      showToast(`Done. Group ${clusterAnalysis.clusterId}`, "success");
     }, 400);
   };
 
@@ -135,47 +163,61 @@ export default function HeuristicClustering() {
         Address: addr,
         ScriptFormat: v.type,
         Confidence: `${clusteringResult.confidenceScore}%`,
-        EstimatedControlBalance: clusteringResult.totalBalance
+        EstimatedControlBalance: clusteringResult.totalBalance,
+        ObservedTxs: clusteringResult.observedTxCount ?? 0
       };
     });
 
     exportToCsv(`NCB-Cluster-${clusteringResult.clusterId}.csv`, rows, [
       { key: 'Index', header: '#' },
-      { key: 'ClusterID', header: 'Cluster Entity ID' },
-      { key: 'Address', header: 'Bitcoin Address' },
-      { key: 'ScriptFormat', header: 'Script Format' },
-      { key: 'Confidence', header: 'CIOH Confidence' },
-      { key: 'EstimatedControlBalance', header: 'Aggregate Balance' }
+      { key: 'ClusterID', header: 'Group ID' },
+      { key: 'Address', header: 'Bitcoin address' },
+      { key: 'ScriptFormat', header: 'Address type' },
+      { key: 'Confidence', header: 'Confidence' },
+      { key: 'EstimatedControlBalance', header: 'Received' },
+      { key: 'ObservedTxs', header: 'Transactions checked' }
     ]);
-    showToast("Downloaded cluster forensic evidence CSV!", "success");
+    showToast("Group data downloaded.", "success");
   };
 
   const handleExportJson = () => {
     if (!clusteringResult) return;
     downloadJson(clusteringResult, `NCB-Cluster-${clusteringResult.clusterId}.json`);
-    showToast("Downloaded cluster analysis JSON file!", "success");
+    showToast("Group data downloaded (JSON).", "success");
   };
 
+  const FEE_VERDICTS = {
+    SAME_WALLET_LIKELY: 'Likely same wallet',
+    DISTINCT_WALLETS: 'Likely different wallets',
+    INCONCLUSIVE: 'Unclear',
+  };
+
+  const feeVerdictColor = feeResult
+    ? feeResult.verdict === 'SAME_WALLET_LIKELY' ? '#f59e0b'
+      : feeResult.verdict === 'DISTINCT_WALLETS' ? '#10b981' : 'var(--text-secondary)'
+    : null;
+
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', minHeight: '500px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+    <div className="responsive-split-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', minHeight: '500px' }}>
       
       {/* Input Wallet List panel */}
       <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <GitMerge style={{ color: '#a855f7' }} /> Common Input Ownership Heuristic (CIOH)
-            </h3>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Group separate addresses into single-entity wallet clusters by analyzing co-spending input signatures.</p>
+              <h3 style={{ fontSize: '1.25rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <GitMerge style={{ color: '#a855f7' }} /> Shared spending
+              </h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Group addresses that spend together — they are probably one wallet.</p>
           </div>
 
           <button
             onClick={handleImportFromGraph}
             className="btn btn-outline"
             style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }}
-            title="Import all addresses from currently active case graph"
+            title="Import all addresses from the open case"
           >
-            <Upload size={13} /> Import Graph Addrs
+            <Upload size={13} /> From graph
           </button>
         </div>
 
@@ -183,7 +225,7 @@ export default function HeuristicClustering() {
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <input
             type="text"
-            placeholder="Enter BTC Address to add to cluster pool..."
+            placeholder="Enter a Bitcoin address..."
             value={newAddr}
             onChange={(e) => setNewAddr(e.target.value)}
             className="mono-addr input-field"
@@ -228,7 +270,7 @@ export default function HeuristicClustering() {
           className="btn btn-primary"
           style={{ width: '100%', padding: '0.75rem', justifyContent: 'center', fontSize: '0.85rem' }}
         >
-          <Shuffle size={16} /> {isClustering ? "Executing CIOH Algorithm..." : `Compute Wallet Cluster (${suspectAddresses.length} Addresses)`}
+          <Shuffle size={16} /> {isClustering ? "Grouping..." : `Find groups (${suspectAddresses.length} addresses)`}
         </button>
       </div>
 
@@ -236,7 +278,7 @@ export default function HeuristicClustering() {
       <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <UserCheck style={{ color: '#10b981' }} size={18} /> Cluster Analysis Output
+            <UserCheck style={{ color: '#10b981' }} size={18} /> Results
           </h3>
 
           {clusteringResult && (
@@ -261,15 +303,15 @@ export default function HeuristicClustering() {
 
         {clusteringResult ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-            
+
             {/* Cluster ID Header */}
             <div style={{ backgroundColor: 'rgba(168, 85, 247, 0.1)', border: '1px solid #a855f7', borderRadius: '8px', padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Derived Entity ID:</span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Group ID:</span>
                 <h4 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#fff', marginTop: '0.1rem' }}>{clusteringResult.clusterId}</h4>
               </div>
               <div style={{ textAlign: 'right' }}>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>CIOH Confidence:</span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Confidence:</span>
                 <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#10b981' }}>{clusteringResult.confidenceScore}%</div>
               </div>
             </div>
@@ -277,18 +319,23 @@ export default function HeuristicClustering() {
             {/* Metrics Breakdown */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', fontSize: '0.85rem' }}>
               <div style={{ backgroundColor: 'rgba(5, 8, 16, 0.8)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-                <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.75rem' }}>Grouped Wallet Count:</span>
-                <strong style={{ fontSize: '1.1rem', color: '#fff' }}>{clusteringResult.addressCount} Addresses</strong>
+                <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.75rem' }}>Addresses:</span>
+                <strong style={{ fontSize: '1.1rem', color: '#fff' }}>{clusteringResult.addressCount}</strong>
               </div>
               <div style={{ backgroundColor: 'rgba(5, 8, 16, 0.8)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-                <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.75rem' }}>Aggregated Control Balance:</span>
+                <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.75rem' }}>Received:</span>
                 <strong style={{ fontSize: '1.1rem', color: 'var(--primary)' }}>{clusteringResult.totalBalance}</strong>
+                <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.7rem', marginTop: '0.15rem' }}>
+                  {clusteringResult.observedTxCount > 0
+                    ? `Across ${clusteringResult.observedTxCount} checked transaction${clusteringResult.observedTxCount === 1 ? '' : 's'}`
+                    : 'No history fetched'}
+                </span>
               </div>
             </div>
 
             {/* Heuristics Applied */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Clustering Heuristics Triggered:</span>
+              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Why grouped:</span>
               {clusteringResult.heuristicsApplied.map((h, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', color: '#cbd5e1', backgroundColor: 'rgba(255,255,255,0.02)', padding: '0.4rem 0.6rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.05)' }}>
                   <ChevronRight size={12} style={{ color: '#a855f7' }} /> {h}
@@ -300,11 +347,87 @@ export default function HeuristicClustering() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', textAlign: 'center', padding: '2rem' }}>
             <HelpCircle size={40} style={{ marginBottom: '1rem' }} />
-            <p style={{ fontSize: '0.85rem' }}>Add 2 or more Bitcoin addresses to the pool and click "Compute Wallet Cluster" to execute co-spending heuristics.</p>
+            <p style={{ fontSize: '0.85rem' }}>Add 2 or more addresses, then Find groups.</p>
           </div>
         )}
       </div>
+    </div>
 
+      {/* Fee habits */}
+      <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div>
+          <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Fingerprint size={18} /> Fee habits
+          </h3>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+            Compare fee habits across two transactions.
+          </p>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '0.5rem', alignItems: 'end' }} className="responsive-split-grid">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+            <label htmlFor="fee-tx-a" style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Transaction A</label>
+            <input
+              id="fee-tx-a"
+              type="text"
+              value={feeTxA}
+              onChange={(e) => setFeeTxA(e.target.value)}
+              placeholder="64-character transaction ID"
+              list="case-txids"
+              className="mono-addr input-field"
+              style={{ fontSize: '0.75rem' }}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+            <label htmlFor="fee-tx-b" style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Transaction B</label>
+            <input
+              id="fee-tx-b"
+              type="text"
+              value={feeTxB}
+              onChange={(e) => setFeeTxB(e.target.value)}
+              placeholder="64-character transaction ID"
+              list="case-txids"
+              className="mono-addr input-field"
+              style={{ fontSize: '0.75rem' }}
+            />
+          </div>
+          <button
+            onClick={handleCompareFees}
+            disabled={isComparingFees}
+            className="btn btn-primary"
+            style={{ fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+          >
+            <Fingerprint size={14} /> {isComparingFees ? 'Fetching…' : 'Compare'}
+          </button>
+        </div>
+        <datalist id="case-txids">
+          {caseTxIds.map(txid => <option key={txid} value={txid} />)}
+        </datalist>
+        {feeResult ? (
+          <div style={{ border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.9rem 1rem', backgroundColor: 'rgba(5,8,16,0.5)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+              <span className="badge-pill" style={{ color: feeVerdictColor, border: `1px solid ${feeVerdictColor}55`, backgroundColor: `${feeVerdictColor}14` }}>
+                {FEE_VERDICTS[feeResult.verdict] || feeResult.verdict}
+              </span>
+              <span style={{ fontSize: '0.8rem' }}>Similarity <strong>{Math.round(feeResult.similarity * 100)}%</strong></span>
+              <span className="mono-addr" style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                {feeResult.rateA} vs {feeResult.rateB} satoshis per byte
+              </span>
+            </div>
+            <div style={{ height: '5px', borderRadius: '3px', backgroundColor: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+              <div style={{ width: `${Math.round(feeResult.similarity * 100)}%`, height: '100%', backgroundColor: feeVerdictColor }} />
+            </div>
+            <div className="mono-addr" style={{ fontSize: '0.68rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
+              A: {feeResult.txidA.slice(0, 16)}… · B: {feeResult.txidB.slice(0, 16)}… (checked live)
+            </div>
+          </div>
+        ) : (
+          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+            {caseTxIds.length > 0
+              ? `Enter two transaction IDs — or pick from the ${caseTxIds.length} in the open case — then compare.`
+              : 'Enter two transaction IDs. Transactions from the open case appear as suggestions once traced.'}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

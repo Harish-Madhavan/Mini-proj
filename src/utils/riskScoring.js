@@ -23,52 +23,70 @@ export const DEFAULT_RISK_WEIGHTS = {
  * @param {Object} customWeights - Optional override weights
  * @returns {Object} Comprehensive risk assessment object
  */
+/**
+ * Clamp caller-supplied weight overrides into a sane numeric range so a
+ * negative or NaN weight can never invert the risk model.
+ */
+function sanitizeWeights(customWeights = {}) {
+  const clean = {};
+  for (const [key, value] of Object.entries(customWeights)) {
+    if (key in DEFAULT_RISK_WEIGHTS && Number.isFinite(value)) {
+      clean[key] = Math.min(100, Math.max(0, value));
+    }
+  }
+  return { ...DEFAULT_RISK_WEIGHTS, ...clean };
+}
+
+function isIdentityVerified(node) {
+  const status = node?.details?.kycStatus || '';
+  return status.includes('IDENTITY') || status.includes('VERIFIED');
+}
+
 export function calculateForensicRiskScore(caseOrNodes, customWeights = {}) {
   const nodes = Array.isArray(caseOrNodes) ? caseOrNodes : (caseOrNodes?.nodes || []);
-  const weights = { ...DEFAULT_RISK_WEIGHTS, ...customWeights };
+  const weights = sanitizeWeights(customWeights);
 
   const hasMixer = nodes.some(n => n.type === 'mixer');
   const hopCount = nodes.filter(n => n.type === 'hop').length;
-  const receiverNode = nodes.find(n => n.type === 'receiver');
-  const isKycVerified = Boolean(
-    receiverNode?.details?.kycStatus?.includes('KYC') || 
-    receiverNode?.details?.kycStatus?.includes('VERIFIED')
-  );
+  const receiverNodes = nodes.filter(n => n.type === 'receiver');
+  // A case is only as clean as its dirtiest endpoint: KYC applies only when
+  // every terminal receiver is attributed, not just the first one found.
+  const isKycVerified = receiverNodes.length > 0 && receiverNodes.every(isIdentityVerified);
 
-  const isHistoricalEra = nodes.some(n => 
-    n.details?.kycStatus?.includes('HISTORICAL') || 
+  const isHistoricalEra = nodes.some(n =>
+    n.details?.kycStatus?.includes('HISTORICAL') ||
     n.details?.scriptStandard?.includes('P2PK') ||
     n.details?.ipLog?.includes('Early Bitcoin')
   ) || (typeof caseOrNodes === 'object' && caseOrNodes?.description?.includes('Historical'));
 
-  // Dimensional sub-scores
-  const obfuscationScore = isHistoricalEra 
-    ? 0 
-    : (hasMixer ? weights.mixerWeight : Math.round(weights.mixerWeight * 0.2));
+  // Dimensional sub-scores (all five feed the aggregate below)
+  const obfuscationScore = isHistoricalEra
+    ? 0
+    : (hasMixer ? weights.mixerWeight : 0);
 
-  const layeringScore = isHistoricalEra 
-    ? Math.min(10, hopCount * 2) 
+  const layeringScore = isHistoricalEra
+    ? Math.min(10, hopCount * 2)
     : Math.min(40, hopCount * weights.hopWeight);
 
-  const destinationScore = isHistoricalEra 
-    ? 5 
-    : (isKycVerified ? Math.max(0, 30 - weights.kycDiscountWeight) : 25);
+  const destinationScore = isHistoricalEra
+    ? 5
+    : (isKycVerified ? 0 : 18);
 
-  const velocityScore = isHistoricalEra 
-    ? 5 
-    : (nodes.length > 3 ? 15 : 8);
+  const velocityScore = isHistoricalEra
+    ? 5
+    : (nodes.length > 4 ? 6 : nodes.length > 2 ? 3 : 0);
 
   // Protocol anomaly score
-  const hasRbf = nodes.some(n => n.details?.rbfStatus?.includes('RBF Enabled'));
-  const anomalyScore = isHistoricalEra ? 0 : (hasRbf ? 8 : 4);
+  const hasRbf = nodes.some(n => n.details?.rbfStatus?.includes('Replaceable fee'));
+  const anomalyScore = isHistoricalEra ? 0 : (hasRbf ? 6 : 0);
 
-  // Dynamic aggregate calculation
+  // Aggregate across every dimension so no sub-score is silently discarded.
   const baseScore = isHistoricalEra ? 10 : weights.baseScore;
-  const rawCalculatedScore = isHistoricalEra 
+  const rawCalculatedScore = isHistoricalEra
     ? Math.min(25, baseScore + layeringScore + obfuscationScore)
-    : Math.min(99, Math.max(15, baseScore + obfuscationScore + layeringScore + (isKycVerified ? -weights.kycDiscountWeight : 10)));
+    : baseScore + obfuscationScore + layeringScore + destinationScore + velocityScore + anomalyScore - (isKycVerified ? weights.kycDiscountWeight : 0);
 
-  const calculatedRiskScore = Math.round(rawCalculatedScore);
+  const calculatedRiskScore = Math.round(Math.min(99, Math.max(5, rawCalculatedScore)));
 
   const threatBadge = getThreatBadge(calculatedRiskScore);
   const statutoryAction = getStatutoryLegalAction(calculatedRiskScore, isKycVerified, isHistoricalEra);
@@ -109,27 +127,27 @@ export function getThreatBadge(score) {
   if (score < 35) {
     return {
       level: 'LOW',
-      label: 'LOW / CLEAN FLOW',
+      label: 'Low',
       color: '#10b981',
       bg: 'rgba(16, 185, 129, 0.15)',
-      description: 'Standard benign/historical transaction structure without obfuscation signatures.'
+      description: 'Standard transaction structure without obfuscation signatures.'
     };
   }
   if (score < 70) {
     return {
       level: 'MEDIUM',
-      label: 'MODERATE EXPOSURE',
+      label: 'Medium',
       color: '#f59e0b',
       bg: 'rgba(245, 158, 11, 0.15)',
-      description: 'Multi-hop transit routing detected. Intermediate monitoring recommended.'
+      description: 'Multi-hop routing. Monitoring recommended.'
     };
   }
   return {
     level: 'HIGH',
-    label: 'ELEVATED / CRITICAL THREAT',
+    label: 'High',
     color: '#ef4444',
     bg: 'rgba(239, 68, 68, 0.15)',
-    description: 'High-risk privacy mixer, peeling chain, or unregistered cashout vectors detected.'
+    description: 'Mixer, peeling chain, or unregistered cash-out pattern detected.'
   };
 }
 
@@ -151,24 +169,24 @@ export function evaluateThreatSignatures(nodes = [], context = {}) {
   if (isHistoricalEra) {
     return [
       {
-        name: "Early Bitcoin Era Provenance (Pre-2014 Era)",
+        name: "Early Bitcoin era (pre-2014)",
         score: "0% (Clean)",
-        category: "Era & Provenance Verification",
-        description: "Direct peer-to-peer on-chain transaction originating in early Bitcoin era. No centralized mixing or coinjoin protocols present.",
+        category: "Era check",
+        description: "Direct transfer from the early Bitcoin era. No mixing involved.",
         status: "mitigated"
       },
       {
-        name: "Direct P2P On-Chain Routing",
+        name: "Direct on-chain routing",
         score: `+${layeringScore}%`,
-        category: "Layering Hop Analysis",
-        description: `Historical standard transaction structure with ${hopCount} transfer hops. No automated peeling chain obfuscation.`,
+        category: "Split analysis",
+        description: `Plain historical structure with ${hopCount} transfer steps. No automated splitting.`,
         status: "mitigated"
       },
       {
-        name: "Terminal UTXO Status",
+        name: "Final output status",
         score: `+${destinationScore}%`,
-        category: "Destination Attribution",
-        description: "Standard peer UTXO output on public Bitcoin ledger.",
+        category: "Destination check",
+        description: "Standard peer output on the public Bitcoin ledger.",
         status: "mitigated"
       }
     ];
@@ -176,28 +194,28 @@ export function evaluateThreatSignatures(nodes = [], context = {}) {
 
   return [
     {
-      name: hasMixer ? "Privacy Mixer Interaction (Wasabi / Tornado / Equal Output)" : "Standard Sequential Routing",
+      name: hasMixer ? "Mixer interaction" : "Standard routing",
       score: `+${obfuscationScore}%`,
-      category: "Obfuscation Analysis",
-      description: hasMixer 
-        ? "Direct transaction linkage with a known decentralized coinjoin or privacy mixer." 
-        : "Sequential multi-hop routing detected between wallet hubs.",
+      category: "Mixing check",
+      description: hasMixer
+        ? "Money passed through a known mixer."
+        : "Step-by-step routing between wallets.",
       status: hasMixer ? "detected" : "mitigated"
     },
     {
-      name: "Peeling Chain Pattern",
+      name: "Split pattern",
       score: `+${layeringScore}%`,
-      category: "Layering Hop Analysis",
-      description: `Detected ${hopCount} intermediate transit hops splitting value across structured change addresses.`,
+      category: "Split analysis",
+      description: `${hopCount} middle steps splitting value across change addresses.`,
       status: hopCount > 1 ? "detected" : "mitigated"
     },
     {
-      name: "End Receiver Settlement Attribution",
+      name: "End receiver check",
       score: isKycVerified ? `-${kycDiscountWeight}%` : `+${destinationScore}%`,
-      category: "Destination Attribution",
-      description: isKycVerified 
-        ? "Terminal destination resolves to a KYC-registered exchange deposit point." 
-        : "Terminal destination remains unspent or non-KYC unspent UTXO.",
+      category: "Destination check",
+      description: isKycVerified
+        ? "End point is an identity-checked exchange."
+        : "End point is an output with no identity records.",
       status: isKycVerified ? "mitigated" : "detected"
     }
   ];
@@ -224,8 +242,8 @@ export function getStatutoryLegalAction(riskScore, isKycVerified = false, isHist
       urgency: 'CRITICAL_ACTION_REQUIRED',
       recommendations: [
         "Issue Section 67 NDPS Act statutory notice to destination exchange gateway.",
-        "Request immediate administrative freeze on target account and linked fiat withdrawal rails.",
-        "Expand recursive CIOH cluster analysis across all co-spent input addresses."
+        "Request immediate administrative freeze on target account and linked cash withdrawal rails.",
+        "Expand shared-spending cluster analysis across all co-spent input addresses."
       ]
     };
   }
@@ -236,7 +254,7 @@ export function getStatutoryLegalAction(riskScore, isKycVerified = false, isHist
       urgency: 'MONITORING_RECOMMENDED',
       recommendations: [
         "Deploy on-chain address monitoring for subsequent outgoing sweeps.",
-        "Request preemptive KYC lookup from destination gateway."
+        "Request identity records from the destination exchange."
       ]
     };
   }

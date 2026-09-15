@@ -60,8 +60,8 @@ describe('bitcoinApi LRU Cache & Formatting', () => {
     expect(formatted.links.length).toBeGreaterThan(0);
     const txNode = formatted.nodes.find(n => n.id.startsWith('tx_'));
     expect(txNode).toBeDefined();
-    expect(txNode.details.feeRateSatVb).toContain('sat/vB');
-    expect(txNode.details.rbfStatus).toBe('RBF Enabled');
+    expect(txNode.details.feeRateSatVb).toContain('satoshis per byte');
+    expect(txNode.details.rbfStatus).toBe('Replaceable fee');
   });
 
   it('should classify script types accurately', () => {

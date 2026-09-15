@@ -17,15 +17,18 @@ import {
   DollarSign,
   Star,
   Bookmark,
-  ExternalLink
+  ExternalLink,
+  Copy
 } from 'lucide-react';
 import { useCase } from '../hooks/useCase';
 import { useToast } from '../hooks/useToast';
 import { convertBtcToFiat, validateBtcAddress } from '../utils/forensicUtils';
 import { EXCHANGES } from '../constants/legalConstants';
 import { useWatchlist } from '../hooks/useWatchlist';
+
 import { getExplorerUrls } from '../utils/knownEntities';
 
+import { FORENSIC_CORPUS } from '../data/forensicCorpus';
 export default function Dashboard() {
   const { 
     scenarios, 
@@ -80,10 +83,8 @@ export default function Dashboard() {
     e.target.value = '';
   };
 
-  const sampleQueries = [
-    { label: "Sample BTC Tx Hash", value: "4b9a8f2e71d3c05c8a9f0e1d2c3b4a5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b" },
-    { label: "Sample BTC Address", value: "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh" }
-  ];
+  // Verified live corpus: each query exercises a distinct tracing capability
+  const sampleQueries = FORENSIC_CORPUS.map(e => ({ label: e.label, value: e.value, title: `${e.typology} — ${e.expectation}` }));
 
   // Compute total session value in BTC and Fiat
   const totalSessionBtc = useMemo(() => {
@@ -99,10 +100,10 @@ export default function Dashboard() {
   }, [totalSessionBtc]);
 
   const sessionStats = [
-    { label: "Active Traced Cases", value: scenarios.length.toString(), icon: Layers, color: "var(--primary)" },
-    { label: "Total Asset Exposure", value: `${totalSessionBtc.toFixed(2)} BTC`, subValue: `${fiatMetrics.formattedUsd} (${fiatMetrics.formattedInr})`, icon: DollarSign, color: "#10b981" },
-    { label: "Current Active Trace", value: activeCase ? activeCase.title.slice(0, 16) + '...' : "None", icon: Cpu, color: "#a855f7" },
-    { label: "API Gateway", value: "Dual Gateway Active", subValue: "Blockstream / Mempool", icon: Radio, color: "#f59e0b" }
+    { label: "Cases", value: scenarios.length.toString(), icon: Layers, color: "var(--primary)" },
+    { label: "Total traced", value: `${totalSessionBtc.toFixed(2)} BTC`, subValue: `${fiatMetrics.formattedUsd} (${fiatMetrics.formattedInr})`, icon: DollarSign, color: "#10b981" },
+    { label: "Open case", value: activeCase ? activeCase.title.slice(0, 16) + '...' : "None", icon: Cpu, color: "#a855f7" },
+    { label: "Data source", value: "Connected", subValue: "Blockstream / Mempool.space", icon: Radio, color: "#f59e0b" }
   ];
 
   const handleSubmit = (e) => {
@@ -120,14 +121,14 @@ export default function Dashboard() {
   const handleCreateCaseSubmit = (e) => {
     e.preventDefault();
     if (!newTitle.trim()) {
-      showToast("Please enter an investigation case title.", "error");
+      showToast("Please enter a title.", "error");
       return;
     }
 
     if (newSuspectAddr.trim()) {
       const validation = validateBtcAddress(newSuspectAddr.trim());
       if (!validation.isValid) {
-        showToast(`Target address warning: ${validation.error}`, "warning");
+        showToast(`Address warning: ${validation.error}`, "warning");
       }
     }
 
@@ -137,7 +138,7 @@ export default function Dashboard() {
       suspectAddress: newSuspectAddr.trim() || 'bc1q999targetwalletcustomforensicnode',
       amount: `${parseFloat(newAmount) || 1.0} BTC`,
       targetExchange: newExchange,
-      description: newNotes.trim() || 'Custom on-chain intelligence dossier assembled by investigator.'
+      description: newNotes.trim() || 'Notes added by the investigator.'
     });
 
     setIsModalOpen(false);
@@ -160,6 +161,18 @@ export default function Dashboard() {
     );
   }, [scenarios, caseFilter]);
 
+  const queryType = useMemo(() => {
+    const trimmed = searchVal.trim();
+    if (!trimmed) return null;
+    if (trimmed.length === 64 && /^[0-9a-fA-F]+$/.test(trimmed)) {
+      return { label: 'Transaction hash', color: 'var(--primary)', bg: 'rgba(59, 130, 246, 0.12)', border: 'rgba(59, 130, 246, 0.3)' };
+    }
+    if (trimmed.startsWith('bc1') || trimmed.startsWith('1') || trimmed.startsWith('3')) {
+      return { label: 'Address', color: 'var(--risk-low)', bg: 'rgba(16, 185, 129, 0.12)', border: 'rgba(16, 185, 129, 0.3)' };
+    }
+    return { label: 'Estimate', color: '#a855f7', bg: 'rgba(168, 85, 247, 0.12)', border: 'rgba(168, 85, 247, 0.3)' };
+  }, [searchVal]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       
@@ -167,14 +180,14 @@ export default function Dashboard() {
       <div className="glass-panel" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
           <h2 style={{ fontSize: '1.15rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <SearchCode style={{ color: 'var(--primary)' }} size={20} /> Trace On-Chain Transaction / Address
+            <SearchCode style={{ color: 'var(--primary)' }} size={20} /> Trace a transaction or address
           </h2>
           
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
               <Sliders size={13} aria-hidden="true" style={{ color: 'var(--primary)' }} />
               <label htmlFor="trace-depth-select" style={{ position: 'absolute', width: '1px', height: '1px', overflow: 'hidden', clip: 'rect(0,0,0,0)' }}>Trace depth</label>
-              <span id="trace-depth-label">Trace Depth:</span>
+              <span id="trace-depth-label">Depth:</span>
               <select 
                 id="trace-depth-select"
                 aria-labelledby="trace-depth-label"
@@ -183,9 +196,9 @@ export default function Dashboard() {
                 className="select-field"
                 style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}
               >
-                <option value={1}>1 Hop (Direct Outspends)</option>
-                <option value={2}>2 Hops (Layering Chains)</option>
-                <option value={3}>3 Hops (Deep Cluster Trail)</option>
+                <option value={1}>1 step (direct)</option>
+                <option value={2}>2 steps</option>
+                <option value={3}>3 steps (deep)</option>
               </select>
             </div>
 
@@ -202,17 +215,17 @@ export default function Dashboard() {
         </div>
 
         <p style={{ color: 'var(--text-secondary)', fontSize: '0.825rem' }}>
-          Enter any Bitcoin transaction hash (64 hex characters) or address (starting with bc1, 1, or 3) to execute recursive outspend tracking.
+          Enter a transaction hash (64 characters) or an address to follow the money forward.
         </p>
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }} aria-label="Blockchain trace search">
-          <div style={{ position: 'relative', flex: 1 }}>
-            <Search aria-hidden="true" style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} size={16} />
+          <div style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center' }}>
+            <Search aria-hidden="true" style={{ position: 'absolute', left: '0.75rem', color: 'var(--text-muted)' }} size={16} />
             <label htmlFor="trace-search-input" style={{ position: 'absolute', width: '1px', height: '1px', overflow: 'hidden', clip: 'rect(0,0,0,0)' }}>Transaction hash or address</label>
             <input
               id="trace-search-input"
               type="text"
-              placeholder="Enter Tx Hash (e.g. 4b9a8f2e...) or Address (e.g. bc1q...)"
+              placeholder="Enter tx hash or address (e.g. bc1q...)"
               value={searchVal}
               onChange={(e) => setSearchVal(e.target.value)}
               className="mono-addr input-field"
@@ -222,11 +235,32 @@ export default function Dashboard() {
               style={{
                 width: '100%',
                 paddingLeft: '2.25rem',
+                paddingRight: searchVal ? '2rem' : '0.65rem',
                 paddingTop: '0.6rem',
                 paddingBottom: '0.6rem',
                 fontSize: '0.825rem'
               }}
             />
+            {searchVal && (
+              <button
+                type="button"
+                onClick={() => setSearchVal('')}
+                aria-label="Clear search input"
+                style={{
+                  position: 'absolute',
+                  right: '0.6rem',
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  padding: '2px',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}
+              >
+                <X size={14} />
+              </button>
+            )}
           </div>
           <button
             type="submit"
@@ -238,19 +272,40 @@ export default function Dashboard() {
           </button>
         </form>
 
-        {/* Quick Sample Queries */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Quick Queries:</span>
-          {sampleQueries.map((sq, i) => (
-            <button
-              key={i}
-              onClick={() => handleSampleClick(sq.value)}
-              className="btn"
-              style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+        {/* Live query format pill & Quick Sample Queries */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Try:</span>
+            {sampleQueries.map((sq, i) => (
+              <button
+                key={i}
+                onClick={() => handleSampleClick(sq.value)}
+                className="btn"
+                title={sq.title}
+                style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
+              >
+                {sq.label}
+              </button>
+            ))}
+          </div>
+          {queryType && (
+            <span
+              style={{
+                fontSize: '0.7rem',
+                fontWeight: 600,
+                color: queryType.color,
+                backgroundColor: queryType.bg,
+                border: `1px solid ${queryType.border}`,
+                padding: '0.15rem 0.5rem',
+                borderRadius: '4px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.3rem'
+              }}
             >
-              {sq.label}
-            </button>
-          ))}
+              Detected: {queryType.label}
+            </span>
+          )}
         </div>
       </div>
 
@@ -309,9 +364,9 @@ export default function Dashboard() {
       <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <FileCheck size={18} style={{ color: 'var(--primary)' }} /> Active Session Traces
-            </h3>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <FileCheck size={18} style={{ color: 'var(--primary)' }} /> Cases
+              </h3>
             <span className="badge-pill badge-pill-info">{filteredCases.length} Cases</span>
           </div>
 
@@ -418,7 +473,21 @@ export default function Dashboard() {
                     className="btn btn-outline"
                     style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
                   >
-                    <span>Open Graph</span> <ArrowRight size={13} />
+                    <span>Open</span> <ArrowRight size={13} />
+                  </button>
+
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigator.clipboard.writeText(JSON.stringify(c, null, 2));
+                      showToast(`Case copied to clipboard.`, 'success');
+                    }}
+                    className="btn btn-outline"
+                    style={{ padding: '0.35rem 0.5rem', fontSize: '0.75rem' }}
+                    title="Copy Case JSON data"
+                    aria-label={`Copy ${c.title} JSON`}
+                  >
+                    <Copy size={13} />
                   </button>
 
                   <button
@@ -449,9 +518,9 @@ export default function Dashboard() {
         <div className="modal-backdrop" onClick={() => setIsModalOpen(false)} role="presentation">
           <div className="modal-content" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="new-case-title">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.75rem' }}>
-              <h3 id="new-case-title" style={{ fontSize: '1.15rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fff' }}>
-                <PlusCircle size={18} aria-hidden="true" style={{ color: 'var(--primary)' }} /> Create Custom Forensic Case
-              </h3>
+                <h3 id="new-case-title" style={{ fontSize: '1.15rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#fff' }}>
+                  <PlusCircle size={18} aria-hidden="true" style={{ color: 'var(--primary)' }} /> New case
+                </h3>
               <button 
                 onClick={() => setIsModalOpen(false)}
                 aria-label="Close dialog"
@@ -464,12 +533,12 @@ export default function Dashboard() {
 
             <form onSubmit={handleCreateCaseSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
-                <label htmlFor="new-case-title-input" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Case / Operation Title *</label>
+                <label htmlFor="new-case-title-input" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Title *</label>
                 <input
                   id="new-case-title-input"
                   type="text"
                   required
-                  placeholder="e.g. Operation DarkFlow - BTC Syndicate"
+                  placeholder="e.g. Operation DarkFlow"
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
                   className="input-field"
@@ -479,7 +548,7 @@ export default function Dashboard() {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                 <div>
-                  <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Suspect Entity Name</label>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Name</label>
                   <input
                     type="text"
                     placeholder="e.g. Target Entity Alpha"
@@ -490,7 +559,7 @@ export default function Dashboard() {
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Traced BTC Volume</label>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Amount (BTC)</label>
                   <input
                     type="number"
                     step="0.0001"
@@ -504,7 +573,7 @@ export default function Dashboard() {
               </div>
 
               <div>
-                <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Suspect / Origin Bitcoin Address</label>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Bitcoin address</label>
                 <input
                   type="text"
                   placeholder="bc1q... or 1... or 3..."
@@ -516,7 +585,7 @@ export default function Dashboard() {
               </div>
 
               <div>
-                <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Destination Exchange Endpoint</label>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Destination exchange</label>
                 <select
                   value={newExchange}
                   onChange={(e) => setNewExchange(e.target.value)}
@@ -530,10 +599,10 @@ export default function Dashboard() {
               </div>
 
               <div>
-                <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Intelligence Brief / Case Notes</label>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Notes</label>
                 <textarea
                   rows={3}
-                  placeholder="Enter initial investigation intelligence, source notes, or FIR context..."
+                  placeholder="Add background notes..."
                   value={newNotes}
                   onChange={(e) => setNewNotes(e.target.value)}
                   className="input-field"

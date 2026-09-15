@@ -20,7 +20,6 @@ import {
   Code2,
   Star,
   ExternalLink,
-  Droplets,
   Tag,
   BarChart3,
   Timer
@@ -29,9 +28,20 @@ import { useToast } from '../../hooks/useToast';
 import { decodeScriptPubkey } from '../../utils/scriptDecoder';
 import { computeNodeCentralityMetrics } from '../../utils/graphAlgorithms';
 import { calculateTaintMap, formatTaintPct, taintTier } from '../../utils/taintAnalysis';
+import { scanCaseSweeps } from '../../utils/obfuscationForensics';
+import { scanCaseStructuring } from '../../utils/structuringAnalysis';
 import { tagKnownEntity, getExplorerUrls } from '../../utils/knownEntities';
 import { useWatchlist } from '../../hooks/useWatchlist';
+import { useEndpointProfile } from '../../hooks/useEndpointProfile';
 import { getFeeTier } from '../../utils/traceHeuristics';
+
+const ENDPOINT_PROFILE_LABELS = {
+  SINGLE_USE_DEPOSIT: 'Single-use deposit',
+  DRAINED_PASS_THROUGH: 'Drained — moved on',
+  ACTIVE_REUSED_WALLET: 'Active reused wallet',
+  DORMANT_HOLDER: 'Dormant holder',
+  UNPROFILED: 'Unprofiled',
+};
 
 export default function MetadataSidebar({ 
   selectedNode, 
@@ -48,6 +58,10 @@ export default function MetadataSidebar({
   const [newNoteText, setNewNoteText] = useState('');
   const [showNotesSection, setShowNotesSection] = useState(false);
   const [showScriptDetails, setShowScriptDetails] = useState(false);
+  const endpointProfile = useEndpointProfile(
+    selectedNode?.details?.address,
+    selectedNode?.type === 'receiver'
+  );
 
   const handleCopy = (text) => {
     navigator.clipboard.writeText(text);
@@ -70,6 +84,7 @@ export default function MetadataSidebar({
   const knownTag = tagKnownEntity(details.address);
   const explorer = getExplorerUrls(details.address || selectedNode?.id);
   const feeTier = details.feeRateSatVb ? getFeeTier(details.feeRateSatVb.replace(/[^0-9.]/g,'')) : null;
+  const feeReplaceable = /Replaceable|RBF Enabled/.test(details.rbfStatus || '');
 
   const taintInfo = useMemo(() => {
     if (!activeCase?.nodes?.length || !activeCase?.links?.length || !selectedNode) return null;
@@ -83,6 +98,19 @@ export default function MetadataSidebar({
     if (!activeCase?.nodes?.length || !activeCase?.links?.length || !selectedNode) return null;
     const allMetrics = computeNodeCentralityMetrics(activeCase.nodes, activeCase.links);
     return allMetrics[selectedNode.id] || null;
+  }, [activeCase, selectedNode]);
+
+  // Typology flags: sweep involvement and structuring-source role for this node
+  const typologyFlags = useMemo(() => {
+    if (!activeCase?.nodes?.length || !activeCase?.links?.length || !selectedNode) return { sweep: null, structuring: null };
+    const sweeps = scanCaseSweeps(activeCase.nodes, activeCase.links);
+    const structuring = scanCaseStructuring(activeCase.nodes, activeCase.links);
+    return {
+      sweep: sweeps.detected ? (sweeps.sweeps.find(s => s.nodeId === selectedNode.id) || null) : null,
+      structuring: structuring.detected
+        ? (structuring.sources.find(s => s.sourceId === selectedNode.id) || null)
+        : null,
+    };
   }, [activeCase, selectedNode]);
 
   // Decode Script template & opcodes
@@ -138,11 +166,14 @@ export default function MetadataSidebar({
           {/* Address / Tx Reference Bar */}
           <div style={{ backgroundColor: 'rgba(5, 8, 16, 0.9)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Reference Hash / Address</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Address / reference</span>
               <button
                 onClick={() => {
-                  const now = toggle(details.address);
-                  showToast(now ? 'Added to watchlist' : 'Removed from watchlist', now ? 'success' : 'info');
+                  const result = toggle(details.address);
+                  if (result === 'added') showToast('Address added to watchlist.', 'success');
+                  else if (result === 'removed') showToast('Address removed.', 'info');
+                  else if (result === 'full') showToast('Watchlist is full (100).', 'warning');
+                  else showToast('Only Bitcoin addresses can be watched.', 'warning');
                 }}
                 className="btn"
                 aria-pressed={watched}
@@ -179,42 +210,68 @@ export default function MetadataSidebar({
             )}
           </div>
 
-          {/* Forensic Centrality & Flow Metrics */}
+          {/* Flow metrics */}
           {centralityMetrics && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.75rem' }}>
               <div style={{ backgroundColor: 'rgba(5, 8, 16, 0.6)', padding: '0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-                <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.65rem' }}>Flow In / Out Degree</span>
-                <strong style={{ color: '#fff' }}>{centralityMetrics.inDegree} In • {centralityMetrics.outDegree} Out</strong>
+                <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.65rem' }}>In / out</span>
+                <strong style={{ color: '#fff' }}>{centralityMetrics.inDegree} in • {centralityMetrics.outDegree} out</strong>
               </div>
               <div style={{ backgroundColor: 'rgba(5, 8, 16, 0.6)', padding: '0.5rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-                <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.65rem' }}>Transit Hub Status</span>
+                <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.65rem' }}>Hub</span>
                 <strong style={{ color: centralityMetrics.isHub ? '#f59e0b' : 'var(--text-secondary)' }}>
-                  {centralityMetrics.isHub ? '⚡ Transit Flow Hub' : 'Standard Hop'}
+                  {centralityMetrics.isHub ? 'Busy hub' : 'No'}
                 </strong>
               </div>
             </div>
           )}
-          {/* Taint Propagation */}
-          {taintInfo && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem', borderRadius: '6px', backgroundColor: taintInfo.tier.bg, border: `1px solid ${taintInfo.tier.color}30`, fontSize: '0.75rem' }}>
-              <Droplets size={13} style={{ color: taintInfo.tier.color }} aria-hidden="true" />
-              <span style={{ color: 'var(--text-muted)' }}>Taint from origin:</span>
-              <strong style={{ color: taintInfo.tier.color }}>{taintInfo.formatted}</strong>
-              <span style={{ marginLeft: 'auto', fontSize: '0.65rem', padding: '0.1rem 0.3rem', borderRadius: '3px', backgroundColor: 'rgba(0,0,0,0.2)', color: taintInfo.tier.color }}>{taintInfo.tier.label}</span>
+          {/* Flow signals */}
+          {(typologyFlags.sweep || typologyFlags.structuring || taintInfo || (selectedNode.type === 'receiver' && endpointProfile.status === 'ready' && endpointProfile.profile)) && (
+            <div style={{ backgroundColor: 'rgba(5, 8, 16, 0.6)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.6rem 0.75rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.75rem' }}>
+              <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Signals</span>
+              {typologyFlags.sweep && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Sweep</span>
+                  <span style={{ fontWeight: 600, color: typologyFlags.sweep.cashoutUrgency === 'IMMINENT' ? '#ef4444' : '#f59e0b' }}>
+                    {typologyFlags.sweep.cashoutUrgency === 'IMMINENT' ? 'Likely cash-out' : 'Aggregation'} · {typologyFlags.sweep.inputCount}→1 · {typologyFlags.sweep.consolidatedBtc} BTC
+                  </span>
+                </div>
+              )}
+              {typologyFlags.structuring && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Structuring</span>
+                  <span style={{ fontWeight: 600, color: '#f59e0b' }}>{typologyFlags.structuring.maxBandSize} similar payments</span>
+                </div>
+              )}
+              {taintInfo && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Taint</span>
+                  <span style={{ fontWeight: 600, color: taintInfo.tier.color }}>{taintInfo.formatted}</span>
+                </div>
+              )}
+              {selectedNode.type === 'receiver' && endpointProfile.status === 'ready' && endpointProfile.profile && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Endpoint</span>
+                  <span style={{ fontWeight: 600, color: '#fff', textAlign: 'right' }}>
+                    {ENDPOINT_PROFILE_LABELS[endpointProfile.profile.profile] || endpointProfile.profile.profile}
+                    <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> · {(endpointProfile.profile.totalReceivedSats / 1e8).toFixed(4)} BTC · {endpointProfile.profile.txCount} txs{endpointProfile.profile.isAggregator ? ' · aggregator' : ''}</span>
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
-          {/* Forensic Metadata & Technical Parameters */}
+          {/* Details */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', fontSize: '0.825rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Type/Role:</span>
+              <span style={{ color: 'var(--text-secondary)' }}>Type:</span>
               <span style={{ fontWeight: 600, textTransform: 'capitalize' }}>{selectedNode.type}</span>
             </div>
 
             {details.scriptStandard && (
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                  <FileCode size={13} style={{ color: 'var(--primary)' }} /> Script Standard:
+                  <FileCode size={13} style={{ color: 'var(--primary)' }} /> Address type:
                 </span>
                 <span style={{ fontWeight: 600, color: 'var(--primary)' }}>{details.scriptStandard}</span>
               </div>
@@ -223,24 +280,15 @@ export default function MetadataSidebar({
             {details.feeRateSatVb && (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                  <Zap size={13} style={{ color: '#f59e0b' }} /> Fee Rate:
+                  <Zap size={13} style={{ color: '#f59e0b' }} /> Fee:
                 </span>
-                <span style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.3rem' }}>{details.feeRateSatVb} ({details.vsize}) {feeTier && <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', borderRadius: '3px', backgroundColor: `${feeTier.color}18`, color: feeTier.color }}>{feeTier.label}</span>}</span>
+                <span style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.3rem' }}>{details.feeRateSatVb}{details.vsize ? ` · ${details.vsize}` : ''}{feeReplaceable ? ' · can be replaced' : ''} {feeTier && <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', borderRadius: '3px', backgroundColor: `${feeTier.color}18`, color: feeTier.color }}>{feeTier.label}</span>}</span>
               </div>
             )}
             {details.blockHeight != null && (
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}><Timer size={12} /> Block:</span>
                 <span style={{ fontWeight: 600, fontFamily: 'monospace' }}>#{details.blockHeight}</span>
-              </div>
-            )}
-
-            {details.rbfStatus && (
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>RBF Protocol:</span>
-                <span style={{ fontWeight: 600, color: details.rbfStatus.includes('Enabled') ? '#f59e0b' : 'var(--text-secondary)' }}>
-                  {details.rbfStatus}
-                </span>
               </div>
             )}
 
@@ -254,28 +302,28 @@ export default function MetadataSidebar({
             )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>Last Activity:</span>
+              <span style={{ color: 'var(--text-secondary)' }}>Last seen:</span>
               <span style={{ fontWeight: 600 }}>{details.lastActive}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>IP Logs (OSINT):</span>
+              <span style={{ color: 'var(--text-secondary)' }}>Network:</span>
               <span style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                 <MapPin size={12} style={{ color: '#ef4444' }} /> {details.ipLog}
               </span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>KYC Status:</span>
+              <span style={{ color: 'var(--text-secondary)' }}>Identity check:</span>
               <span style={{ fontWeight: 600, color: selectedNode.type === 'receiver' ? '#10b981' : 'var(--text-muted)' }}>
                 {details.kycStatus}
               </span>
             </div>
 
-            {/* Cryptographic Script Disassembler Panel */}
+            {/* Script details panel */}
             {scriptAnalysis && (
               <div style={{ marginTop: '0.5rem', backgroundColor: 'rgba(5, 8, 16, 0.8)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.75rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
                   <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                    <Code2 size={13} /> Script Disassembly & BIP
+                    <Code2 size={13} /> Script details
                   </span>
                   <button
                     onClick={() => setShowScriptDetails(!showScriptDetails)}
@@ -290,9 +338,9 @@ export default function MetadataSidebar({
 
                 {showScriptDetails && (
                   <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column', gap: '0.3rem', fontSize: '0.7rem' }}>
-                    <div style={{ color: '#cbd5e1' }}><strong>ASM Bytecode:</strong> <code style={{ color: 'var(--primary)' }}>{scriptAnalysis.asm}</code></div>
+                    <div style={{ color: '#cbd5e1' }}><strong>Code:</strong> <code style={{ color: 'var(--primary)' }}>{scriptAnalysis.asm}</code></div>
                     <div style={{ color: 'var(--text-muted)' }}>Rating: {scriptAnalysis.securityRating}</div>
-                    <div style={{ color: 'var(--text-muted)' }}>Spend: {scriptAnalysis.spendRequirement}</div>
+                    <div style={{ color: 'var(--text-muted)' }}>To spend: {scriptAnalysis.spendRequirement}</div>
                   </div>
                 )}
               </div>
@@ -302,18 +350,19 @@ export default function MetadataSidebar({
             {details.heuristicBreakdown && (
               <div style={{ marginTop: '0.5rem', backgroundColor: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.18)', borderRadius: '6px', padding: '0.75rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}><BarChart3 size={13} /> Forensic Heuristic Score: {details.heuristicScore != null ? `${details.heuristicScore > 0 ? '+' : ''}${details.heuristicScore}` : '—'} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(conf {(details.heuristicConfidence*100).toFixed(0)}%)</span></span>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}><BarChart3 size={13} /> Score breakdown: {details.heuristicScore != null ? `${details.heuristicScore > 0 ? '+' : ''}${details.heuristicScore}` : '—'} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>({(details.heuristicConfidence*100).toFixed(0)}% confidence)</span></span>
                   <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem', borderRadius: '3px', backgroundColor: details.heuristicScore > 1 ? 'rgba(16,185,129,0.15)' : details.heuristicScore < -1 ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.06)', color: details.heuristicScore > 1 ? '#10b981' : details.heuristicScore < -1 ? '#ef4444' : 'var(--text-muted)' }}>{details.heuristicScore > 1 ? 'Payment' : details.heuristicScore < -1 ? 'Change' : 'Ambiguous'}</span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
                   {[
-                    ['Script type', details.heuristicBreakdown.scriptScore],
-                    ['Reuse/fresh', details.heuristicBreakdown.reuseScore],
-                    ['Value round', details.heuristicBreakdown.roundnessScore],
+                    ['Address type', details.heuristicBreakdown.scriptScore],
+                    ['Reuse', details.heuristicBreakdown.reuseScore],
+                    ['Round amount', details.heuristicBreakdown.roundnessScore],
                     ['Position', details.heuristicBreakdown.positionScore],
                     ['Spent', details.heuristicBreakdown.spentScore],
-                    ...(details.heuristicBreakdown.fingerprintScore != null ? [['Fingerprint', details.heuristicBreakdown.fingerprintScore]] : []),
-                    ...(details.heuristicBreakdown.feeScore != null ? [['Fee ctx', details.heuristicBreakdown.feeScore]] : []),
+                    ...(details.heuristicBreakdown.fingerprintScore != null ? [['Pattern', details.heuristicBreakdown.fingerprintScore]] : []),
+                    ...(details.heuristicBreakdown.feeScore != null ? [['Fee', details.heuristicBreakdown.feeScore]] : []),
+                    ...(details.heuristicBreakdown.identityScore ? [['Identity', details.heuristicBreakdown.identityScore]] : []),
                   ].map(([label, val]) => (
                     <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.7rem' }}>
                       <span style={{ width: '70px', color: 'var(--text-muted)' }}>{label}</span>
@@ -324,8 +373,11 @@ export default function MetadataSidebar({
                     </div>
                   ))}
                 </div>
+                {details.heuristicBreakdown.dwellBlocks != null && (
+                  <div style={{ marginTop: '0.4rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>Spent {details.heuristicBreakdown.dwellBlocks} blocks after the parent</div>
+                )}
                 {details.exchangeConf != null && (
-                  <div style={{ marginTop: '0.4rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>Exchange deposit confidence: <strong style={{ color: details.exchangeConf > 0.4 ? '#f59e0b' : 'var(--text-secondary)' }}>{(details.exchangeConf*100).toFixed(0)}%</strong></div>
+                  <div style={{ marginTop: '0.4rem', fontSize: '0.7rem', color: 'var(--text-muted)' }}>Exchange likelihood: <strong style={{ color: details.exchangeConf > 0.4 ? '#f59e0b' : 'var(--text-secondary)' }}>{(details.exchangeConf*100).toFixed(0)}%</strong></div>
                 )}
               </div>
             )}
@@ -333,7 +385,7 @@ export default function MetadataSidebar({
             {details.opReturnHex && (
               <div style={{ marginTop: '0.5rem', backgroundColor: 'rgba(168, 85, 247, 0.08)', border: '1px solid #a855f7', borderRadius: '6px', padding: '0.75rem' }}>
                 <span style={{ fontSize: '0.75rem', color: '#a855f7', fontWeight: 700, textTransform: 'uppercase', display: 'block', marginBottom: '0.3rem' }}>
-                  Decoded OP_RETURN Data
+                  Embedded message
                 </span>
                 {details.opReturnDecoded && (
                   <div style={{ fontSize: '0.8rem', color: '#fff', fontWeight: 600, marginBottom: '0.3rem' }}>
@@ -341,22 +393,22 @@ export default function MetadataSidebar({
                   </div>
                 )}
                 <div className="mono-addr" style={{ fontSize: '0.7rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
-                  Raw Hex: {details.opReturnHex}
+                  Raw code: {details.opReturnHex}
                 </div>
               </div>
             )}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.75rem' }}>
-              <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}><ShieldAlert size={12} /> Risk Rationale:</span>
+              <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}><ShieldAlert size={12} /> Why flagged:</span>
               <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', lineHeight: '1.4' }}>{details.riskReason}</p>
             </div>
           </div>
 
-          {/* Investigator Field Notes & Case Evidence Log */}
+          {/* Notes */}
           <div style={{ marginTop: '0.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
               <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                <FileEdit size={13} style={{ color: 'var(--primary)' }} /> Investigator Field Notes ({notesList.length})
+                <FileEdit size={13} style={{ color: 'var(--primary)' }} /> Notes ({notesList.length})
               </span>
               <button
                 onClick={() => setShowNotesSection(!showNotesSection)}
@@ -408,7 +460,7 @@ export default function MetadataSidebar({
             )}
           </div>
 
-          {/* Expand hop and KYC options */}
+          {/* Expand and notice options */}
           {selectedNode.type === 'receiver' ? (
             <div className="pulse-glow-border" style={{ 
               backgroundColor: 'rgba(16, 185, 129, 0.05)', 
@@ -417,7 +469,7 @@ export default function MetadataSidebar({
               padding: '0.75rem' 
             }}>
               <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                <User size={12} /> KYC Profile Available
+                <User size={12} /> Identity record available
               </span>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.25rem', marginTop: '0.5rem', fontSize: '0.8rem' }}>
                 <div>Name: <strong style={{ color: '#fff' }}>{details.ownerName || 'Identified Gateway'}</strong></div>
@@ -434,7 +486,7 @@ export default function MetadataSidebar({
                   fontSize: '0.8rem'
                 }}
               >
-                Request Formal Notice
+                Prepare notice
               </button>
             </div>
           ) : !selectedNode.id.startsWith('tx_') && onExpandAddress ? (
@@ -449,14 +501,14 @@ export default function MetadataSidebar({
                 fontSize: '0.85rem'
               }}
             >
-              <Search size={14} /> Trace Forward (Query Address Hops)
+              <Search size={14} /> Trace forward
             </button>
           ) : null}
         </>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)' }}>
           <HelpCircle size={40} />
-          <p style={{ marginTop: '1rem', textAlign: 'center', fontSize: '0.85rem' }}>Select a node in the graph explorer to inspect its cryptocurrency parameters.</p>
+          <p style={{ marginTop: '1rem', textAlign: 'center', fontSize: '0.85rem' }}>Select a node to inspect it.</p>
         </div>
       )}
     </div>

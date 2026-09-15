@@ -9,9 +9,16 @@
  *  H2: Address Reuse & Freshness (18%) — change goes to fresh address, payment often reused but not always
  *  H3: Value Roundness & Amount Pattern (18%) — payments often round (e.g. 0.1 BTC), change is "dusty remainder"
  *  H4: Output Position / Wallet Fingerprint (12%) — many wallets order change last (BIP69) or first; weight light
- *  H5: Spent Status + Future Behavior (18%) — unspent = terminal; spent quickly with many confirms = transit
- *  H6: Transaction Fingerprint (8%) — 1-in-2-out peel vs 1-in-many consolidation vs many-in-many CoinJoin structure
- *  H7: Fee Market Context (6%) — extreme fee rates suggest manual bump / CPFP, not typical peel change
+ *  H5: Spent Status + Dwell Behavior (18%) — unspent = terminal; spent+dwelled =
+ *      recipient action (neutral); spent within ~a day = change sweep (transit)
+ *  H6: Transaction Fingerprint (8%) — 1-in-2-out peel vs batch dispersal vs many-in-many CoinJoin structure
+ *       (single-output shape is owned by H8, not fingerprinted as "consolidation")
+ *  H7: Fee Market Context (6%) — post-2015 fee rates only; pre-fee-market eras skip this signal
+ *  H8: Single-Output Address Identity (shares H2 budget) — one value-bearing output cannot be
+ *      "change alongside a payment". Identity is decisive: back to an input address =>
+ *      self-consolidation (change); anywhere else => payment. Fresh output => high
+ *      confidence (cf. May-2010 10,000 BTC pizza purchase: 131 inputs, one fresh
+ *      round output); previously-seen output => tempered (possible change-address reuse).
  *
  * Also exports: valueConservationCheck, detectDustOutputs, exchangeDepositHeuristic, computeTraceConfidence
  */
@@ -21,16 +28,17 @@ export const DUST_THRESHOLD_SATS = BITCOIN_CONSTANTS.DUST_THRESHOLD_SATS;
 export const TRACE_CONFIG = CENTRAL_TRACE_CONFIG;
 
 /**
- * Check if satoshi value looks "round" (likely human-specified payment) vs remainder change
+ * Check if satoshi value looks "round" (likely human-specified payment) vs remainder change.
+ * Uses integer satoshi arithmetic only — floating-point BTC multiplication
+ * (e.g. 0.07 * 100 === 7.000000000001) misclassifies near-round values.
  */
 export function isRoundValue(sats) {
-  if (!Number.isFinite(sats) || sats <= 0) return false;
-  // Round if divisible by 100k sats (0.001 BTC) or 10k with zero trailing, or exactly 1M multiples
+  if (!Number.isFinite(sats) || sats <= 0 || !Number.isInteger(sats)) return false;
+  // Round if divisible by 100k sats (0.001 BTC — covers 0.01/0.1/1.0 BTC tiers)
   if (sats % 100000 === 0) return true;
+  // Round milli-BTC style amounts with at least 4 trailing zeros
   if (sats % 10000 === 0 && String(sats).endsWith('0000')) return true;
-  // Also round BTC amounts like 0.1, 0.5, 1.0
-  const btc = sats / 1e8;
-  return Number.isInteger(btc * 10) || Number.isInteger(btc * 100);
+  return false;
 }
 
 /**
@@ -38,7 +46,15 @@ export function isRoundValue(sats) {
  * @param {Object} params - { tx, outputIndex, inputScriptTypes, outspends, seenAddresses }
  * @returns {{ score: number, confidence: number, breakdown: object, isChangeCandidate: boolean, isPaymentCandidate: boolean }}
  */
-export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outspends, seenAddresses }) {
+/**
+ * Start of the modern fee market: before ~2015-01-01 there was no sat/vB fee
+ * market, so absolute fee-rate thresholds (80 sat/vB "urgent", <2 "uneconomic")
+ * misread historic transactions (e.g. a 2010 tx paying 0.99 BTC fee over a tiny
+ * vsize reads as 4000+ sat/vB "urgent"). H7 is skipped for older blocks.
+ */
+export const FEE_MARKET_GENESIS_TIME = 1420070400;
+
+export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outspends, seenAddresses, outputId = null }) {
   const outputs = tx.vout || [];
   const output = outputs[outputIndex];
   if (!output) return { score: 0, confidence: 0, breakdown: {}, isChangeCandidate: false, isPaymentCandidate: false };
@@ -49,11 +65,21 @@ export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outsp
   const outspend = outspends[outputIndex] || {};
   const isSpent = outspend.spent === true;
 
+  // Shared context: input identity keys (address or bare pubkey) and the set
+  // of value-bearing outputs. H8 fires only for the single value-bearing
+  // output (OP_RETURN / zero-value carriers can never be change OR payment).
+  const inputIdentityKeys = (tx.vin || []).map(v => getIdentityKey(v.prevout)).filter(Boolean);
+  const outputIdentityKey = getIdentityKey(output);
+  const valueOutputs = outputs.filter(o => (o.value || 0) > 0);
+  const isSoleValueOutput = value > 0 && valueOutputs.length === 1 && valueOutputs[0] === output;
+
   // --- H1: Script Type Consistency (wallet usually matches change type) ---
   let scriptScore = 0;
   if (inputScriptTypes && inputScriptTypes.length > 0) {
-    // Use majority vote over all inputs, not just first
-    const freq = inputScriptTypes.reduce((a, t) => { a[t] = (a[t] || 0) + 1; return a; }, {});
+    // Majority vote over NORMALIZED input types — display names and raw
+    // esplora types are mapped into the heuristic key space first.
+    const normalizedInputs = inputScriptTypes.map(normalizeScriptKey);
+    const freq = normalizedInputs.reduce((a, t) => { a[t] = (a[t] || 0) + 1; return a; }, {});
     const majorityType = Object.entries(freq).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
     const outputScript = getScriptTypeFromHeuristic(address, scriptType);
     const otherOutputsDifferent = outputs.some((o, idx) => {
@@ -80,11 +106,13 @@ export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outsp
       // Fresh change addresses are usually new; payment may be known exchange
       reuseScore = -0.5;
     }
-    // Self-transfer detection: output reuses any input address => definitely change
-    const inputAddrs = (tx.vin || []).map(v => v.prevout?.scriptpubkey_address).filter(Boolean);
-    if (inputAddrs.includes(address)) {
-      reuseScore = -5.0; // strong change signal (self transfer)
-    }
+  }
+  // Self-transfer detection (outside the address gate: bare-pubkey outputs
+  // have no address). Output reusing any input identity (address or pubkey)
+  // => definitely change. Pubkey comparison rescues 2009-era P2PK flows where
+  // no addresses exist at all.
+  if (outputIdentityKey && inputIdentityKeys.includes(outputIdentityKey)) {
+    reuseScore = -5.0; // strong change signal (self transfer)
   }
 
   // --- H3: Value roundness ---
@@ -96,13 +124,20 @@ export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outsp
   } else if (outputs.length === 2) {
     const otherVal = outputs[1 - outputIndex]?.value || 0;
     const total = value + otherVal;
-    // Smaller输出通常是payment peeling, larger是change
+    // In a 2-output peel the smaller output is usually the peeled payment
+    // and the larger remainder is the change going back to the sender wallet.
+    // NOTE: share must be value/total — min/total can never exceed 0.5, so a
+    // min-based "dominant remainder" test is dead code (cf. 2017 ransom peel
+    // 2b22df65: 9.02 BTC change beside a 0.003 BTC peel would never trigger).
     if (total > 0) {
-      const ratio = Math.min(value, otherVal) / total;
-      if (value < otherVal && ratio < 0.3) {
-        roundnessScore = 1.2; // small peel payment
-      } else if (value > otherVal && ratio > 0.7) {
-        roundnessScore = -1.5; // large change leftover
+      const share = value / total;
+      if (value < otherVal && share < 0.3) {
+        // Extreme peels (<5% sliver beside a dominant remainder, cf. ransom
+        // splits) score stronger: a fast dwell alone must not flip them into
+        // confident change when the shape screams payment.
+        roundnessScore = share < 0.05 ? 2.0 : 1.2; // small peel payment
+      } else if (value > otherVal && share > 0.7) {
+        roundnessScore = -1.5; // dominant remainder is change
       }
     }
   }
@@ -120,12 +155,23 @@ export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outsp
     if (isSmallest && value < (outputs.reduce((s, o) => s + (o.value || 0), 0) / outputs.length)) positionScore = -0.8;
   }
 
-  // --- H5: Spent status ---
+  // --- H5: Spent status + dwell behavior ---
+  // A spent output's dwell (parent block -> spender block) separates change
+  // sweeps (spent in the wallet's very next tx) from real payments (dwelling
+  // in the recipient's wallet — the spend is the RECIPIENT's later action, so
+  // the transit penalty is lifted). Cf. Jan-2009 first-ever tx: 40 BTC change
+  // swept 11 blocks later, 10 BTC payment dwelled 92,070 blocks.
   let spentScore = 0;
+  let dwellBlocks = null;
   if (!isSpent) {
     spentScore = 3.5; // unspent terminal -> strong payment/UTXO signal
-  } else if (isSpent) {
+  } else {
     spentScore = -1.0;
+    dwellBlocks = getSpendDwellBlocks(tx, outspend);
+    if (dwellBlocks != null) {
+      if (dwellBlocks <= QUICK_SPEND_BLOCKS) spentScore = -2.0; // fast sweep — change-leaning
+      else if (dwellBlocks >= LONG_DWELL_BLOCKS) spentScore = 0.0; // dwelled — recipient action, neutral
+    }
   }
 
   // --- H6: Transaction fingerprint ---
@@ -139,23 +185,50 @@ export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outsp
     // Batch peel / dispersal — small outputs are payments, largest is change
     if (voutLen <= 5 && value < (outputs.reduce((s, o) => s + (o.value || 0), 0) / voutLen)) fingerprintScore = 1.0;
     else if (value === Math.max(...outputs.map(o => o.value || 0))) fingerprintScore = -1.2;
-  } else if (vinLen >= 3 && voutLen === 1) {
-    // Consolidation — single output is not payment to external party but consolidation change-like
-    fingerprintScore = -1.5;
   } else if (vinLen >= 2 && voutLen >= 3) {
     // Many-to-many may be CoinJoin or payjoin — penalize confidence, handled elsewhere for CoinJoin
     fingerprintScore = 0.2;
   }
 
-  // --- H7: Fee context ---
+  // --- H7: Fee context (modern fee market only) ---
   let feeScore = 0;
-  const feeRate = tx.fee && tx.vsize ? (tx.fee / (tx.weight ? tx.weight / 4 : tx.size || 250)) : null;
-  if (Number.isFinite(feeRate)) {
-    if (feeRate > 80) feeScore = 0.8; // high fee manual bump — payment may be urgent
-    else if (feeRate < 2 && tx.status?.confirmed) feeScore = -0.6; // uneconomic low fee — likely change consolidation with low priority
+  const blockTime = tx.status?.block_time;
+  const feeEraApplies = blockTime == null || blockTime >= FEE_MARKET_GENESIS_TIME;
+  if (feeEraApplies) {
+    const feeRate = tx.fee && tx.vsize ? (tx.fee / (tx.weight ? tx.weight / 4 : tx.size || 250)) : null;
+    if (Number.isFinite(feeRate)) {
+      if (feeRate > 80) feeScore = 0.8; // high fee manual bump — payment may be urgent
+      else if (feeRate < 2 && tx.status?.confirmed) feeScore = -0.6; // uneconomic low fee — likely change consolidation with low priority
+    }
   }
 
-  // Weighted aggregate
+  // --- H8: Single-output address identity (decisive, shares H2's weight budget) ---
+  // With one value-bearing output there is no payment/change split to infer —
+  // identity decides. Back to a funder address => self-consolidation (change);
+  // a fresh address => payment (nothing else the funds could be). A previously
+  // seen (but non-input) address is tempered: likely payment, but compatible
+  // with change-address reuse, so confidence stays modest.
+  let identityScore = 0;
+  let identityStrength = null; // 'decisive' | 'tempered' | null
+  if (isSoleValueOutput && outputIdentityKey) {
+    if (inputIdentityKeys.includes(outputIdentityKey)) {
+      identityScore = -4.0; // self-consolidation — change by construction
+      identityStrength = 'decisive';
+    } else {
+      // Freshness via the classifier's identifier (real address or P2PK
+      // pseudo-id); falls back to decisive when no address index exists.
+      const seenKey = outputId || address;
+      if (seenKey && seenAddresses && seenAddresses.has(seenKey)) {
+        identityScore = 1.5; // sole output to a known address — payment, tempered
+        identityStrength = 'tempered';
+      } else {
+        identityScore = 4.0; // sole output to a fresh identity — payment by construction
+        identityStrength = 'decisive';
+      }
+    }
+  }
+
+  // Weighted aggregate (H8 shares the address-identity budget with H2)
   const weights = { script: 0.20, reuse: 0.18, roundness: 0.18, position: 0.12, spent: 0.18, fingerprint: 0.08, fee: 0.06 };
   const weightedScore =
     scriptScore * (weights.script * 4) +
@@ -164,10 +237,16 @@ export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outsp
     positionScore * (weights.position * 4) +
     spentScore * (weights.spent * 4) +
     fingerprintScore * (weights.fingerprint * 4) +
-    feeScore * (weights.fee * 4);
+    feeScore * (weights.fee * 4) +
+    identityScore * (weights.reuse * 4);
 
   const hopDecay = Math.max(0.75, 1 - (typeof tx._traceDepth === 'number' ? tx._traceDepth * 0.07 : 0));
-  const confidence = Math.min(0.95, (Math.abs(weightedScore) / 8) * hopDecay);
+  let confidence = Math.min(0.95, (Math.abs(weightedScore) / 8) * hopDecay);
+  // Identity-decisive outcomes are near-deterministic accounting, not a
+  // behavioral guess — floor their confidence instead of letting the /8 norm
+  // dilute them into ambiguity.
+  if (identityStrength === 'decisive') confidence = Math.max(confidence, 0.85);
+  else if (identityStrength === 'tempered') confidence = Math.max(confidence, 0.6);
   const breakdown = {
     scriptScore: parseFloat(scriptScore.toFixed(2)),
     reuseScore: parseFloat(reuseScore.toFixed(2)),
@@ -176,6 +255,8 @@ export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outsp
     spentScore: parseFloat(spentScore.toFixed(2)),
     fingerprintScore: parseFloat(fingerprintScore.toFixed(2)),
     feeScore: parseFloat(feeScore.toFixed(2)),
+    identityScore: parseFloat(identityScore.toFixed(2)),
+    dwellBlocks,
     weightedScore: parseFloat(weightedScore.toFixed(2)),
   };
 
@@ -200,6 +281,94 @@ function getScriptTypeFromHeuristic(address, scriptType = '') {
 }
 
 /**
+ * Normalize a script-type label to the heuristic key space. Input script
+ * types arrive as DISPLAY names from getScriptTypeFromAddress ("Legacy
+ * (P2PKH)") or RAW esplora types ("v0_p2wpkh"), while outputs are keyed by
+ * getScriptTypeFromHeuristic ("p2pkh"). Comparing across taxonomies never
+ * matches — which silently killed H1's change branch (-3.0 unreachable) and
+ * handed every output a phantom +2.5 payment lean. Normalize first.
+ */
+export function normalizeScriptKey(label) {
+  if (!label || typeof label !== 'string') return 'unknown';
+  const t = label.trim();
+  const HEURISTIC_KEYS = new Set(['p2pk', 'p2pkh', 'p2sh', 'p2wpkh', 'p2wsh', 'p2tr', 'multisig', 'op_return', 'unknown']);
+  if (HEURISTIC_KEYS.has(t)) return t;
+  const DISPLAY_MAP = {
+    'Early public key (P2PK)': 'p2pk',
+    'Legacy': 'p2pkh',
+    'Script address (P2SH)': 'p2sh',
+    'Native SegWit': 'p2wpkh',
+    'SegWit script': 'p2wsh',
+    'Taproot (P2TR)': 'p2tr',
+    'Shared signatures': 'multisig',
+    'Embedded data': 'op_return',
+    // Legacy display names (pre-plain-words UI + persisted sessions)
+    'Pay-to-PubKey (Legacy P2PK)': 'p2pk',
+    'Legacy (P2PKH)': 'p2pkh',
+    'Pay-to-Script-Hash (P2SH Multi-sig)': 'p2sh',
+    'Native SegWit (v0 P2WPKH)': 'p2wpkh',
+    'SegWit Script (v0 P2WSH)': 'p2wsh',
+    'Taproot (P2TR / Bech32m)': 'p2tr',
+    'Bare Multi-Sig (P2MS)': 'multisig',
+    'OP_RETURN (Null Data)': 'op_return',
+  };
+  if (DISPLAY_MAP[t]) return DISPLAY_MAP[t];
+  const RAW_MAP = {
+    v0_p2wpkh: 'p2wpkh', v0_p2wsh: 'p2wsh', v1_p2tr: 'p2tr',
+    p2pkh: 'p2pkh', p2sh: 'p2sh', p2pk: 'p2pk', op_return: 'op_return', multisig: 'multisig',
+  };
+  return RAW_MAP[t] || t;
+}
+
+/**
+ * Extract the full public key hex from a P2PK output/prevout.
+ * Bare-pubkey scripts predate addresses entirely (2009-era chain), so the
+ * pubkey itself is the only identity available. Handles Blockstream/Electrs
+ * ASM (`OP_PUSHBYTES_65 <hex> OP_CHECKSIG`) and raw hex templates
+ * (`41<65-byte>ac` / `21<33-byte>ac`). Returns lowercase hex or null.
+ */
+export function extractTxPubkey(scriptObj) {
+  if (!scriptObj) return null;
+  const asm = scriptObj.scriptpubkey_asm || '';
+  const asmMatch = asm.match(/(?:OP_PUSHBYTES_\d+\s+)?([0-9a-fA-F]{66}|[0-9a-fA-F]{130})\s+OP_CHECKSIG/);
+  if (asmMatch) return asmMatch[1].toLowerCase();
+  const hex = scriptObj.scriptpubkey || '';
+  const hexMatch = hex.match(/^(?:41)([0-9a-fA-F]{130})(?:ac)$/) || hex.match(/^(?:21)([0-9a-fA-F]{66})(?:ac)$/);
+  if (hexMatch) return hexMatch[1].toLowerCase();
+  return null;
+}
+
+/**
+ * Identity key for change/payment matching: the address when present,
+ * otherwise the bare pubkey (namespaced so key spaces can never collide).
+ * Lets 2009-era P2PK flows use the same identity logic as modern addresses.
+ */
+export function getIdentityKey(scriptObj) {
+  if (!scriptObj) return null;
+  if (scriptObj.scriptpubkey_address) return scriptObj.scriptpubkey_address;
+  const pubkey = extractTxPubkey(scriptObj);
+  return pubkey ? `pubkey:${pubkey}` : null;
+}
+
+/**
+ * Spend dwell: how many blocks after the parent an output was spent, from
+ * outspend status heights. Change sweeps move fast (next wallet tx); real
+ * payments dwell in the recipient's wallet. Null when either height is
+ * unknown (mempool/unconfirmed) — the signal is skipped, never guessed.
+ */
+export function getSpendDwellBlocks(tx, outspend) {
+  const parentHeight = tx?.status?.block_height;
+  const spendHeight = outspend?.status?.block_height;
+  if (!Number.isInteger(parentHeight) || !Number.isInteger(spendHeight)) return null;
+  const delta = spendHeight - parentHeight;
+  return delta >= 0 ? delta : null;
+}
+
+/** Dwell thresholds in blocks (~144/day): swept within a day vs dwelled a week+. */
+export const QUICK_SPEND_BLOCKS = 144;
+export const LONG_DWELL_BLOCKS = 1008;
+
+/**
  * Validate value conservation: sum(inputs) == sum(outputs) + fee (±1 sat for rounding)
  */
 export function checkValueConservation(tx) {
@@ -220,18 +389,22 @@ export function checkValueConservation(tx) {
 }
 
 /**
- * Exchange deposit heuristic – expanded beyond 3/bc1p to include reused bc1q custodial patterns + Taproot/tr multisig
- * Returns confidence 0..1 that address is custodial
+ * Exchange deposit heuristic — P2SH multisig and Taproot script paths are the
+ * strong custodial signals. Plain 42-char P2WPKH (bc1q) is the default
+ * self-custody format, so it scores nothing on its own and needs corroboration
+ * (P2WSH length or an unspent long-dwell UTXO) before counting as custodial.
+ * Returns confidence 0..1 that address is custodial.
  */
 export function exchangeDepositConfidence(address, scriptType, outspend) {
   if (!address) return 0;
   let score = 0;
   if (scriptType === 'p2sh' || address.startsWith('3')) score += 0.35;
   if (scriptType === 'v1_p2tr' || address.startsWith('bc1p')) score += 0.40;
-  if (address.startsWith('bc1q') && address.length === 42) score += 0.15; // P2WPKH custodial also possible, lower weight
-  // Enterprises reuse deposit addresses per user, often appear in many txs – if unspent long, more likely
+  // P2WSH (62-char bc1q) script-hash custodial vaults score weakly; plain
+  // P2WPKH single-sig does not — it is the standard self-custody format.
+  if (address.startsWith('bc1q') && address.length === 62) score += 0.15;
+  // Custodial deposits dwell unspent; change is usually swept quickly
   if (outspend && outspend.spent === false) score += 0.15;
-  // But change is usually quickly spent; payment UTXO sits
   return Math.min(0.95, score);
 }
 
@@ -243,7 +416,10 @@ export function computeTraceConfidence(heuristicsList = []) {
   const avg = heuristicsList.reduce((s, h) => s + (h.confidence || 0.5), 0) / heuristicsList.length;
   const ambiguous = heuristicsList.filter(h => Math.abs(h.score) < 1.0).length;
   const decay = Math.max(0.7, 1 - heuristicsList.length * 0.06); // longer chains less certain
-  const penalized = avg * (1 - ambiguous * 0.15) * decay;
+  // Cap the ambiguity penalty so long traces bottom out at a floored discount
+  // instead of flipping the factor negative (7+ ambiguous hops => 1-1.05 < 0).
+  const ambiguityFactor = Math.max(0.4, 1 - ambiguous * 0.12);
+  const penalized = avg * ambiguityFactor * decay;
   const confidence = Math.max(0.1, Math.min(0.98, penalized));
   let level = 'HIGH';
   if (confidence < 0.55) level = 'LOW';
@@ -262,11 +438,11 @@ export function isDustOutput(value) {
  * UTXO age in blocks/days for detail display. Approx if tx is confirmed.
  * Returns { blocks, days, label } or null if mempool/unconfirmed.
  */
-export function getUtxoAgeInfo(tx) {
+export function getUtxoAgeInfo(tx, nowMs = Date.now()) {
   const bh = tx?.status?.block_height;
   const bt = tx?.status?.block_time;
   if (!bh || !bt) return null;
-  const nowSec = Math.floor(Date.now() / 1000);
+  const nowSec = Math.floor(nowMs / 1000);
   const ageSec = Math.max(0, nowSec - bt);
   const days = Math.floor(ageSec / 86400);
   const hours = Math.floor((ageSec % 86400) / 3600);
@@ -283,10 +459,11 @@ export function getUtxoAgeInfo(tx) {
  * Fee tier label for detail display
  */
 export function getFeeTier(feeRateSatVb) {
+  const { FEE_TIER_LOW, FEE_TIER_AVG, FEE_TIER_HIGH } = BITCOIN_CONSTANTS;
   const n = parseFloat(feeRateSatVb);
   if (!Number.isFinite(n)) return { label: 'unknown', color: 'var(--text-muted)' };
-  if (n < 3) return { label: 'Low fee', color: '#10b981', detail: 'Economical / slow' };
-  if (n <= 15) return { label: 'Average fee', color: 'var(--text-secondary)', detail: 'Normal priority' };
-  if (n <= 80) return { label: 'High fee', color: '#f59e0b', detail: 'Expedited / RBF bump' };
-  return { label: 'Very high fee', color: '#ef4444', detail: 'Urgent / CPFP chain' };
+  if (n < FEE_TIER_LOW) return { label: 'Low fee', color: '#10b981', detail: 'Economical / slow' };
+  if (n <= FEE_TIER_AVG) return { label: 'Average fee', color: 'var(--text-secondary)', detail: 'Normal priority' };
+  if (n <= FEE_TIER_HIGH) return { label: 'High fee', color: '#f59e0b', detail: 'Expedited' };
+  return { label: 'Very high fee', color: '#ef4444', detail: 'Urgent' };
 }
