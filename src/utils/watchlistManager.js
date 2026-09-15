@@ -8,7 +8,7 @@ import { API_CONFIG } from '../constants/config';
 
 const WATCHLIST_STORAGE_KEY = 'aegistrace_watchlist';
 const ALERTS_STORAGE_KEY = 'aegistrace_mempool_alerts';
-const MAX_WATCHLIST = 100;
+export const MAX_WATCHLIST = 100;
 
 /**
  * Single canonical watchlist entry shape. Both the hook and the manager

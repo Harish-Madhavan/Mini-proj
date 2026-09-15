@@ -11,6 +11,7 @@ maps, cluster analysis, risk scores, and printable reports.
 npm install
 npm run dev      # local dev server
 npm test         # unit suite (vitest)
+npm run verify   # labeled-set accuracy table (offline)
 npm run lint     # oxlint
 npm run build    # production bundle
 ```
@@ -21,10 +22,12 @@ verified mainnet transactions), or paste any transaction hash or address.
 ## What it does
 
 - **Tracing** — forward outspend tracing with bounded parallelism, peel-chain
-  priority, branch pruning, and CoinJoin halt.
+  priority (high-confidence change runs up to 2 levels past max depth),
+  branch pruning, and CoinJoin halt.
 - **Classification** — weighted change-vs-payment scoring (script match,
   address identity incl. bare public keys, roundness, dwell timing, fee
-  context) with per-hop confidence.
+  context, plus live chain-reuse checks on ambiguous outputs) with per-hop
+  confidence.
 - **Taint** — haircut, FIFO, and poison models with edge maps and an audit
   ledger, rendered as a graph heatmap.
 - **Clustering** — co-spending groups, peel detection, fee-habit comparison,
@@ -47,3 +50,29 @@ verified mainnet transactions), or paste any transaction hash or address.
 
 Live network calls happen only on explicit user actions (trace, expand,
 fee compare, mempool scan, endpoint profiles); everything else runs locally.
+
+## Measuring accuracy
+
+Be precise about what the numbers mean:
+
+- **Per-hop confidence** (0–1) measures how strongly the heuristics agree on
+  one output — margin of the weighted score, decayed by trace depth, floored
+  for near-deterministic identity calls. It is *not* a measured probability.
+- **Trace confidence** averages per-hop confidence, discounted for ambiguous
+  hops and chain length. A CoinJoin halt or a trace with no scored hops
+  reports unknown instead of a default 50%.
+- **Labeled-set accuracy** (`npm run verify`) is the actual measurement:
+  ground-truth payment/change labels on real mainnet shapes (pizza purchase,
+  first-ever transaction, ransom splits, self-consolidations, coinbase),
+  scored by the same thresholds the product uses. Accuracy is reported over
+  committed decisions only, alongside coverage, per-class precision/recall,
+  and each verdict's margin past the decision boundary — thin margins flag
+  where the next labeled case should go. The risk suite additionally checks
+  that threat bands survive ±20% weight changes.
+
+To demonstrate end to end: run `npm run verify` for the offline table, then
+trace the Dashboard corpus samples live and compare each hop against the
+expected outcome in `src/data/forensicCorpus.js`. Value-conservation
+warnings, taint continuity, and dwell consistency act as independent
+cross-checks; the chain-of-custody ledger makes any post-hoc edit of the
+trail mechanically detectable.

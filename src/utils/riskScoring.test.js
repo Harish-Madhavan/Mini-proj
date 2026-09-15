@@ -67,4 +67,54 @@ describe('riskScoring engine', () => {
     expect(getThreatBadge(50).level).toBe('MEDIUM');
     expect(getThreatBadge(85).level).toBe('HIGH');
   });
+
+  it('keeps threat bands stable under ±20% weight changes', () => {
+    // Risk weights are judgment calls. Verdicts must not hinge on their exact
+    // values — perturb each weight and require the same band.
+    const cases = [
+      {
+        name: 'mixer + hops',
+        nodes: [
+          { id: 'suspect', type: 'suspect' },
+          { id: 'mixer', type: 'mixer' },
+          { id: 'hop1', type: 'hop' },
+          { id: 'hop2', type: 'hop' },
+          { id: 'receiver', type: 'receiver', details: { kycStatus: 'UNREGISTERED' } }
+        ],
+        band: 'HIGH',
+      },
+      {
+        name: 'historical',
+        nodes: [
+          { id: 'in_p2pk', type: 'suspect', details: { scriptStandard: 'P2PK', kycStatus: 'HISTORICAL UNSPENT UTXO' } },
+          { id: 'out_p2pk', type: 'receiver', details: { scriptStandard: 'P2PK', kycStatus: 'HISTORICAL UNSPENT UTXO' } }
+        ],
+        band: 'LOW',
+      },
+      {
+        name: 'single hop, no KYC',
+        nodes: [
+          { id: 'suspect', type: 'suspect' },
+          { id: 'hop', type: 'hop' },
+          { id: 'receiver', type: 'receiver', details: { kycStatus: 'UNREGISTERED' } }
+        ],
+        band: 'MEDIUM',
+      },
+    ];
+    const perturbations = [
+      { mixerWeight: 28 }, { mixerWeight: 42 },
+      { hopWeight: 9.6 }, { hopWeight: 14.4 },
+      { kycDiscountWeight: 12 }, { kycDiscountWeight: 18 },
+      { baseScore: 16 }, { baseScore: 24 },
+    ];
+    for (const c of cases) {
+      expect(calculateForensicRiskScore(c.nodes).threatBadge.level, c.name).toBe(c.band);
+      for (const weights of perturbations) {
+        expect(
+          calculateForensicRiskScore(c.nodes, weights).threatBadge.level,
+          `${c.name} with ${JSON.stringify(weights)}`
+        ).toBe(c.band);
+      }
+    }
+  });
 });

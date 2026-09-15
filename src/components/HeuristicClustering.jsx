@@ -19,6 +19,7 @@ import { useToast } from '../hooks/useToast';
 import { validateBtcAddress, exportToCsv } from '../utils/forensicUtils';
 import { computeAddressClusters, detectPeelingChain, feeFingerprintSimilarity, estimatePoolReceived } from '../utils/clusteringAlgorithms';
 import { downloadJson } from '../utils/download';
+import EmptyState from './EmptyState';
 
 function StatBox({ label, value, valueColor = '#fff', sub = null }) {
   return (
@@ -353,10 +354,9 @@ export default function HeuristicClustering() {
 
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', textAlign: 'center', padding: '2rem' }}>
-            <HelpCircle size={40} style={{ marginBottom: '1rem' }} />
-            <p style={{ fontSize: '0.85rem' }}>Add 2 or more addresses, then Find groups.</p>
-          </div>
+          <EmptyState icon={<HelpCircle size={36} />}>
+            Add 2 or more addresses, then Find groups.
+          </EmptyState>
         )}
       </div>
     </div>

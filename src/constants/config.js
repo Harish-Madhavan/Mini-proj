@@ -16,7 +16,10 @@ export const TRACE_CONFIG = {
   MAX_NODES: 120,
   COINJOIN_HALT: true,
   COINJOIN_ANONYMITY_THRESHOLD: 0.85,
-  CONFIDENCE_LOW_THRESHOLD: 0.35
+  CONFIDENCE_LOW_THRESHOLD: 0.35,
+  // High-confidence change branches may run this many levels past maxDepth:
+  // peel chains are near-deterministic trails, fan-outs are not.
+  EXTRA_PEEL_DEPTH: 2
 };
 
 export const BITCOIN_CONSTANTS = {

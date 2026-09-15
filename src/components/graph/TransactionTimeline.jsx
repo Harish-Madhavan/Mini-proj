@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Clock, ExternalLink, ArrowRight, ShieldAlert, Droplets } from 'lucide-react';
 import { getExplorerUrls } from '../../utils/knownEntities';
+import EmptyState from '../EmptyState';
 
 const HALT_REASONS = {
   COINJOIN_AT_ROOT: 'stopped at a mixing round',
@@ -41,7 +42,7 @@ export default function TransactionTimeline({ activeCase }) {
     });
   }, [activeCase]);
 
-  if (!events.length) return <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>No timeline events for this case.</div>;
+  if (!events.length) return <EmptyState>No timeline events for this case.</EmptyState>;
 
   return (
     <div className="glass-panel" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>

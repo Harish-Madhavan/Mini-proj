@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Network, Link2, ChevronDown, ChevronRight } from 'lucide-react';
 import { useCase } from '../hooks/useCase';
 import { correlateCases } from '../utils/syndicateAnalysis';
+import EmptyState from './EmptyState';
 
 const ROLE_LABELS = {
   suspect: 'start',
@@ -76,9 +77,9 @@ export default function SyndicateMap() {
           <Link2 size={15} /> Links
         </h4>
         {correlation.pairs.length === 0 ? (
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+          <EmptyState icon={<Network size={28} style={{ opacity: 0.6 }} />}>
             No shared addresses across these {correlation.caseCount} cases. Trace more cases to find links.
-          </p>
+          </EmptyState>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
             {correlation.pairs.map(pair => {

@@ -1,12 +1,3 @@
-export const EXCHANGES = [
-  'WazirX (Zanmai Labs Pvt Ltd)',
-  'CoinDCX (Neblio Technologies Pvt Ltd)',
-  'Binance Holdings Ltd (Global compliance)',
-  'Coinswitch Kuber (Bitcipher Labs LLP)',
-  'ZebPay (Awlencan Innovations India Ltd)',
-  'KuCoin (Requests)'
-];
-
 export const EXCHANGE_DIRECTORY = {
   'WazirX (Zanmai Labs Pvt Ltd)': {
     entity: 'Zanmai Labs Private Limited',
@@ -45,6 +36,9 @@ export const EXCHANGE_DIRECTORY = {
     jurisdiction: 'International / Seychelles'
   }
 };
+
+// Derived from the directory so names can never drift out of sync.
+export const EXCHANGES = Object.keys(EXCHANGE_DIRECTORY);
 
 export const ZONAL_UNITS = [
   { label: 'NCB Headquarters, Delhi', value: 'NCB Head Office, New Delhi', code: 'NCB/HQ/ND' },

@@ -355,8 +355,9 @@ export default function MetadataSidebar({
                         ['Spent', details.heuristicBreakdown.spentScore],
                         ...(details.heuristicBreakdown.fingerprintScore != null ? [['Pattern', details.heuristicBreakdown.fingerprintScore]] : []),
                         ...(details.heuristicBreakdown.feeScore != null ? [['Fee', details.heuristicBreakdown.feeScore]] : []),
-                        ...(details.heuristicBreakdown.identityScore ? [['Identity', details.heuristicBreakdown.identityScore]] : []),
-                      ].map(([label, val]) => (
+                    ...(details.heuristicBreakdown.identityScore ? [['Identity', details.heuristicBreakdown.identityScore]] : []),
+                    ...(details.heuristicBreakdown.chainReuseScore ? [['Chain use', details.heuristicBreakdown.chainReuseScore]] : []),
+                  ].map(([label, val]) => (
                         <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.7rem' }}>
                           <span style={{ width: '70px', color: 'var(--text-muted)' }}>{label}</span>
                           <div style={{ flex: 1, height: '6px', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>

@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "oxlint",
     "test": "vitest run",
+    "verify": "vitest run src/utils/accuracy.test.js",
     "preview": "vite preview"
   },
   "dependencies": {

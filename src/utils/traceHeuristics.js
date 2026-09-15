@@ -4,7 +4,8 @@
  * Each output is scored on 7 orthogonal signals. Higher positive score => likely PAYMENT (end receiver),
  * negative score => likely CHANGE (continue tracing). Threshold tunable, confidence derived from margin + hop decay.
  *
- * Heuristics implemented (weights validated against 5000+ labeled Bitcoin transactions + 2024 wallet fingerprint study):
+ * Heuristics implemented (weights tuned against labeled mainnet transactions;
+ * measured per-hop accuracy and coverage live in accuracy.js — run `npm run verify`):
  *  H1: Script Type Consistency (20%) — wallets reuse script type for change (BIP69 / wallet fingerprint)
  *  H2: Address Reuse & Freshness (18%) — change goes to fresh address, payment often reused but not always
  *  H3: Value Roundness & Amount Pattern (18%) — payments often round (e.g. 0.1 BTC), change is "dusty remainder"
@@ -19,6 +20,12 @@
  *      self-consolidation (change); anywhere else => payment. Fresh output => high
  *      confidence (cf. May-2010 10,000 BTC pizza purchase: 131 inputs, one fresh
  *      round output); previously-seen output => tempered (possible change-address reuse).
+ *  H9: Chain Reuse (shares H2 budget, tracing only) — needs pre-fetched address
+ *      summaries. An output address funded twice or more on-chain predates this
+ *      transaction; change addresses are almost never reused, so reuse leans
+ *      payment. One-time-funded or unknown addresses stay neutral: H2/H8 own
+ *      freshness, and funded_txo_count (not tx_count) avoids mistaking a
+ *      fund-once/spend-once lifecycle for reuse.
  *
  * Also exports: checkValueConservation, isDustOutput, exchangeDepositConfidence, computeTraceConfidence
  */
@@ -52,7 +59,7 @@ export function isRoundValue(sats) {
  */
 export const FEE_MARKET_GENESIS_TIME = 1420070400;
 
-export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outspends, seenAddresses, outputId = null }) {
+export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outspends, seenAddresses, outputId = null, addressMeta = null }) {
   const outputs = tx.vout || [];
   const output = outputs[outputIndex];
   if (!output) return { score: 0, confidence: 0, breakdown: {}, isChangeCandidate: false, isPaymentCandidate: false };
@@ -79,12 +86,10 @@ export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outsp
     const normalizedInputs = inputScriptTypes.map(normalizeScriptKey);
     const freq = normalizedInputs.reduce((a, t) => { a[t] = (a[t] || 0) + 1; return a; }, {});
     const majorityType = Object.entries(freq).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
-    const outputScript = getScriptTypeFromHeuristic(address, scriptType);
+    const outputScript = scriptKeyOf(address, scriptType);
     const otherOutputsDifferent = outputs.some((o, idx) => {
       if (idx === outputIndex) return false;
-      const otherAddr = o.scriptpubkey_address || '';
-      const otherType = getScriptTypeFromHeuristic(otherAddr, o.scriptpubkey_type || '');
-      return otherType !== majorityType;
+      return scriptKeyOf(o.scriptpubkey_address || '', o.scriptpubkey_type || '') !== majorityType;
     });
     if (outputScript === majorityType && otherOutputsDifferent) {
       scriptScore = -3.0; // likely change (matches wallet)
@@ -226,7 +231,14 @@ export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outsp
     }
   }
 
-  // Weighted aggregate (H8 shares the address-identity budget with H2)
+  // --- H9: Chain reuse (pre-fetched address summaries, tracing only) ---
+  let chainReuseScore = 0;
+  const fundedCount = address ? addressMeta?.get?.(address)?.chain_stats?.funded_txo_count : undefined;
+  if (Number.isFinite(fundedCount) && fundedCount >= 2) {
+    chainReuseScore = 1.2; // known-before-this-tx address — payment-leaning
+  }
+
+  // Weighted aggregate (H8/H9 share the address-identity budget with H2)
   const weights = { script: 0.20, reuse: 0.18, roundness: 0.18, position: 0.12, spent: 0.18, fingerprint: 0.08, fee: 0.06 };
   const weightedScore =
     scriptScore * (weights.script * 4) +
@@ -236,7 +248,8 @@ export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outsp
     spentScore * (weights.spent * 4) +
     fingerprintScore * (weights.fingerprint * 4) +
     feeScore * (weights.fee * 4) +
-    identityScore * (weights.reuse * 4);
+    identityScore * (weights.reuse * 4) +
+    chainReuseScore * (weights.reuse * 4);
 
   const hopDecay = Math.max(0.75, 1 - (typeof tx._traceDepth === 'number' ? tx._traceDepth * 0.07 : 0));
   let confidence = Math.min(0.95, (Math.abs(weightedScore) / 8) * hopDecay);
@@ -254,6 +267,7 @@ export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outsp
     fingerprintScore: parseFloat(fingerprintScore.toFixed(2)),
     feeScore: parseFloat(feeScore.toFixed(2)),
     identityScore: parseFloat(identityScore.toFixed(2)),
+    chainReuseScore: parseFloat(chainReuseScore.toFixed(2)),
     dwellBlocks,
     weightedScore: parseFloat(weightedScore.toFixed(2)),
   };
@@ -262,12 +276,19 @@ export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outsp
     score: parseFloat(weightedScore.toFixed(2)),
     confidence,
     breakdown,
+    weightedScore: parseFloat(weightedScore.toFixed(2)),
     isChangeCandidate: weightedScore < -1.0,
     isPaymentCandidate: weightedScore > 1.0,
   };
 }
 
-function getScriptTypeFromHeuristic(address, scriptType = '') {
+/**
+ * Canonical script-type key from an address and/or raw script type string.
+ * Single taxonomy for the whole app: display names are derived from these
+ * keys (see getScriptTypeFromAddress), and heuristic inputs normalize into
+ * them. Order preserves the legacy classifier behavior exactly.
+ */
+export function scriptKeyOf(address, scriptType = '') {
   if (!address && !scriptType) return 'unknown';
   if (scriptType === 'p2pk' || (address && address.includes('P2PK'))) return 'p2pk';
   if (address?.startsWith('bc1p') || scriptType === 'v1_p2tr') return 'p2tr';
@@ -275,16 +296,16 @@ function getScriptTypeFromHeuristic(address, scriptType = '') {
   if (address?.startsWith('bc1q') || scriptType === 'v0_p2wpkh') return 'p2wpkh';
   if (address?.startsWith('3') || scriptType === 'p2sh') return 'p2sh';
   if (address?.startsWith('1') || scriptType === 'p2pkh') return 'p2pkh';
-  return scriptType || 'unknown';
+  if (scriptType === 'op_return') return 'op_return';
+  if (scriptType === 'multisig') return 'multisig';
+  return normalizeScriptKey(scriptType || 'unknown');
 }
 
 /**
- * Normalize a script-type label to the heuristic key space. Input script
- * types arrive as DISPLAY names from getScriptTypeFromAddress ("Legacy
- * (P2PKH)") or RAW esplora types ("v0_p2wpkh"), while outputs are keyed by
- * getScriptTypeFromHeuristic ("p2pkh"). Comparing across taxonomies never
- * matches — which silently killed H1's change branch (-3.0 unreachable) and
- * handed every output a phantom +2.5 payment lean. Normalize first.
+ * Normalize a script-type label to the heuristic key space. Labels arrive as
+ * current or legacy DISPLAY names, or RAW esplora types ("v0_p2wpkh").
+ * Normalizing both sides of H1 through one funnel is what keeps the change
+ * branch reachable — comparing across taxonomies never matches.
  */
 export function normalizeScriptKey(label) {
   if (!label || typeof label !== 'string') return 'unknown';

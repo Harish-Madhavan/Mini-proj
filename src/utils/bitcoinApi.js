@@ -8,6 +8,7 @@ import {
   isDustOutput,
   getIdentityKey,
   getSpendDwellBlocks,
+  scriptKeyOf,
   QUICK_SPEND_BLOCKS,
   LONG_DWELL_BLOCKS,
   TRACE_CONFIG,
@@ -91,6 +92,31 @@ export async function fetchAddressTxs(address) {
 }
 
 /**
+ * Batch address summaries (chain stats) for chain-reuse scoring, with the
+ * same bounded parallelism as transaction batches. Never throws: failures
+ * degrade to missing entries, which the scorer treats as no-signal.
+ * @returns {Promise<Map<string, object>>} address -> /address summary
+ */
+export async function fetchAddressSummaries(addresses = [], concurrency = 5) {
+  const unique = [...new Set((addresses || []).filter(a => typeof a === 'string' && a))];
+  const out = new Map();
+  for (let i = 0; i < unique.length; i += concurrency) {
+    const chunk = unique.slice(i, i + concurrency);
+    const settled = await Promise.all(chunk.map(async (addr) => {
+      try {
+        return [addr, await fetchAddressSummary(addr)];
+      } catch {
+        return [addr, null];
+      }
+    }));
+    for (const [addr, summary] of settled) {
+      if (summary) out.set(addr, summary);
+    }
+  }
+  return out;
+}
+
+/**
  * Display labels for endpoint activity profiles (single source for all views).
  */
 export const ENDPOINT_PROFILE_LABELS = {
@@ -144,19 +170,24 @@ export function classifyEndpointActivity(summary) {
   return { ...base, profile: 'DORMANT_HOLDER' };
 }
 
+const SCRIPT_DISPLAY_NAMES = {
+  op_return: 'Embedded data',
+  p2pk: 'Early public key (P2PK)',
+  multisig: 'Shared signatures',
+  p2tr: 'Taproot (P2TR)',
+  p2wsh: 'SegWit script',
+  p2wpkh: 'Native SegWit',
+  p2sh: 'Script address (P2SH)',
+  p2pkh: 'Legacy',
+  unknown: 'Standard',
+};
+
 /**
- * Classify Bitcoin script types from address prefix and scriptpubkey type string.
+ * Human-readable script type: pure display mapping over the canonical key,
+ * so labels can never drift from heuristic classification again.
  */
 export function getScriptTypeFromAddress(address, scriptType = '') {
-  if (scriptType === 'op_return' || !address) return 'Embedded data';
-  if (scriptType === 'p2pk' || (address && address.includes('P2PK'))) return 'Early public key (P2PK)';
-  if (scriptType === 'multisig') return 'Shared signatures';
-  if (address.startsWith('bc1p') || scriptType === 'v1_p2tr') return 'Taproot (P2TR)';
-  if (address.startsWith('bc1q') && address.length > 50) return 'SegWit script';
-  if (address.startsWith('bc1q') || scriptType === 'v0_p2wpkh') return 'Native SegWit';
-  if (address.startsWith('3') || scriptType === 'p2sh') return 'Script address (P2SH)';
-  if (address.startsWith('1') || scriptType === 'p2pkh') return 'Legacy';
-  return 'Standard';
+  return SCRIPT_DISPLAY_NAMES[scriptKeyOf(address, scriptType)] || 'Standard';
 }
 
 /**
@@ -358,6 +389,7 @@ function classifyOutputShared({
   scriptStd,
   valBtc,
   isCoinJoin,
+  addressMeta = null,
 }) {
   const outspend = outspends[outputIndex] || {};
   const isSpent = outspend.spent === true;
@@ -414,6 +446,7 @@ function classifyOutputShared({
     outspends,
     seenAddresses,
     outputId: addr,
+    addressMeta,
   });
 
   const exchangeConf = exchangeDepositConfidence(addr, output.scriptpubkey_type, outspend);
@@ -497,7 +530,7 @@ function classifyOutputShared({
  * OP_RETURN detection, identifier + value formatting, classification.
  * Returns { opReturn } for data carriers, else { addr, valBtc, outNodeId, scriptStd, cls }.
  */
-function prepareOutput({ tx, txid, output, outputIndex, outspends, inputScriptTypes, seenAddresses, isCoinJoin }) {
+function prepareOutput({ tx, txid, output, outputIndex, outspends, inputScriptTypes, seenAddresses, isCoinJoin, addressMeta = null }) {
   const opReturn = parseOpReturnPayload(output);
   if (opReturn) return { opReturn };
   const addr = getAddressOrIdentifier(output) || `out_script_${txid.slice(0, 6)}_${outputIndex}`;
@@ -505,7 +538,7 @@ function prepareOutput({ tx, txid, output, outputIndex, outspends, inputScriptTy
   const outNodeId = `out_${addr}`;
   const scriptStd = getScriptTypeFromAddress(addr, output.scriptpubkey_type);
   const cls = classifyOutputShared({
-    tx, output, outputIndex, outspends, inputScriptTypes, seenAddresses, addr, scriptStd, valBtc, isCoinJoin,
+    tx, output, outputIndex, outspends, inputScriptTypes, seenAddresses, addr, scriptStd, valBtc, isCoinJoin, addressMeta,
   });
   return { addr, valBtc, outNodeId, scriptStd, cls };
 }
@@ -514,7 +547,7 @@ function prepareOutput({ tx, txid, output, outputIndex, outspends, inputScriptTy
  * Format a raw Blockstream transaction object into graph nodes and links.
  * Now uses shared weighted classifier and value conservation checks.
  */
-export function formatBlockstreamTx(tx, outspends = []) {
+export function formatBlockstreamTx(tx, outspends = [], addressMeta = null) {
   const nodes = [];
   const links = [];
   const txNodeId = `tx_${tx.txid}`;
@@ -559,7 +592,7 @@ export function formatBlockstreamTx(tx, outspends = []) {
   // Mark depth for hop-decay heuristic
   tx._traceDepth = 0;
   (tx.vout || []).forEach((output, i) => {
-    const prep = prepareOutput({ tx, txid: tx.txid, output, outputIndex: i, outspends, inputScriptTypes, seenAddresses, isCoinJoin });
+    const prep = prepareOutput({ tx, txid: tx.txid, output, outputIndex: i, outspends, inputScriptTypes, seenAddresses, isCoinJoin, addressMeta });
     if (prep.opReturn) {
       nodes.push(buildOpReturnNode({ txId: tx.txid, index: i, payload: prep.opReturn }));
       links.push({ source: txNodeId, target: `op_${tx.txid}_${i}`, value: '0 BTC Data', timestamp: 'Embedded' });
@@ -612,7 +645,7 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
   }
 
   // BFS queue: array of { txId, depth, parentOutNodeId, parentValue, branchValueSats }
-  let frontier = [{ txId: startTxId, depth: 0, parentOutNodeId: null, parentValue: null, branchValueSats: Number.MAX_SAFE_INTEGER }];
+  let frontier = [{ txId: startTxId, depth: 0, parentOutNodeId: null, parentValue: null, branchValueSats: Number.MAX_SAFE_INTEGER, limit: maxDepth }];
   let depthReached = 0;
 
   // Bounded-parallel fetch: full Promise.all over a 24-wide frontier fires
@@ -637,7 +670,7 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
     return results;
   }
 
-  for (let depth = 0; depth <= maxDepth && frontier.length > 0; depth++) {
+  for (let depth = 0; depth <= maxDepth + TRACE_CONFIG.EXTRA_PEEL_DEPTH && frontier.length > 0; depth++) {
     if (nodes.length > TRACE_CONFIG.MAX_NODES) {
       warnings.push(`Node limit ${TRACE_CONFIG.MAX_NODES} reached — truncating trace`);
       haltReason = 'NODE_LIMIT';
@@ -739,8 +772,10 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
       }
 
       if (isCoinJoin && TRACE_CONFIG.COINJOIN_HALT) continue;
-      if (depth >= maxDepth) continue;
+      if (depth >= (item.limit ?? maxDepth)) continue;
 
+      // Pass 1: classify everything without chain data.
+      const pending = [];
       for (let i = 0; i < (tx.vout || []).length; i++) {
         const output = tx.vout[i];
         const prep = prepareOutput({ tx, txid: item.txId, output, outputIndex: i, outspends, inputScriptTypes, seenAddresses, isCoinJoin });
@@ -749,7 +784,33 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
           addLink(txNodeId, `op_${item.txId}_${i}`, '0 BTC Data', 'Embedded');
           continue;
         }
-        const { addr, valBtc, outNodeId, scriptStd, cls } = prep;
+        pending.push({ output, index: i, ...prep });
+      }
+
+      // Pass 2: chain-reuse check (H9), gated on ambiguity so decisive calls
+      // never cost a request. Skips dust, bare-key outputs without addresses,
+      // current-tx inputs (self-transfers are already decisive), and
+      // trace-seen addresses (H2 covers those). Failures degrade to missing
+      // entries, which score as no-signal.
+      const selfAddrs = new Set((tx.vin || []).map(v => v.prevout?.scriptpubkey_address).filter(Boolean));
+      const needy = pending.filter(p =>
+        p.cls?.heuristics && Math.abs(p.cls.heuristics.score) <= 1.0 &&
+        p.output.scriptpubkey_address &&
+        (p.output.value || 0) >= DUST_THRESHOLD_SATS &&
+        !seenAddresses.has(p.output.scriptpubkey_address) &&
+        !selfAddrs.has(p.output.scriptpubkey_address)
+      );
+      if (needy.length > 0) {
+        const addressMeta = await fetchAddressSummaries(needy.map(p => p.output.scriptpubkey_address));
+        for (const p of needy) {
+          if (!addressMeta.has(p.output.scriptpubkey_address)) continue;
+          const redo = prepareOutput({ tx, txid: item.txId, output: p.output, outputIndex: p.index, outspends, inputScriptTypes, seenAddresses, isCoinJoin, addressMeta });
+          if (!redo.opReturn) p.cls = redo.cls;
+        }
+      }
+
+      for (const p of pending) {
+        const { addr, valBtc, outNodeId, scriptStd, cls, output, index: i } = p;
         const outspend = outspends[i] || {};
         const isSpent = outspend.spent === true;
         const spendingTxId = outspend.txid || null;
@@ -768,8 +829,15 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
           // Prioritize change outputs less: if high confidence change, follow but don't mark as payment path
           // Always follow change to find ultimate peel end; payment branches are situational.
           const isHighConfChange = cls.isChange && (cls.confidence || 0) > 0.6;
+          // High-confidence change extends its own budget (peel chains are
+          // near-deterministic trails); every other branch keeps the parent's.
+          // Capped at maxDepth + EXTRA_PEEL_DEPTH; node/prune caps backstop.
+          const childLimit = Math.min(
+            maxDepth + TRACE_CONFIG.EXTRA_PEEL_DEPTH,
+            (item.limit ?? maxDepth) + (isHighConfChange ? 1 : 0)
+          );
           // Carry branch value so over-wide frontiers prune dust first, not the money trail
-          nextFrontier.push({ txId: spendingTxId, depth: depth + 1, parentOutNodeId: outNodeId, parentValue: `${valBtc} BTC`, branchValueSats: output.value || 0, _isChange: isHighConfChange });
+          nextFrontier.push({ txId: spendingTxId, depth: depth + 1, parentOutNodeId: outNodeId, parentValue: `${valBtc} BTC`, branchValueSats: output.value || 0, _isChange: isHighConfChange, limit: childLimit });
         } else if (isDustOutput(output.value)) {
           // ignore
         }

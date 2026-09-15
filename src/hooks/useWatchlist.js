@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { safeGetItem, safeSetItem } from '../utils/storage';
 import { isJoinableAddress } from '../utils/syndicateAnalysis';
-import { makeWatchEntry, normalizeWatchlist } from '../utils/watchlistManager';
+import { makeWatchEntry, normalizeWatchlist, MAX_WATCHLIST } from '../utils/watchlistManager';
 
 const STORAGE_KEY = 'aegistrace_watchlist';
-const MAX_WATCH = 100;
 
 const entryAddress = (entry) => (typeof entry === 'string' ? entry : entry?.address);
 
@@ -30,7 +29,7 @@ export function useWatchlist() {
       setWatchlist(prev => prev.filter(entry => entryAddress(entry) !== trimmed));
       return 'removed';
     }
-    if (watchlist.length >= MAX_WATCH) return 'full';
+    if (watchlist.length >= MAX_WATCHLIST) return 'full';
     setWatchlist(prev => (
       prev.some(entry => entryAddress(entry) === trimmed)
         ? prev
@@ -42,7 +41,7 @@ export function useWatchlist() {
   const add = useCallback((address) => {
     if (!isJoinableAddress(address)) return false;
     const t = address.trim();
-    if (watchlist.some(entry => entryAddress(entry) === t) || watchlist.length >= MAX_WATCH) return false;
+    if (watchlist.some(entry => entryAddress(entry) === t) || watchlist.length >= MAX_WATCHLIST) return false;
     setWatchlist(prev => (
       prev.some(entry => entryAddress(entry) === t) ? prev : [...prev, makeWatchEntry(t)]
     ));

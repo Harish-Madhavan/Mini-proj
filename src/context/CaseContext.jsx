@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { SCENARIOS } from '../data/scenarios';
-import { traceEndReceiver, fetchAddressTxs, formatBlockstreamTx } from '../utils/bitcoinApi';
+import { traceEndReceiver, fetchAddressTxs, formatBlockstreamTx, fetchAddressSummaries } from '../utils/bitcoinApi';
+import { DUST_THRESHOLD_SATS } from '../utils/traceHeuristics';
 import { 
   createLiveTxCase, 
   createAddressTraceCase, 
@@ -243,7 +244,16 @@ export function CaseProvider({ children }) {
       }
 
       const firstTx = txs[0];
-      const formatted = formatBlockstreamTx(firstTx);
+      // Same chain-reuse context the tracer uses; a single explicit expansion
+      // can afford the extra round. Ungated here (unlike tracing) because an
+      // expansion re-examines one transaction with fresh live data by design.
+      const expandAddrs = [...new Set(
+        (firstTx.vout || [])
+          .filter(o => (o.value || 0) >= DUST_THRESHOLD_SATS)
+          .map(o => o.scriptpubkey_address)
+          .filter(Boolean)
+      )];
+      const formatted = formatBlockstreamTx(firstTx, [], await fetchAddressSummaries(expandAddrs));
 
       setScenarios(prev => prev.map(s => {
         if (s.id !== activeCase.id) return s;

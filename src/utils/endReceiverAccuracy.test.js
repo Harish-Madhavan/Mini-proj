@@ -320,6 +320,38 @@ describe('end-receiver accuracy (first-tx grounded)', () => {
     expect(peel.isChangeCandidate).toBe(false);
   });
 
+  it('rewards chain-reused addresses and ignores one-time or unknown ones', () => {
+    const tx = {
+      fee: 2000, vsize: 250, weight: 1000,
+      vin: [{ prevout: { scriptpubkey_address: 'bc1qsrcftx11111111111111111111111111', scriptpubkey_type: 'v0_p2wpkh', value: 5000000 } }],
+      vout: [
+        { scriptpubkey_address: 'bc1qpayftx11111111111111111111111111', scriptpubkey_type: 'v0_p2wpkh', value: 3000000 },
+        { scriptpubkey_address: 'bc1qchgftx11111111111111111111111111', scriptpubkey_type: 'v0_p2wpkh', value: 1998000 },
+      ],
+      status: { confirmed: true, block_height: 800000, block_time: 1700000000 },
+    };
+    const base = {
+      tx, outputIndex: 0,
+      inputScriptTypes: ['Native SegWit (v0 P2WPKH)'],
+      outspends: [{ spent: true, status: { block_height: 800500 } }, { spent: true }],
+      seenAddresses: new Set(),
+    };
+    const plain = scoreOutputHeuristics(base);
+    expect(plain.breakdown.chainReuseScore).toBe(0);
+    const reused = scoreOutputHeuristics({
+      ...base,
+      addressMeta: new Map([['bc1qpayftx11111111111111111111111111', { chain_stats: { funded_txo_count: 5 } }]]),
+    });
+    expect(reused.breakdown.chainReuseScore).toBe(1.2);
+    expect(reused.score - plain.score).toBeCloseTo(0.86, 2);
+    const once = scoreOutputHeuristics({
+      ...base,
+      addressMeta: new Map([['bc1qpayftx11111111111111111111111111', { chain_stats: { funded_txo_count: 1 } }]]),
+    });
+    expect(once.breakdown.chainReuseScore).toBe(0);
+    expect(once.score).toBe(plain.score);
+  });
+
   it('ranks dwelled payments above fast-swept change with no identity signal', () => {
     const tx = {
       fee: 1000, vsize: 200, weight: 800,

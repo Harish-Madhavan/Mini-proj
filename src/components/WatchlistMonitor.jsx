@@ -23,6 +23,7 @@ import {
 } from '../utils/watchlistManager';
 import { validateBtcAddress } from '../utils/forensicUtils';
 import { getExplorerUrls } from '../utils/knownEntities';
+import EmptyState from './EmptyState';
 
 export default function WatchlistMonitor() {
   const { activeCase, liveMode, handleSearch } = useCase();
@@ -396,10 +397,9 @@ export default function WatchlistMonitor() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', overflowY: 'auto', flex: 1, maxHeight: '420px' }}>
           {alerts.length === 0 ? (
-            <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-              <CheckCircle size={32} style={{ color: '#10b981', margin: '0 auto 0.5rem', opacity: 0.6 }} />
+            <EmptyState icon={<CheckCircle size={30} style={{ color: '#10b981', opacity: 0.6 }} />}>
               Nothing pending. Watched addresses will appear here when they transact.
-            </div>
+            </EmptyState>
           ) : (
             alerts.map((alert) => (
               <div 

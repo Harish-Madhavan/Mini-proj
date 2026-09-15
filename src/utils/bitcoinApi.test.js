@@ -64,6 +64,29 @@ describe('bitcoinApi LRU Cache & Formatting', () => {
     expect(txNode.details.rbfStatus).toBe('Replaceable fee');
   });
 
+  it('should label dust outputs as uneconomic and skip payment logic', () => {
+    const dustyTx = {
+      txid: 'dust0001',
+      fee: 500,
+      size: 200,
+      weight: 800,
+      vin: [{
+        sequence: 0xffffffff,
+        prevout: { scriptpubkey_address: 'bc1qsrc', scriptpubkey_type: 'v0_p2wpkh', value: 1000000 }
+      }],
+      vout: [
+        { scriptpubkey_address: 'bc1qdust', scriptpubkey_type: 'v0_p2wpkh', value: 300 },
+        { scriptpubkey_address: 'bc1qmain', scriptpubkey_type: 'v0_p2wpkh', value: 999200 }
+      ],
+      status: { confirmed: true, block_height: 800000, block_time: 1700000000 }
+    };
+    const formatted = formatBlockstreamTx(dustyTx, [{ spent: false }, { spent: false }]);
+    const dust = formatted.nodes.find(n => n.id === 'out_bc1qdust');
+    expect(dust).toBeDefined();
+    expect(dust.label).toBe('Dust Output');
+    expect(dust.type).toBe('hop');
+  });
+
   it('should classify script types accurately', () => {
     expect(getScriptTypeFromAddress('bc1p0xlxue26wmcc5qcu2v2h2ygq2hld0007z7z42q')).toContain('Taproot');
     expect(getScriptTypeFromAddress('bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh')).toContain('Native SegWit');
