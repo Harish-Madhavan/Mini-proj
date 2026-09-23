@@ -19,8 +19,130 @@ import { satsToBtc } from './forensicUtils';
 
 export const apiCache = new Map();
 
+let cacheStats = {
+  hits: 0,
+  misses: 0,
+  evictions: 0
+};
+
+export function getCacheStats() {
+  return {
+    ...cacheStats,
+    size: apiCache.size,
+    maxSize: API_CONFIG.MAX_CACHE_SIZE,
+    ttlMs: API_CONFIG.CACHE_TTL_MS
+  };
+}
+
 export function clearCache() {
   apiCache.clear();
+  cacheStats = { hits: 0, misses: 0, evictions: 0 };
+}
+
+function getFromCache(cacheKey) {
+  const cached = apiCache.get(cacheKey);
+  if (!cached) {
+    cacheStats.misses++;
+    return null;
+  }
+  if (Date.now() - cached.timestamp >= API_CONFIG.CACHE_TTL_MS) {
+    apiCache.delete(cacheKey);
+    cacheStats.misses++;
+    return null;
+  }
+  // True LRU: delete and re-set to refresh insertion order
+  apiCache.delete(cacheKey);
+  apiCache.set(cacheKey, cached);
+  cacheStats.hits++;
+  return cached.data;
+}
+
+function putInCache(cacheKey, data) {
+  if (apiCache.has(cacheKey)) {
+    apiCache.delete(cacheKey);
+  } else if (apiCache.size >= API_CONFIG.MAX_CACHE_SIZE) {
+    const oldestKey = apiCache.keys().next().value;
+    if (oldestKey) {
+      apiCache.delete(oldestKey);
+      cacheStats.evictions++;
+    }
+  }
+  apiCache.set(cacheKey, { timestamp: Date.now(), data });
+}
+
+export class RateLimitError extends Error {
+  constructor(message = 'Gateway rate-limited (429)', gateway = null, cooldownSec = 60) {
+    super(message);
+    this.name = 'RateLimitError';
+    this.gateway = gateway;
+    this.cooldownSec = cooldownSec;
+  }
+}
+
+export class GatewayError extends Error {
+  constructor(message = 'All blockchain gateways unavailable') {
+    super(message);
+    this.name = 'GatewayError';
+  }
+}
+
+const gatewayListeners = new Set();
+
+export function onGatewayEvent(listener) {
+  if (typeof listener === 'function') {
+    gatewayListeners.add(listener);
+    return () => gatewayListeners.delete(listener);
+  }
+  return () => {};
+}
+
+function emitGatewayEvent(event) {
+  for (const listener of gatewayListeners) {
+    try {
+      listener(event);
+    } catch {
+      // Ignore listener error
+    }
+  }
+}
+
+const gateways = [
+  {
+    id: 'primary',
+    name: 'Blockstream',
+    baseUrl: API_CONFIG.PRIMARY_BASE_URL,
+    status: 'HEALTHY',
+    cooldownUntil: 0,
+    consecutiveFailures: 0
+  },
+  {
+    id: 'fallback',
+    name: 'Mempool.space',
+    baseUrl: API_CONFIG.FALLBACK_BASE_URL,
+    status: 'HEALTHY',
+    cooldownUntil: 0,
+    consecutiveFailures: 0
+  }
+];
+
+export function getGatewayStatus() {
+  const now = Date.now();
+  return gateways.map(gw => ({
+    id: gw.id,
+    name: gw.name,
+    baseUrl: gw.baseUrl,
+    status: gw.cooldownUntil > now ? (gw.status === 'RATE_LIMITED' ? 'RATE_LIMITED' : 'COOLDOWN') : 'HEALTHY',
+    cooldownRemainingMs: Math.max(0, gw.cooldownUntil - now),
+    consecutiveFailures: gw.consecutiveFailures
+  }));
+}
+
+export function resetGatewayCircuitBreaker() {
+  gateways.forEach(gw => {
+    gw.status = 'HEALTHY';
+    gw.cooldownUntil = 0;
+    gw.consecutiveFailures = 0;
+  });
 }
 
 async function fetchWithTimeout(url, timeoutMs = 8000) {
@@ -39,41 +161,82 @@ async function fetchWithFallbackAndCache(endpoint) {
     throw new Error('Invalid API endpoint');
   }
   const cacheKey = endpoint;
-  const cached = apiCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < API_CONFIG.CACHE_TTL_MS) {
-    apiCache.delete(cacheKey);
-    apiCache.set(cacheKey, cached);
-    return cached.data;
+  const cachedData = getFromCache(cacheKey);
+  if (cachedData !== null) {
+    return cachedData;
   }
 
-  const urls = [
-    `${API_CONFIG.PRIMARY_BASE_URL}${endpoint}`,
-    `${API_CONFIG.FALLBACK_BASE_URL}${endpoint}`
-  ];
+  const now = Date.now();
+  // Sort gateways: healthy gateways first (cooldownUntil <= now), then by earliest cooldown expiry
+  const orderedGateways = [...gateways].sort((a, b) => {
+    const aCool = a.cooldownUntil > now;
+    const bCool = b.cooldownUntil > now;
+    if (!aCool && bCool) return -1;
+    if (aCool && !bCool) return 1;
+    return a.cooldownUntil - b.cooldownUntil;
+  });
 
   let lastError = null;
-  for (const url of urls) {
+  for (const gw of orderedGateways) {
+    const url = `${gw.baseUrl}${endpoint}`;
     try {
       const response = await fetchWithTimeout(url);
       if (response.ok) {
         const data = await response.json();
-        if (apiCache.size >= API_CONFIG.MAX_CACHE_SIZE) {
-          const oldestKey = apiCache.keys().next().value;
-          if (oldestKey) apiCache.delete(oldestKey);
+        if (gw.consecutiveFailures > 0 || gw.cooldownUntil > 0) {
+          emitGatewayEvent({
+            type: 'RECOVERED',
+            gateway: gw.name,
+            endpoint
+          });
         }
-        apiCache.set(cacheKey, { timestamp: Date.now(), data });
+        gw.status = 'HEALTHY';
+        gw.cooldownUntil = 0;
+        gw.consecutiveFailures = 0;
+        putInCache(cacheKey, data);
         return data;
       } else if (response.status === 429) {
-        lastError = new Error('Rate limited (429) - try again shortly');
+        gw.status = 'RATE_LIMITED';
+        gw.cooldownUntil = now + 60000;
+        gw.consecutiveFailures++;
+        emitGatewayEvent({
+          type: 'RATE_LIMIT',
+          gateway: gw.name,
+          endpoint,
+          cooldownSec: 60
+        });
+        lastError = new RateLimitError(`Rate limited (429) on ${gw.name} - cooldown 60s`, gw.name, 60);
       } else {
+        gw.consecutiveFailures++;
+        if (gw.consecutiveFailures >= 2) {
+          gw.status = 'DEGRADED';
+          gw.cooldownUntil = now + 30000;
+        }
+        emitGatewayEvent({
+          type: 'GATEWAY_ERROR',
+          gateway: gw.name,
+          endpoint,
+          status: response.status
+        });
         lastError = new Error(`HTTP ${response.status} for ${endpoint}`);
       }
     } catch (err) {
+      gw.consecutiveFailures++;
+      if (gw.consecutiveFailures >= 2) {
+        gw.status = 'DEGRADED';
+        gw.cooldownUntil = now + 30000;
+      }
       lastError = err.name === 'AbortError' ? new Error(`Request timeout for ${endpoint}`) : err;
+      emitGatewayEvent({
+        type: 'GATEWAY_TIMEOUT',
+        gateway: gw.name,
+        endpoint,
+        error: lastError.message
+      });
     }
   }
 
-  throw new Error(lastError ? lastError.message : `Failed to fetch data for ${endpoint}`);
+  throw lastError || new GatewayError(`Failed to fetch data for ${endpoint}`);
 }
 
 export async function fetchTx(txId) {

@@ -57,6 +57,58 @@ describe('taintAnalysis', () => {
     expect(ledger[0].taintedSats).toBe(100000000);
   });
 
+  it('averages taint across merged inputs (haircut fan-in)', () => {
+    const mergeNodes = [
+      { id: 'a', type: 'suspect', balance: '0.5 BTC' },
+      { id: 'x', type: 'hop', balance: '0.5 BTC' },
+      { id: 'v', type: 'hop', balance: '1.0 BTC' }
+    ];
+    const mergeLinks = [
+      { source: 'a', target: 'v', value: '0.5 BTC' },
+      { source: 'x', target: 'v', value: '0.5 BTC' }
+    ];
+    const map = calculateTaintMap(mergeNodes, mergeLinks, ['a'], 'proportionate');
+    expect(map.get('v')).toBeCloseTo(0.5, 5);
+  });
+
+  it('fills outputs in link order under FIFO (mixed source)', () => {
+    const fifoNodes = [
+      { id: 's1', type: 'suspect', balance: '0.5 BTC' },
+      { id: 's2', type: 'hop', balance: '0.5 BTC' },
+      { id: 'm', type: 'hop', balance: '1.0 BTC' },
+      { id: 'c', type: 'receiver', balance: '1.0 BTC' },
+      { id: 'd', type: 'hop', balance: '1.0 BTC' }
+    ];
+    const fifoLinks = [
+      { source: 's1', target: 'm', value: '0.5 BTC' },
+      { source: 's2', target: 'm', value: '0.5 BTC' },
+      { source: 'm', target: 'c', value: '1.0 BTC' },
+      { source: 'm', target: 'd', value: '1.0 BTC' }
+    ];
+    const map = calculateTaintMap(fifoNodes, fifoLinks, ['s1'], 'fifo');
+    expect(map.get('m')).toBeCloseTo(0.5, 5);
+    expect(map.get('c')).toBe(1);
+    expect(map.get('d')).toBe(0);
+  });
+
+  it('leaves zero-value data carriers untainted', () => {
+    const map = calculateTaintMap(
+      [
+        { id: 'a', type: 'suspect', balance: '1.0 BTC' },
+        { id: 'op', type: 'hop', balance: '0 BTC' },
+        { id: 'b', type: 'hop', balance: '1.0 BTC' }
+      ],
+      [
+        { source: 'a', target: 'b', value: '1.0 BTC' },
+        { source: 'a', target: 'op', value: '0 BTC Data' }
+      ],
+      ['a'],
+      'proportionate'
+    );
+    expect(map.get('op')).toBe(0);
+    expect(map.get('b')).toBe(1);
+  });
+
   it('produces tier labels', () => {
     expect(taintTier(0.9).label).toBe('High');
     expect(taintTier(0.5).label).toBe('Medium');

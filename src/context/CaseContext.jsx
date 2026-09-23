@@ -1,7 +1,15 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { SCENARIOS } from '../data/scenarios';
-import { traceEndReceiver, fetchAddressTxs, formatBlockstreamTx, fetchAddressSummaries } from '../utils/bitcoinApi';
+import { 
+  traceEndReceiver, 
+  fetchAddressTxs, 
+  formatBlockstreamTx, 
+  fetchAddressSummaries,
+  onGatewayEvent,
+  getGatewayStatus,
+  getCacheStats
+} from '../utils/bitcoinApi';
 import { DUST_THRESHOLD_SATS } from '../utils/traceHeuristics';
 import { 
   createLiveTxCase, 
@@ -57,6 +65,26 @@ export function CaseProvider({ children }) {
   useEffect(() => {
     safeSetItem('aegistrace_activeCaseId', activeCaseId);
   }, [activeCaseId]);
+
+  // Subscribe to gateway events to notify user of circuit-breaker failovers
+  useEffect(() => {
+    const unsubscribe = onGatewayEvent((event) => {
+      if (event.type === 'RATE_LIMIT') {
+        showToast(
+          `Gateway ${event.gateway} rate-limited (429). Failover to backup gateway active.`,
+          'warning',
+          4500
+        );
+      } else if (event.type === 'RECOVERED') {
+        showToast(
+          `Gateway ${event.gateway} recovered and operational.`,
+          'success',
+          2500
+        );
+      }
+    });
+    return unsubscribe;
+  }, [showToast]);
 
   const activeCase = useMemo(() => scenarios.find(s => s.id === activeCaseId) || scenarios[0] || SCENARIOS[0], [scenarios, activeCaseId]);
 
@@ -319,7 +347,9 @@ export function CaseProvider({ children }) {
     handleSearch,
     handleExpandAddress,
     handleAddCaseNote,
-    handleDeleteCaseNote
+    handleDeleteCaseNote,
+    getGatewayStatus,
+    getCacheStats
   };
 
   return (

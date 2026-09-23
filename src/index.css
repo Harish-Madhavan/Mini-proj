@@ -472,3 +472,176 @@ body {
   letter-spacing: -0.01em;
   font-feature-settings: "zero" 1;
 }
+
+/* ==========================================================================
+   Design System Components: Meters, Info Cards, Factor Rows & Controls
+   ========================================================================== */
+
+/* Forensic Dimension Meters */
+.meter-card {
+  background-color: rgba(5, 8, 16, 0.6);
+  padding: 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.meter-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.meter-label {
+  color: var(--text-secondary);
+}
+
+.meter-value {
+  font-weight: 700;
+}
+
+.meter-track {
+  width: 100%;
+  height: 5px;
+  background-color: #1e293b;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease-out;
+}
+
+/* Forensic Information Cards */
+.forensic-info-card {
+  background-color: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.forensic-info-header {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.forensic-info-body {
+  font-size: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.forensic-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.forensic-info-row-label {
+  color: var(--text-muted);
+}
+
+/* Threat & Risk Factor Rows */
+.factor-row {
+  background-color: rgba(5, 8, 16, 0.4);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.factor-category-tag {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  background-color: rgba(255, 255, 255, 0.05);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Configuration Sliders Panel */
+.config-slider-panel {
+  background-color: rgba(5, 8, 16, 0.8);
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.config-slider-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.config-slider-label {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  display: flex;
+  justify-content: space-between;
+}
+
+/* Stat Tiles */
+.stat-tile {
+  background-color: rgba(5, 8, 16, 0.5);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0.65rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.stat-tile-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.stat-tile-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* Enhanced Responsive Layout Rules */
+@media (max-width: 768px) {
+  .app-container {
+    padding: 0.5rem 0.75rem;
+  }
+  .header-banner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .main-nav {
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+  .config-slider-panel {
+    grid-template-columns: 1fr;
+  }
+}
+
