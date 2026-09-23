@@ -9,6 +9,8 @@
  * 5. Blockchain Era & Provenance Modulation (Genesis / Early Satoshi era discount for clean P2P)
  */
 
+import { identifyBridgeEntity, parseCrossChainMemo } from './crossChainForensics';
+
 export const DEFAULT_RISK_WEIGHTS = {
   mixerWeight: 35,
   hopWeight: 12,
@@ -47,6 +49,12 @@ export function calculateForensicRiskScore(caseOrNodes, customWeights = {}) {
   const weights = sanitizeWeights(customWeights);
 
   const hasMixer = nodes.some(n => n.type === 'mixer');
+  const hasBridge = nodes.some(n => 
+    n.type === 'bridge' || 
+    Boolean(n.details?.crossChain) || 
+    Boolean(identifyBridgeEntity(n)) ||
+    Boolean(n.details?.opReturnDecoded && parseCrossChainMemo(n.details.opReturnDecoded))
+  );
   const hopCount = nodes.filter(n => n.type === 'hop').length;
   const receiverNodes = nodes.filter(n => n.type === 'receiver');
   // A case is only as clean as its dirtiest endpoint: KYC applies only when
@@ -62,7 +70,7 @@ export function calculateForensicRiskScore(caseOrNodes, customWeights = {}) {
   // Dimensional sub-scores (all five feed the aggregate below)
   const obfuscationScore = isHistoricalEra
     ? 0
-    : (hasMixer ? weights.mixerWeight : 0);
+    : (hasMixer ? weights.mixerWeight : (hasBridge ? Math.round(weights.mixerWeight * 0.8) : 0));
 
   const layeringScore = isHistoricalEra
     ? Math.min(10, hopCount * 2)
@@ -92,6 +100,7 @@ export function calculateForensicRiskScore(caseOrNodes, customWeights = {}) {
   const statutoryAction = getStatutoryLegalAction(calculatedRiskScore, isKycVerified, isHistoricalEra);
   const threatSignatures = evaluateThreatSignatures(nodes, {
     hasMixer,
+    hasBridge,
     hopCount,
     isKycVerified,
     isHistoricalEra,
@@ -105,6 +114,7 @@ export function calculateForensicRiskScore(caseOrNodes, customWeights = {}) {
     riskScore: calculatedRiskScore,
     isHistoricalEra,
     hasMixer,
+    hasBridge,
     hopCount,
     isKycVerified,
     threatBadge,
@@ -157,6 +167,7 @@ export function getThreatBadge(score) {
 export function evaluateThreatSignatures(nodes = [], context = {}) {
   const {
     hasMixer = false,
+    hasBridge = false,
     hopCount = 0,
     isKycVerified = false,
     isHistoricalEra = false,
@@ -192,7 +203,7 @@ export function evaluateThreatSignatures(nodes = [], context = {}) {
     ];
   }
 
-  return [
+  const signatures = [
     {
       name: hasMixer ? "Mixer interaction" : "Standard routing",
       score: `+${obfuscationScore}%`,
@@ -219,6 +230,18 @@ export function evaluateThreatSignatures(nodes = [], context = {}) {
       status: isKycVerified ? "mitigated" : "detected"
     }
   ];
+
+  if (hasBridge) {
+    signatures.push({
+      name: "Cross-chain bridge exit",
+      score: "+28%",
+      category: "Chain-hopping check",
+      description: "Funds transferred to non-custodial liquidity vault for secondary blockchain settlement.",
+      status: "detected"
+    });
+  }
+
+  return signatures;
 }
 
 /**

@@ -10,13 +10,15 @@ import {
   Clock,
   ShieldCheck,
   FileCode,
-  ExternalLink
+  ExternalLink,
+  ArrowRightLeft
 } from 'lucide-react';
 import { useCase } from '../hooks/useCase';
 import { useToast } from '../hooks/useToast';
 import { decodeScriptPubkey } from '../utils/scriptDecoder';
 import { downloadText } from '../utils/download';
 import { getExplorerUrls } from '../utils/knownEntities';
+import { parseCrossChainMemo } from '../utils/crossChainForensics';
 import { 
   EXCHANGES, 
   EXCHANGE_DIRECTORY,
@@ -27,25 +29,55 @@ import {
   generateComplianceEmailTemplate
 } from '../constants/legalConstants';
 
+function EndpointRow({ role, node }) {
+  const explorer = getExplorerUrls(node.details?.address || node.id);
+  return (
+    <div style={{ backgroundColor: 'rgba(5, 8, 16, 0.8)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '0.8rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
+        <span style={{ color: 'var(--text-muted)' }}>{role}:</span>
+        <strong style={{ color: '#fff' }}>{node.entityName || node.label}</strong>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+        <span className="mono-addr" style={{ color: 'var(--primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={node.details?.address || node.id}>
+          {node.details?.address || node.id}
+        </span>
+        {explorer && (
+          <a href={explorer.mempool} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-muted)', flexShrink: 0 }} aria-label={`Open ${role} in explorer`}>
+            <ExternalLink size={12} />
+          </a>
+        )}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.2rem' }}>
+        <span style={{ color: 'var(--text-muted)' }}>Balance:</span>
+        <span>{node.balance || 'N/A'}</span>
+      </div>
+    </div>
+  );
+}
+
 export default function OSINTIntegrator() {
   const { activeCase } = useCase();
   const { showToast } = useToast();
 
-  const [selectedExchange, setSelectedExchange] = useState(EXCHANGES[0]);
-  const [firNumber, setFirNumber] = useState(DEFAULT_FIR_NUMBER);
-  const [zonalUnit, setZonalUnit] = useState(ZONAL_UNITS[0].value);
-  const [officerRank, setOfficerRank] = useState(DEFAULT_OFFICER_TITLE);
-  const [officerBadge, setOfficerBadge] = useState('NCB-84920-LE');
+  const [noticeForm, setNoticeForm] = useState({
+    selectedExchange: EXCHANGES[0],
+    firNumber: DEFAULT_FIR_NUMBER,
+    zonalUnit: ZONAL_UNITS[0].value,
+    officerRank: DEFAULT_OFFICER_TITLE,
+    officerBadge: 'NCB-84920-LE'
+  });
+  const updateNotice = (key, val) => setNoticeForm(prev => ({ ...prev, [key]: val }));
 
   // Script Inspector state
   const [scriptInput, setScriptInput] = useState('');
   const [decodedScript, setDecodedScript] = useState(null);
+  const [crossChainMatch, setCrossChainMatch] = useState(null);
 
   if (!activeCase) return <div style={{ color: 'var(--text-secondary)' }}>Select a case first.</div>;
 
   const receiverNode = activeCase.nodes.find(n => n.type === 'receiver');
   const suspectNode = activeCase.nodes.find(n => n.type === 'suspect');
-  const exchangeInfo = EXCHANGE_DIRECTORY[selectedExchange] || {
+  const exchangeInfo = EXCHANGE_DIRECTORY[noticeForm.selectedExchange] || {
     entity: 'Exchange Compliance Liaison',
     email: 'compliance@exchange.com',
     sla: '48 Hours',
@@ -58,9 +90,12 @@ export default function OSINTIntegrator() {
       showToast("Enter an address or code to decode.", "warning");
       return;
     }
-    const res = decodeScriptPubkey(val.trim());
+    const trimmed = val.trim();
+    const res = decodeScriptPubkey(trimmed);
+    const cc = parseCrossChainMemo(trimmed) || (res?.asm ? parseCrossChainMemo(res.asm) : null);
     setDecodedScript(res);
-    showToast("Decoded.", "info");
+    setCrossChainMatch(cc);
+    showToast(cc ? "Cross-chain memo detected!" : "Decoded.", "info");
   };
 
   const endpointRows = [
@@ -71,14 +106,14 @@ export default function OSINTIntegrator() {
   const getSubpoenaText = () => {
     if (!receiverNode) return "";
     return generateSection67NoticeText({
-      zonalUnit,
-      firNumber,
-      selectedExchange,
+      zonalUnit: noticeForm.zonalUnit,
+      firNumber: noticeForm.firNumber,
+      selectedExchange: noticeForm.selectedExchange,
       caseTitle: activeCase.title,
       depositAddress: receiverNode.details?.address || receiverNode.id || 'N/A',
       currency: activeCase.currency,
       balance: receiverNode.balance || '0 BTC',
-      officerRank: `${officerRank} [Badge: ${officerBadge}]`,
+      officerRank: `${noticeForm.officerRank} [Badge: ${noticeForm.officerBadge}]`,
       sigKey: undefined
     });
   };
@@ -109,11 +144,11 @@ export default function OSINTIntegrator() {
       return;
     }
     const mailto = generateComplianceEmailTemplate({
-      selectedExchange,
-      firNumber,
+      selectedExchange: noticeForm.selectedExchange,
+      firNumber: noticeForm.firNumber,
       depositAddress: receiverNode.details?.address || receiverNode.id || 'N/A',
       balance: receiverNode.balance || '0 BTC',
-      officerRank: `${officerRank} [Badge: ${officerBadge}]`
+      officerRank: `${noticeForm.officerRank} [Badge: ${noticeForm.officerBadge}]`
     });
     window.open(mailto, '_blank');
     showToast("Opened email draft.", "info");
@@ -140,31 +175,9 @@ export default function OSINTIntegrator() {
               No origin or endpoint nodes in the active case yet.
             </div>
           ) : (
-            endpointRows.map(({ role, node }) => {
-              const explorer = getExplorerUrls(node.details?.address || node.id);
-              return (
-                <div key={node.id} style={{ backgroundColor: 'rgba(5, 8, 16, 0.8)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '0.8rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.2rem' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>{role}:</span>
-                    <strong style={{ color: '#fff' }}>{node.entityName || node.label}</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
-                    <span className="mono-addr" style={{ color: 'var(--primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={node.details?.address || node.id}>
-                      {node.details?.address || node.id}
-                    </span>
-                    {explorer && (
-                      <a href={explorer.mempool} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-muted)', flexShrink: 0 }} aria-label={`Open ${role} in explorer`}>
-                        <ExternalLink size={12} />
-                      </a>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.2rem' }}>
-                    <span style={{ color: 'var(--text-muted)' }}>Balance:</span>
-                    <span>{node.balance || 'N/A'}</span>
-                  </div>
-                </div>
-              );
-            })
+            endpointRows.map(({ role, node }) => (
+              <EndpointRow key={node.id} role={role} node={node} />
+            ))
           )}
         </div>
 
@@ -239,6 +252,38 @@ export default function OSINTIntegrator() {
               </div>
             </div>
           )}
+
+          {crossChainMatch && (
+            <div style={{ backgroundColor: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.35)', padding: '0.75rem', borderRadius: '6px', fontSize: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: '#38bdf8', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                  <ArrowRightLeft size={13} /> Cross-Chain Exit Identified
+                </span>
+                <span style={{ color: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.15)', padding: '0.1rem 0.35rem', borderRadius: '3px', fontWeight: 700, fontSize: '0.65rem' }}>
+                  CHAIN-HOP
+                </span>
+              </div>
+              <div style={{ color: '#fff', fontWeight: 600 }}>{crossChainMatch.protocol}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Target:</span>
+                <strong style={{ color: '#38bdf8' }}>{crossChainMatch.destinationChain} ({crossChainMatch.targetAsset})</strong>
+              </div>
+              {crossChainMatch.destinationAddress && (
+                <div style={{ marginTop: '0.2rem' }}>
+                  <span style={{ color: 'var(--text-muted)', display: 'block' }}>Destination address:</span>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.3rem', marginTop: '0.1rem' }}>
+                    <span className="mono-addr" style={{ fontSize: '0.7rem', color: '#cbd5e1', wordBreak: 'break-all' }}>{crossChainMatch.destinationAddress}</span>
+                    <button onClick={() => { navigator.clipboard.writeText(crossChainMatch.destinationAddress); showToast("Destination address copied.", "success"); }} className="btn btn-outline" style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem' }}>Copy</button>
+                  </div>
+                </div>
+              )}
+              {crossChainMatch.explorerUrl && (
+                <a href={crossChainMatch.explorerUrl} target="_blank" rel="noopener noreferrer" className="btn btn-outline" style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', justifyContent: 'center', marginTop: '0.3rem', textDecoration: 'none' }}>
+                  <ExternalLink size={12} /> Open in {crossChainMatch.destinationChain} Explorer
+                </a>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Target Exchange Compliance Directory Card */}
@@ -268,8 +313,8 @@ export default function OSINTIntegrator() {
           <div>
             <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Exchange:</label>
             <select
-              value={selectedExchange}
-              onChange={(e) => setSelectedExchange(e.target.value)}
+              value={noticeForm.selectedExchange}
+              onChange={(e) => updateNotice('selectedExchange', e.target.value)}
               className="select-field"
               style={{ width: '100%' }}
             >
@@ -284,8 +329,8 @@ export default function OSINTIntegrator() {
               <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Case number (FIR):</label>
               <input
                 type="text"
-                value={firNumber}
-                onChange={(e) => setFirNumber(e.target.value)}
+                value={noticeForm.firNumber}
+                onChange={(e) => updateNotice('firNumber', e.target.value)}
                 className="input-field"
                 style={{ width: '100%' }}
               />
@@ -293,8 +338,8 @@ export default function OSINTIntegrator() {
             <div>
               <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Unit:</label>
               <select
-                value={zonalUnit}
-                onChange={(e) => setZonalUnit(e.target.value)}
+                value={noticeForm.zonalUnit}
+                onChange={(e) => updateNotice('zonalUnit', e.target.value)}
                 className="select-field"
                 style={{ width: '100%' }}
               >
@@ -310,8 +355,8 @@ export default function OSINTIntegrator() {
               <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Officer rank:</label>
               <input
                 type="text"
-                value={officerRank}
-                onChange={(e) => setOfficerRank(e.target.value)}
+                value={noticeForm.officerRank}
+                onChange={(e) => updateNotice('officerRank', e.target.value)}
                 className="input-field"
                 style={{ width: '100%' }}
               />
@@ -320,8 +365,8 @@ export default function OSINTIntegrator() {
               <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Badge:</label>
               <input
                 type="text"
-                value={officerBadge}
-                onChange={(e) => setOfficerBadge(e.target.value)}
+                value={noticeForm.officerBadge}
+                onChange={(e) => updateNotice('officerBadge', e.target.value)}
                 className="input-field"
                 style={{ width: '100%' }}
               />

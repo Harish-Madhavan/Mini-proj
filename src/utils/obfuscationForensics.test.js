@@ -83,4 +83,33 @@ describe('obfuscationForensics', () => {
     expect(dossier.hasMixer).toBe(true);
     expect(dossier.recommendations.length).toBeGreaterThan(0);
   });
+
+  it('detects cross-chain hops in dossier and generates relayer recommendations', () => {
+    const crossChainCase = {
+      id: 'case-crosschain-01',
+      nodes: [
+        { id: 'suspect', type: 'suspect', balance: '2.5 BTC' },
+        { 
+          id: 'asgard', 
+          type: 'bridge', 
+          label: 'THORChain Asgard Vault', 
+          balance: '2.48 BTC',
+          details: { 
+            address: 'bc1qthorvault9981247asgard001',
+            opReturnDecoded: 'SWAP:ETH.USDT:0x71C8364437F5Fa0128509890F0D8E8170D30d6F9:1000'
+          }
+        }
+      ],
+      links: [
+        { source: 'suspect', target: 'asgard', value: '2.5 BTC' }
+      ]
+    };
+
+    const dossier = generateObfuscationDossier(crossChainCase);
+    expect(dossier.crossChain.detected).toBe(true);
+    expect(dossier.crossChain.bridgeCount).toBe(1);
+    expect(dossier.crossChain.targetChains).toContain('Ethereum');
+    expect(dossier.obfuscationScore).toBeGreaterThanOrEqual(35);
+    expect(dossier.recommendations.some(r => r.includes('relay') || r.includes('cross-chain') || r.includes('Ethereum'))).toBe(true);
+  });
 });

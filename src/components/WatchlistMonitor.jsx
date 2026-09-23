@@ -7,9 +7,9 @@ import {
   RefreshCw, 
   CheckCircle, 
   AlertTriangle, 
-  Upload,
-  ArrowRight,
-  Bell
+  Upload, 
+  ArrowRight, 
+  Bell 
 } from 'lucide-react';
 import { useCase } from '../hooks/useCase';
 import { useToast } from '../hooks/useToast';
@@ -25,16 +25,19 @@ import { validateBtcAddress } from '../utils/forensicUtils';
 import { getExplorerUrls } from '../utils/knownEntities';
 import EmptyState from './EmptyState';
 
+const TIER_COLORS = {
+  CRITICAL: { bg: 'rgba(239,68,68,0.15)', text: '#ef4444' },
+  HIGH: { bg: 'rgba(245,158,11,0.15)', text: '#f59e0b' },
+  MEDIUM: { bg: 'rgba(16,185,129,0.15)', text: '#10b981' }
+};
+
 export default function WatchlistMonitor() {
   const { activeCase, liveMode, handleSearch } = useCase();
   const { showToast } = useToast();
 
   const [watchlist, setWatchlist] = useState([]);
   const [alerts, setAlerts] = useState([]);
-  const [newAddr, setNewAddr] = useState('');
-  const [newTag, setNewTag] = useState('');
-  const [newSyndicate, setNewSyndicate] = useState('');
-  const [newTier, setNewTier] = useState('CRITICAL');
+  const [form, setForm] = useState({ address: '', tag: '', syndicate: '', tier: 'CRITICAL' });
   const [isCheckingAll, setIsCheckingAll] = useState(false);
   const [mempoolResults, setMempoolResults] = useState({});
 
@@ -44,7 +47,7 @@ export default function WatchlistMonitor() {
   }, []);
 
   const handleAdd = () => {
-    const trimmed = newAddr.trim();
+    const trimmed = form.address.trim();
     if (!trimmed) {
       showToast("Please enter a Bitcoin address.", "warning");
       return;
@@ -57,16 +60,14 @@ export default function WatchlistMonitor() {
 
     const res = addToWatchlist({
       address: trimmed,
-      tag: newTag.trim() || 'Suspect Wallet',
-      syndicate: newSyndicate.trim() || 'Open case',
-      riskTier: newTier
+      tag: form.tag.trim() || 'Suspect Wallet',
+      syndicate: form.syndicate.trim() || 'Open case',
+      riskTier: form.tier
     });
 
     if (res.success) {
       setWatchlist(res.watchlist);
-      setNewAddr('');
-      setNewTag('');
-      setNewSyndicate('');
+      setForm({ address: '', tag: '', syndicate: '', tier: 'CRITICAL' });
       showToast("Address added to watchlist.", "success");
     } else {
       showToast(res.message, "warning");
@@ -74,8 +75,7 @@ export default function WatchlistMonitor() {
   };
 
   const handleRemove = (address) => {
-    const updated = removeFromWatchlist(address);
-    setWatchlist(updated);
+    setWatchlist(removeFromWatchlist(address));
     showToast("Address removed.", "info");
   };
 
@@ -135,8 +135,6 @@ export default function WatchlistMonitor() {
     setIsCheckingAll(true);
     showToast(`Checking ${watchlist.length} watched addresses...`, "info");
 
-    // Bounded parallelism: chunks of 4 keep large watchlists fast without
-    // hammering the gateway. Failed checks degrade to a quiet miss.
     const CONCURRENCY = 4;
     const queue = [...watchlist];
     const results = {};
@@ -149,38 +147,29 @@ export default function WatchlistMonitor() {
       );
       settled.forEach((res, i) => {
         const item = chunk[i];
-        const status = res.status === 'fulfilled'
-          ? res.value
-          : { hasMempoolTx: false, message: 'Check failed.' };
+        const status = res.status === 'fulfilled' ? res.value : { hasMempoolTx: false, message: 'Check failed.' };
         results[item.address] = status;
         if (status.hasMempoolTx) hits.push({ item, status });
       });
       setMempoolResults(prev => ({ ...prev, ...results }));
     }
 
-    const newAlertList = [...alerts];
-    for (const { item, status } of hits) {
-      newAlertList.unshift({
-        id: `alert_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        address: item.address,
-        txid: status.txid,
-        amount: status.amount,
-        feeRate: status.feeRate,
-        type: status.type,
-        timestamp: 'Just now',
-        status: 'Unconfirmed'
-      });
-    }
+    const newAlertList = hits.map(({ item, status }) => ({
+      id: `alert_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      address: item.address,
+      txid: status.txid,
+      amount: status.amount,
+      feeRate: status.feeRate,
+      type: status.type,
+      timestamp: 'Just now',
+      status: 'Unconfirmed'
+    })).concat(alerts).slice(0, 30);
 
-    setAlerts(newAlertList.slice(0, 30));
-    saveMempoolAlerts(newAlertList.slice(0, 30));
+    setAlerts(newAlertList);
+    saveMempoolAlerts(newAlertList);
     setIsCheckingAll(false);
 
-    if (hits.length > 0) {
-      showToast(`Scan complete: ${hits.length} active transaction(s).`, "warning");
-    } else {
-      showToast("Scan complete: nothing pending.", "success");
-    }
+    showToast(hits.length > 0 ? `Scan complete: ${hits.length} active transaction(s).` : "Scan complete: nothing pending.", hits.length > 0 ? "warning" : "success");
   };
 
   const handleClearAlerts = () => {
@@ -192,16 +181,16 @@ export default function WatchlistMonitor() {
   return (
     <div className="responsive-split-grid" style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: '1.5rem', minHeight: '520px' }}>
       
-      {/* Left: Monitored Address Surveillance Pool */}
+      {/* Monitored Address Surveillance Pool */}
       <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem' }}>
           <div>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Radio style={{ color: '#0ea5e9' }} /> Watchlist
-              </h3>
-              <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                Watched addresses, checked against live mempool activity.
-              </p>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Radio style={{ color: '#0ea5e9' }} /> Watchlist
+            </h3>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+              Watched addresses, checked against live mempool activity.
+            </p>
           </div>
 
           <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
@@ -221,41 +210,41 @@ export default function WatchlistMonitor() {
               type="button"
               style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
             >
-              <RefreshCw size={13} className={isCheckingAll ? "moving-dash" : ""} style={{ animation: isCheckingAll ? 'spin 1s linear infinite' : 'none' }} />
+              <RefreshCw size={13} style={{ animation: isCheckingAll ? 'spin 1s linear infinite' : 'none' }} />
               {isCheckingAll ? "Scanning..." : "Scan all"}
             </button>
           </div>
         </div>
 
-        {/* Add Address to Watchlist Form */}
+        {/* Add Address Form */}
         <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 0.8fr auto', gap: '0.5rem', alignItems: 'center' }}>
           <input
             type="text"
             placeholder="Bitcoin address"
-            value={newAddr}
-            onChange={(e) => setNewAddr(e.target.value)}
+            value={form.address}
+            onChange={(e) => setForm(prev => ({ ...prev, address: e.target.value }))}
             className="input-field mono-addr"
             style={{ fontSize: '0.775rem' }}
           />
           <input
             type="text"
             placeholder="Label"
-            value={newTag}
-            onChange={(e) => setNewTag(e.target.value)}
+            value={form.tag}
+            onChange={(e) => setForm(prev => ({ ...prev, tag: e.target.value }))}
             className="input-field"
             style={{ fontSize: '0.775rem' }}
           />
           <input
             type="text"
             placeholder="Group"
-            value={newSyndicate}
-            onChange={(e) => setNewSyndicate(e.target.value)}
+            value={form.syndicate}
+            onChange={(e) => setForm(prev => ({ ...prev, syndicate: e.target.value }))}
             className="input-field"
             style={{ fontSize: '0.775rem' }}
           />
           <select
-            value={newTier}
-            onChange={(e) => setNewTier(e.target.value)}
+            value={form.tier}
+            onChange={(e) => setForm(prev => ({ ...prev, tier: e.target.value }))}
             className="select-field"
             style={{ fontSize: '0.775rem' }}
           >
@@ -289,6 +278,8 @@ export default function WatchlistMonitor() {
               {watchlist.map((item) => {
                 const memRes = mempoolResults[item.address];
                 const urls = getExplorerUrls(item.address);
+                const tierColor = TIER_COLORS[item.riskTier] || TIER_COLORS.MEDIUM;
+
                 return (
                   <tr key={item.address} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                     <td style={{ padding: '0.5rem' }}>
@@ -309,14 +300,7 @@ export default function WatchlistMonitor() {
                       <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{item.syndicate}</div>
                     </td>
                     <td style={{ padding: '0.5rem' }}>
-                      <span style={{ 
-                        padding: '0.15rem 0.45rem', 
-                        borderRadius: '4px', 
-                        fontSize: '0.675rem', 
-                        fontWeight: 700,
-                        backgroundColor: item.riskTier === 'CRITICAL' ? 'rgba(239,68,68,0.15)' : item.riskTier === 'HIGH' ? 'rgba(245,158,11,0.15)' : 'rgba(16,185,129,0.15)',
-                        color: item.riskTier === 'CRITICAL' ? '#ef4444' : item.riskTier === 'HIGH' ? '#f59e0b' : '#10b981'
-                      }}>
+                      <span style={{ padding: '0.15rem 0.45rem', borderRadius: '4px', fontSize: '0.675rem', fontWeight: 700, backgroundColor: tierColor.bg, color: tierColor.text }}>
                         {item.riskTier}
                       </span>
                     </td>
@@ -332,34 +316,17 @@ export default function WatchlistMonitor() {
                           </span>
                         )
                       ) : (
-                        <button
-                          onClick={() => handleCheckAddress(item.address)}
-                          className="btn btn-outline"
-                          type="button"
-                          style={{ fontSize: '0.675rem', padding: '0.2rem 0.4rem' }}
-                        >
+                        <button onClick={() => handleCheckAddress(item.address)} className="btn btn-outline" type="button" style={{ fontSize: '0.675rem', padding: '0.2rem 0.4rem' }}>
                           Check
                         </button>
                       )}
                     </td>
                     <td style={{ padding: '0.5rem', textAlign: 'right' }}>
                       <div style={{ display: 'inline-flex', gap: '0.3rem' }}>
-                        <button
-                          onClick={() => handleSearch(item.address)}
-                          className="btn btn-outline"
-                          type="button"
-                          style={{ fontSize: '0.7rem', padding: '0.2rem 0.45rem' }}
-                          title="Trace forward in active case graph"
-                        >
+                        <button onClick={() => handleSearch(item.address)} className="btn btn-outline" type="button" style={{ fontSize: '0.7rem', padding: '0.2rem 0.45rem' }} title="Trace forward in active case graph">
                           Trace <ArrowRight size={11} />
                         </button>
-                        <button
-                          onClick={() => handleRemove(item.address)}
-                          className="btn btn-outline"
-                          type="button"
-                          style={{ padding: '0.2rem 0.4rem', color: 'var(--text-muted)' }}
-                          title="Remove from surveillance"
-                        >
+                        <button onClick={() => handleRemove(item.address)} className="btn btn-outline" type="button" style={{ padding: '0.2rem 0.4rem', color: 'var(--text-muted)' }} title="Remove from surveillance">
                           <Trash2 size={12} />
                         </button>
                       </div>
@@ -384,12 +351,7 @@ export default function WatchlistMonitor() {
           </div>
 
           {alerts.length > 0 && (
-            <button
-              onClick={handleClearAlerts}
-              className="btn btn-outline"
-              type="button"
-              style={{ fontSize: '0.7rem', padding: '0.25rem 0.5rem' }}
-            >
+            <button onClick={handleClearAlerts} className="btn btn-outline" type="button" style={{ fontSize: '0.7rem', padding: '0.25rem 0.5rem' }}>
               Clear Log
             </button>
           )}
@@ -415,14 +377,7 @@ export default function WatchlistMonitor() {
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ 
-                    fontSize: '0.675rem', 
-                    fontWeight: 700, 
-                    color: '#eab308', 
-                    backgroundColor: 'rgba(234, 179, 8, 0.15)', 
-                    padding: '0.1rem 0.4rem', 
-                    borderRadius: '4px' 
-                  }}>
+                  <span style={{ fontSize: '0.675rem', fontWeight: 700, color: '#eab308', backgroundColor: 'rgba(234, 179, 8, 0.15)', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>
                     {alert.status}
                   </span>
                   <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{alert.timestamp}</span>
@@ -441,12 +396,7 @@ export default function WatchlistMonitor() {
                   <span style={{ fontSize: '0.675rem', color: 'var(--text-muted)' }} className="mono-addr">
                     Transaction: {alert.txid.slice(0, 14)}...
                   </span>
-                  <button
-                    onClick={() => handleSearch(alert.address)}
-                    className="btn btn-outline"
-                    type="button"
-                    style={{ fontSize: '0.675rem', padding: '0.15rem 0.4rem' }}
-                  >
+                  <button onClick={() => handleSearch(alert.address)} className="btn btn-outline" type="button" style={{ fontSize: '0.675rem', padding: '0.15rem 0.4rem' }}>
                     Trace
                   </button>
                 </div>

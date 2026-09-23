@@ -33,6 +33,38 @@ function StatBox({ label, value, valueColor = '#fff', sub = null }) {
   );
 }
 
+function AddressRow({ addr, onRemove }) {
+  const isEvm = addr.startsWith('0x');
+  const isTron = addr.startsWith('T') && addr.length >= 33 && addr.length <= 35;
+  const validation = validateBtcAddress(addr);
+  const isValid = validation.isValid;
+  const badgeColor = isValid ? '#10b981' : (isEvm || isTron) ? '#06b6d4' : '#f59e0b';
+  const label = isEvm 
+    ? 'EVM address (cross-chain)'
+    : isTron
+      ? 'Tron address (cross-chain)'
+      : validation.type;
+
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.6rem 0.8rem', borderRadius: '6px', backgroundColor: 'rgba(5, 8, 16, 0.8)', border: '1px solid var(--border-color)', gap: '0.5rem' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', overflow: 'hidden' }}>
+        <span className="mono-addr" style={{ fontSize: '0.8rem', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{addr}</span>
+        <span style={{ fontSize: '0.65rem', color: badgeColor, display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+          {isValid ? <CheckCircle size={10} /> : <AlertCircle size={10} />}
+          {label}
+        </span>
+      </div>
+      <button
+        onClick={onRemove}
+        style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', opacity: 0.7 }}
+        title="Remove address"
+      >
+        <Trash2 size={14} />
+      </button>
+    </div>
+  );
+}
+
 export default function HeuristicClustering() {
   const { activeCase } = useCase();
   const { showToast } = useToast();
@@ -45,18 +77,19 @@ export default function HeuristicClustering() {
   const [newAddr, setNewAddr] = useState('');
   const [clusteringResult, setClusteringResult] = useState(null);
   const [isClustering, setIsClustering] = useState(false);
-  const [feeTxA, setFeeTxA] = useState('');
-  const [feeTxB, setFeeTxB] = useState('');
+  const [feeTxs, setFeeTxs] = useState({ a: '', b: '' });
   const [feeResult, setFeeResult] = useState(null);
   const [isComparingFees, setIsComparingFees] = useState(false);
+
+  const updateFeeTx = (field, val) => setFeeTxs(prev => ({ ...prev, [field]: val }));
 
   const caseTxIds = (activeCase?.nodes || [])
     .filter(n => typeof n.id === 'string' && n.id.startsWith('tx_'))
     .map(n => n.id.slice(3));
 
   const handleCompareFees = async () => {
-    const a = feeTxA.trim();
-    const b = feeTxB.trim();
+    const a = feeTxs.a.trim();
+    const b = feeTxs.b.trim();
     if (!/^[0-9a-fA-F]{64}$/.test(a) || !/^[0-9a-fA-F]{64}$/.test(b)) {
       showToast('Both inputs must be 64-character transaction IDs.', 'warning');
       return;
@@ -254,27 +287,13 @@ export default function HeuristicClustering() {
 
         {/* List of Addresses */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1, overflowY: 'auto', maxHeight: '280px' }}>
-          {suspectAddresses.map((addr, idx) => {
-            const validation = validateBtcAddress(addr);
-            return (
-              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.6rem 0.8rem', borderRadius: '6px', backgroundColor: 'rgba(5, 8, 16, 0.8)', border: '1px solid var(--border-color)', gap: '0.5rem' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', overflow: 'hidden' }}>
-                  <span className="mono-addr" style={{ fontSize: '0.8rem', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{addr}</span>
-                  <span style={{ fontSize: '0.65rem', color: validation.isValid ? '#10b981' : '#f59e0b', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
-                    {validation.isValid ? <CheckCircle size={10} /> : <AlertCircle size={10} />}
-                    {validation.type}
-                  </span>
-                </div>
-                <button
-                  onClick={() => handleRemoveAddress(idx)}
-                  style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', opacity: 0.7 }}
-                  title="Remove address"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            );
-          })}
+          {suspectAddresses.map((addr, idx) => (
+            <AddressRow
+              key={idx}
+              addr={addr}
+              onRemove={() => handleRemoveAddress(idx)}
+            />
+          ))}
         </div>
 
         <button
@@ -377,8 +396,8 @@ export default function HeuristicClustering() {
             <input
               id="fee-tx-a"
               type="text"
-              value={feeTxA}
-              onChange={(e) => setFeeTxA(e.target.value)}
+              value={feeTxs.a}
+              onChange={(e) => updateFeeTx('a', e.target.value)}
               placeholder="64-character transaction ID"
               list="case-txids"
               className="mono-addr input-field"
@@ -390,8 +409,8 @@ export default function HeuristicClustering() {
             <input
               id="fee-tx-b"
               type="text"
-              value={feeTxB}
-              onChange={(e) => setFeeTxB(e.target.value)}
+              value={feeTxs.b}
+              onChange={(e) => updateFeeTx('b', e.target.value)}
               placeholder="64-character transaction ID"
               list="case-txids"
               className="mono-addr input-field"

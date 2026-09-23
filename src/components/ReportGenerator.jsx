@@ -12,7 +12,8 @@ import {
   Download,
   Clock,
   Stamp,
-  Copy
+  Copy,
+  Layers
 } from 'lucide-react';
 import { useCase } from '../hooks/useCase';
 import { useToast } from '../hooks/useToast';
@@ -24,10 +25,7 @@ import { generateForensicNarrative } from '../utils/narrativeGenerator';
 import { buildChainOfCustody, verifyChainOfCustody } from '../utils/chainOfCustody';
 import { useEndpointProfile } from '../hooks/useEndpointProfile';
 import { ENDPOINT_PROFILE_LABELS } from '../utils/bitcoinApi';
-
-const SHEET_CELL = { padding: '0.4rem', border: '1px solid #e2e8f0' };
-const SHEET_CELL_SM = { padding: '0.35rem', border: '1px solid #e2e8f0' };
-const EXHIBIT_CELL = { padding: '0.35rem', border: '1px solid #cbd5e1' };
+import { analyzeCaseCrossChainActivity } from '../utils/crossChainForensics';
 
 function HopRow({ pill, pillStyle, address, balance, balanceColor = '#0f172a', dashed = false, bg = '#f8fafc', borderColor = '#e2e8f0' }) {
   return (
@@ -39,12 +37,31 @@ function HopRow({ pill, pillStyle, address, balance, balanceColor = '#0f172a', d
   );
 }
 
+function TableCell({ children, bold, mono, style, isHeader = false }) {
+  const Tag = isHeader ? 'th' : 'td';
+  return (
+    <Tag style={{
+      padding: '0.35rem',
+      border: '1px solid #cbd5e1',
+      fontWeight: bold || isHeader ? 600 : 'normal',
+      fontFamily: mono ? 'monospace' : 'inherit',
+      textAlign: isHeader ? 'left' : 'inherit',
+      backgroundColor: isHeader ? '#f8fafc' : 'transparent',
+      ...style
+    }}>
+      {children}
+    </Tag>
+  );
+}
+
+const shortRef = (ref) => (!ref || ref.length <= 18 ? ref || 'N/A' : `${ref.slice(0, 10)}...${ref.slice(-6)}`);
+
 export default function ReportGenerator() {
   const { activeCase } = useCase();
   const { showToast } = useToast();
 
   const canvasRef = useRef(null);
-  const [reportType, setReportType] = useState('ndps_section67'); // 'ndps_section67' | 'evidence_section65b'
+  const [reportType, setReportType] = useState('ndps_section67');
   const [isDrawing, setIsDrawing] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
   const [integrityHash, setIntegrityHash] = useState('');
@@ -71,9 +88,8 @@ export default function ReportGenerator() {
           return;
         }
       } catch {
-        // fall back to pseudo hash below
+        // Fallback below
       }
-      // Fallback deterministic pseudo-hash for non-secure contexts / tests
       let hash = 0;
       for (let i = 0; i < dataStr.length; i++) {
         hash = (hash << 5) - hash + dataStr.charCodeAt(i);
@@ -93,6 +109,7 @@ export default function ReportGenerator() {
   const narrative = useMemo(() => generateForensicNarrative(activeCase), [activeCase]);
   const custody = useMemo(() => buildChainOfCustody(activeCase), [activeCase]);
   const custodyVerification = useMemo(() => verifyChainOfCustody(custody.events), [custody]);
+  const crossChainReport = useMemo(() => activeCase ? analyzeCaseCrossChainActivity(activeCase.nodes || [], activeCase.links || []) : null, [activeCase]);
   const reportReceiverAddress = activeCase?.nodes?.find(n => n.type === 'receiver')?.details?.address;
   const endpointProfile = useEndpointProfile(reportReceiverAddress, true);
 
@@ -106,20 +123,13 @@ export default function ReportGenerator() {
   const taintMap = activeCase.nodes.length > 1 ? calculateTaintMap(activeCase.nodes, activeCase.links) : null;
   const receiverTaint = receiverNode && taintMap ? taintMap.get(receiverNode.id) : null;
 
-  const shortRef = (ref) => {
-    if (!ref || typeof ref !== 'string' || ref.length <= 18) return ref || 'N/A';
-    return `${ref.slice(0, 10)}...${ref.slice(-6)}`;
-  };
-
   const getCoordinates = (e) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
     return {
-      x: clientX - rect.left,
-      y: clientY - rect.top
+      x: (e.touches ? e.touches[0].clientX : e.clientX) - rect.left,
+      y: (e.touches ? e.touches[0].clientY : e.clientY) - rect.top
     };
   };
 
@@ -128,7 +138,6 @@ export default function ReportGenerator() {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     const { x, y } = getCoordinates(e);
-    
     ctx.beginPath();
     ctx.moveTo(x, y);
     setIsDrawing(true);
@@ -139,22 +148,18 @@ export default function ReportGenerator() {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     const { x, y } = getCoordinates(e);
-    
     ctx.lineTo(x, y);
-    ctx.strokeStyle = '#0284c7'; 
+    ctx.strokeStyle = '#0284c7';
     ctx.lineWidth = 2.5;
     ctx.lineCap = 'round';
     ctx.stroke();
   };
 
-  const stopDrawing = () => {
-    setIsDrawing(false);
-  };
+  const stopDrawing = () => setIsDrawing(false);
 
   const clearSignature = () => {
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
     showToast("Signature cleared.", "info");
   };
 
@@ -166,10 +171,12 @@ export default function ReportGenerator() {
       const img = new Image();
       img.onload = () => {
         const canvas = canvasRef.current;
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        showToast("Image loaded.", "success");
+        if (canvas) {
+          const ctx = canvas.getContext('2d');
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          showToast("Image loaded.", "success");
+        }
       };
       img.src = event.target.result;
     };
@@ -180,6 +187,13 @@ export default function ReportGenerator() {
   const handlePrint = () => {
     showToast("Opening print...", "info");
     window.print();
+  };
+
+  const getRefCode = () => {
+    if (bureauZone.includes('Head Office')) return 'NCB/HQ/ND';
+    if (bureauZone.includes('Mumbai')) return 'NCB/MZU/MUM';
+    if (bureauZone.includes('Bengaluru')) return 'NCB/BZU/BLR';
+    return 'NCB/CIU/CH';
   };
 
   const getReportMarkdown = () => {
@@ -234,58 +248,42 @@ ${investigatorNotes}
 `;
   };
 
-  const handleExportMarkdown = () => {
-    const md = getReportMarkdown();
-    downloadText(md, `NCB-Forensic-Report-${activeCase.id.toUpperCase()}.md`);
-    showToast("Report downloaded.", "success");
-  };
+  const getSection65BText = () => generateSection65BCertificateText({
+    zonalUnit: bureauZone,
+    firNumber: `NCB/NDPS/CR-${activeCase.id.slice(-4).toUpperCase()}/2026`,
+    caseTitle: activeCase.title,
+    officerName,
+    officerBadge,
+    integrityHash,
+    nodesCount: activeCase.nodes?.length || 0,
+    hopsCount: activeCase.links?.length || 0,
+    initialTxHash: activeCase.initialTxHash,
+    targetExchange: receiverNode?.entityName || 'Domestic exchange',
+    depositAddress: receiverNode?.details?.address || 'N/A',
+    totalSeizedBtc: suspectNode?.balance || '0.0000 BTC'
+  });
 
-  const handleCopyMarkdown = () => {
-    const md = getReportMarkdown();
-    navigator.clipboard.writeText(md);
-    showToast("Report copied.", "success");
-  };
+  const isEvidence = reportType === 'evidence_section65b';
 
-  const getSection65BText = () => {
-    return generateSection65BCertificateText({
-      zonalUnit: bureauZone,
-      firNumber: `NCB/NDPS/CR-${activeCase.id.slice(-4).toUpperCase()}/2026`,
-      caseTitle: activeCase.title,
-      officerName,
-      officerBadge,
-      integrityHash,
-      nodesCount: activeCase.nodes?.length || 0,
-      hopsCount: activeCase.links?.length || 0,
-      initialTxHash: activeCase.initialTxHash,
-      targetExchange: receiverNode?.entityName || 'Domestic exchange',
-      depositAddress: receiverNode?.details?.address || 'N/A',
-      totalSeizedBtc: suspectNode?.balance || '0.0000 BTC'
-    });
-  };
-
-  const handleExportSection65B = () => {
-    const text = getSection65BText();
-    downloadText(text, `NCB-Section65B-Certificate-${activeCase.id.toUpperCase()}.txt`);
-    showToast("Certificate downloaded.", "success");
-  };
-
-  const handleCopySection65B = () => {
-    const text = getSection65BText();
+  const handleCopy = () => {
+    const text = isEvidence ? getSection65BText() : getReportMarkdown();
     navigator.clipboard.writeText(text);
-    showToast("Certificate copied.", "success");
+    showToast(isEvidence ? "Certificate copied." : "Report copied.", "success");
+  };
+
+  const handleExport = () => {
+    const text = isEvidence ? getSection65BText() : getReportMarkdown();
+    const filename = isEvidence
+      ? `NCB-Section65B-Certificate-${activeCase.id.toUpperCase()}.txt`
+      : `NCB-Forensic-Report-${activeCase.id.toUpperCase()}.md`;
+    downloadText(text, filename);
+    showToast(isEvidence ? "Certificate downloaded." : "Report downloaded.", "success");
   };
 
   const toggleLock = () => {
     const nextLocked = !isLocked;
     setIsLocked(nextLocked);
     showToast(nextLocked ? "Report locked." : "Report unlocked.", nextLocked ? "success" : "info");
-  };
-
-  const getRefCode = () => {
-    if (bureauZone.includes('Head Office')) return 'NCB/HQ/ND';
-    if (bureauZone.includes('Mumbai')) return 'NCB/MZU/MUM';
-    if (bureauZone.includes('Bengaluru')) return 'NCB/BZU/BLR';
-    return 'NCB/CIU/CH';
   };
 
   return (
@@ -295,7 +293,7 @@ ${investigatorNotes}
         <div style={{ display: 'flex', gap: '0.35rem', backgroundColor: 'rgba(15, 23, 42, 0.75)', padding: '0.25rem', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
           <button
             onClick={() => setReportType('ndps_section67')}
-            className={`btn ${reportType === 'ndps_section67' ? 'btn-primary' : 'btn-outline'}`}
+            className={`btn ${!isEvidence ? 'btn-primary' : 'btn-outline'}`}
             type="button"
             style={{ fontSize: '0.75rem', padding: '0.35rem 0.85rem' }}
           >
@@ -303,7 +301,7 @@ ${investigatorNotes}
           </button>
           <button
             onClick={() => setReportType('evidence_section65b')}
-            className={`btn ${reportType === 'evidence_section65b' ? 'btn-primary' : 'btn-outline'}`}
+            className={`btn ${isEvidence ? 'btn-primary' : 'btn-outline'}`}
             type="button"
             style={{ fontSize: '0.75rem', padding: '0.35rem 0.85rem' }}
           >
@@ -312,59 +310,22 @@ ${investigatorNotes}
         </div>
 
         <div style={{ display: 'flex', gap: '0.4rem' }}>
-          {reportType === 'evidence_section65b' ? (
-            <>
-              <button
-                onClick={handleCopySection65B}
-                className="btn btn-outline"
-                type="button"
-                style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
-              >
-                <Copy size={13} /> Copy Affidavit
-              </button>
-              <button
-                onClick={handleExportSection65B}
-                className="btn btn-primary"
-                type="button"
-                style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem' }}
-              >
-                <Download size={13} /> Download Certificate (.txt)
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                onClick={handleCopyMarkdown}
-                className="btn btn-outline"
-                type="button"
-                style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
-              >
-                <Copy size={13} /> Copy Markdown
-              </button>
-              <button
-                onClick={handleExportMarkdown}
-                className="btn btn-outline"
-                type="button"
-                style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
-              >
-                <Download size={13} /> Export .md
-              </button>
-            </>
-          )}
+          <button onClick={handleCopy} className="btn btn-outline" type="button" style={{ fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}>
+            <Copy size={13} /> {isEvidence ? 'Copy Affidavit' : 'Copy Markdown'}
+          </button>
+          <button onClick={handleExport} className="btn btn-primary" type="button" style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem' }}>
+            <Download size={13} /> {isEvidence ? 'Download Certificate (.txt)' : 'Export .md'}
+          </button>
         </div>
       </div>
 
       <div className="responsive-split-grid" style={{ display: 'grid', gridTemplateColumns: '3fr 1.5fr', gap: '1.5rem' }}>
         
-        {/* Report Sheet */}
+        {/* Printable Area */}
         <div className="glass-panel" id="printable-area" style={{ position: 'relative', padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.5rem', backgroundColor: '#ffffff', color: '#0f172a', borderRadius: '8px', overflow: 'hidden' }}>
-          
-          {/* Subtle Watermark on Printable Area */}
-          <div className="report-watermark">
-            {watermark}
-          </div>
+          <div className="report-watermark">{watermark}</div>
 
-          {reportType === 'evidence_section65b' ? (
+          {isEvidence ? (
             /* SECTION 65B EVIDENCE ACT AFFIDAVIT VIEW */
             <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: '1.2rem', fontFamily: 'Georgia, serif', lineHeight: '1.6' }}>
               <div style={{ textAlign: 'center', borderBottom: '2px solid #0f172a', paddingBottom: '1rem' }}>
@@ -392,23 +353,18 @@ ${investigatorNotes}
                 <p style={{ marginBottom: '0.75rem' }}>
                   I, <strong>{officerName}</strong>, Badge No. <strong>{officerBadge}</strong>, currently serving at {bureauZone}, do hereby solemnly affirm and state on oath as under:
                 </p>
-
                 <p style={{ marginBottom: '0.75rem' }}>
                   <strong>1. Authority & Competence:</strong> That I am the Investigating Officer / Certified Cyber Forensic Examiner in the investigation titled <em>"{activeCase.title}"</em> and am fully authorized to extract, preserve, and certify electronic records pertaining to on-chain cryptocurrency fund flows.
                 </p>
-
                 <p style={{ marginBottom: '0.75rem' }}>
                   <strong>2. System Integrity (Section 65B(2) / Section 63(2)):</strong> The electronic transaction trace was generated using the AegisTrace Forensic Suite operating on an isolated, secured NCB Cyber Forensic Workstation. The workstation was operating properly and free from any operational malfunctions or tampering throughout the material period.
                 </p>
-
                 <p style={{ marginBottom: '0.75rem' }}>
                   <strong>3. Manifest & Integrity Hash:</strong> The complete transaction flow consisting of {activeCase.nodes?.length || 0} nodes and {activeCase.links?.length || 0} validated transaction steps has been sealed under SHA-256 digest:
                 </p>
-
                 <div style={{ backgroundColor: '#f1f5f9', border: '1px solid #cbd5e1', padding: '0.5rem 0.75rem', borderRadius: '4px', fontFamily: 'monospace', fontSize: '0.75rem', color: '#0f172a', margin: '0.5rem 0' }}>
                   {integrityHash}
                 </div>
-
                 <p style={{ marginTop: '0.75rem' }}>
                   <strong>4. End receiver:</strong> The transaction path demonstrates direct fund movement ending at an exchange-held deposit address <code style={{ fontFamily: 'monospace', backgroundColor: '#e2e8f0', padding: '0.1rem 0.3rem', borderRadius: '3px' }}>{receiverNode?.details?.address || 'N/A'}</code> attributed to <strong>{receiverNode?.entityName || 'Domestic exchange'}</strong> with settled value of <strong>{receiverNode?.balance || '0 BTC'}</strong>.
                 </p>
@@ -421,24 +377,22 @@ ${investigatorNotes}
                 </h4>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem', border: '1px solid #cbd5e1' }}>
                   <thead>
-                    <tr style={{ backgroundColor: '#f8fafc', textAlign: 'left', borderBottom: '1px solid #cbd5e1' }}>
-                      <th style={EXHIBIT_CELL}>Ex. #</th>
-                      <th style={EXHIBIT_CELL}>Node Entity</th>
-                      <th style={EXHIBIT_CELL}>On-Chain Identifier / Address</th>
-                      <th style={EXHIBIT_CELL}>Value</th>
-                      <th style={EXHIBIT_CELL}>Forensic Role</th>
+                    <tr>
+                      <TableCell isHeader>Ex. #</TableCell>
+                      <TableCell isHeader>Node Entity</TableCell>
+                      <TableCell isHeader>On-Chain Identifier / Address</TableCell>
+                      <TableCell isHeader>Value</TableCell>
+                      <TableCell isHeader>Forensic Role</TableCell>
                     </tr>
                   </thead>
                   <tbody>
                     {activeCase.nodes.map((n, i) => (
                       <tr key={n.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                        <td style={{ ...EXHIBIT_CELL, fontWeight: 600 }}>Ex-{i + 1}</td>
-                        <td style={EXHIBIT_CELL}>{n.entityName || n.label}</td>
-                        <td style={{ ...EXHIBIT_CELL, fontFamily: 'monospace' }}>
-                          {n.details?.address ? `${n.details.address.slice(0, 10)}...${n.details.address.slice(-8)}` : n.id}
-                        </td>
-                        <td style={{ ...EXHIBIT_CELL, fontWeight: 600 }}>{n.balance}</td>
-                        <td style={EXHIBIT_CELL}>{n.type.toUpperCase()}</td>
+                        <TableCell bold>Ex-{i + 1}</TableCell>
+                        <TableCell>{n.entityName || n.label}</TableCell>
+                        <TableCell mono>{n.details?.address ? `${n.details.address.slice(0, 10)}...${n.details.address.slice(-8)}` : n.id}</TableCell>
+                        <TableCell bold>{n.balance}</TableCell>
+                        <TableCell>{n.type.toUpperCase()}</TableCell>
                       </tr>
                     ))}
                   </tbody>
@@ -463,7 +417,6 @@ ${investigatorNotes}
           ) : (
             /* SECTION 67 NDPS STANDARD REPORT VIEW */
             <>
-              {/* Report Header */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #0f172a', paddingBottom: '1rem', position: 'relative', zIndex: 1 }}>
                 <div>
                   <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', textTransform: 'uppercase' }}>Narcotics Control Bureau (NCB)</h2>
@@ -479,403 +432,396 @@ ${investigatorNotes}
                 </div>
               </div>
 
-        {/* Forensic Metadata summary */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', borderBottom: '1px solid #e2e8f0', paddingBottom: '1rem', fontSize: '0.85rem', position: 'relative', zIndex: 1 }}>
-          <div>
-            <span style={{ color: '#64748b', display: 'block' }}>Investigation Title:</span>
-            <strong style={{ fontSize: '0.95rem', color: '#0f172a' }}>{activeCase.title}</strong>
-          </div>
-          <div>
-            <span style={{ color: '#64748b', display: 'block' }}>Origin Target:</span>
-            <strong style={{ fontSize: '0.95rem', color: '#0f172a' }}>{activeCase.suspectName}</strong>
-          </div>
-          <div>
-            <span style={{ color: '#64748b', display: 'block' }}>Blockchain Asset:</span>
-            <strong style={{ color: '#0f172a' }}>{activeCase.currency} Protocol (≈ {fiatVal.formattedUsd} / {fiatVal.formattedInr})</strong>
-          </div>
-          <div>
-            <span style={{ color: '#64748b', display: 'block' }}>Calculated Risk Score:</span>
-            <strong style={{ color: '#b91c1c' }}>{activeCase.riskScore}% Threat Index</strong>
-          </div>
-        </div>
-
-        {/* Investigative Narrative */}
-        {narrative && (
-          <div style={{ position: 'relative', zIndex: 1, border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0.85rem', backgroundColor: '#f8fafc' }}>
-            <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
-              <FileText size={15} /> SUMMARY
-            </h4>
-            <p style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.3rem' }}>{narrative.headline}</p>
-            <p style={{ fontSize: '0.8rem', color: '#334155', marginBottom: '0.5rem' }}>{narrative.summary}</p>
-            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#065f46', textTransform: 'uppercase' }}>Findings</span>
-            <ul style={{ margin: '0.2rem 0 0.5rem 1rem', padding: 0, fontSize: '0.78rem', color: '#1e293b' }}>
-              {narrative.findings.map((f, i) => <li key={i} style={{ marginBottom: '0.2rem' }}>{f}</li>)}
-            </ul>
-            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#991b1b', textTransform: 'uppercase' }}>Limits of this analysis</span>
-            <ul style={{ margin: '0.2rem 0 0 1rem', padding: 0, fontSize: '0.78rem', color: '#475569' }}>
-              {narrative.limitations.map((l, i) => <li key={i} style={{ marginBottom: '0.2rem' }}>{l}</li>)}
-            </ul>
-          </div>
-        )}
-
-        {/* Transaction Flow Details */}
-        <div style={{ position: 'relative', zIndex: 1 }}>
-          <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-            <GitBranch size={16} /> TRANSACTION STEPS
-          </h4>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <HopRow
-              pill="Start" pillStyle={{ backgroundColor: '#fca5a5', color: '#991b1b' }}
-              address={suspectNode?.details?.address || suspectNode?.id || 'N/A'}
-              balance={suspectNode?.balance || '0 BTC'}
-            />
-            {mixer && (
-              <HopRow
-                pill="Mixing" pillStyle={{ backgroundColor: '#ddd6fe', color: '#5b21b6' }}
-                address={mixer.details?.address || mixer.id}
-                balance={mixer.balance} dashed
-              />
-            )}
-            {hops.map((hop, idx) => (
-              <HopRow
-                key={idx}
-                pill={`Step #${idx + 1}`} pillStyle={{ backgroundColor: '#e2e8f0', color: '#475569' }}
-                address={hop.details?.address || hop.id}
-                balance={hop.balance}
-              />
-            ))}
-            {receiverNode && (
-              <HopRow
-                pill="End receiver" pillStyle={{ backgroundColor: '#a7f3d0', color: '#065f46' }}
-                address={receiverNode.details?.address || receiverNode.id}
-                balance={receiverNode.balance} balanceColor="#065f46"
-                bg="#ecfdf5" borderColor="#059669"
-              />
-            )}
-          </div>
-        </div>
-
-          {/* Receiver Technical Attribution */}
-        {receiverNode && (
-          <div style={{ border: '1px solid #10b981', backgroundColor: '#f0fdf4', borderRadius: '6px', padding: '0.85rem', position: 'relative', zIndex: 1 }}>
-            <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#065f46', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
-              <UserCheck size={16} /> END RECEIVER
-            </h4>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.8rem' }}>
-              <div>
-                <span style={{ color: '#64748b', display: 'block' }}>Endpoint:</span>
-                <strong style={{ color: '#0f172a' }}>{receiverNode.entityName}</strong>
-              </div>
-              <div>
-                <span style={{ color: '#64748b', display: 'block' }}>Identity check:</span>
-                <strong style={{ color: '#0f172a' }}>{receiverNode.details.kycStatus}</strong>
-              </div>
-              <div>
-                <span style={{ color: '#64748b', display: 'block' }}>Address:</span>
-                <span style={{ fontFamily: 'monospace', color: '#0f172a' }}>{receiverNode.details.address}</span>
-              </div>
-              <div>
-                <span style={{ color: '#64748b', display: 'block' }}>Amount:</span>
-                <strong style={{ color: '#065f46' }}>{receiverNode.balance}</strong>
-              </div>
-              {endpointProfile.status === 'ready' && endpointProfile.profile && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', borderBottom: '1px solid #e2e8f0', paddingBottom: '1rem', fontSize: '0.85rem', position: 'relative', zIndex: 1 }}>
                 <div>
-                  <span style={{ color: '#64748b', display: 'block' }}>Past activity:</span>
-                  <strong style={{ color: '#0f172a' }}>
-                    {ENDPOINT_PROFILE_LABELS[endpointProfile.profile.profile] || endpointProfile.profile.profile}
-                    {' '}({(endpointProfile.profile.totalReceivedSats / 1e8).toFixed(4)} BTC in · {endpointProfile.profile.txCount} txs{endpointProfile.profile.isAggregator ? ' · aggregator' : ''})
-                  </strong>
+                  <span style={{ color: '#64748b', display: 'block' }}>Investigation Title:</span>
+                  <strong style={{ fontSize: '0.95rem', color: '#0f172a' }}>{activeCase.title}</strong>
                 </div>
-              )}
-              {receiverTaint != null && (
                 <div>
-                  <span style={{ color: '#64748b', display: 'block' }}>Traced funds:</span>
-                  <strong style={{ color: receiverTaint >= 0.5 ? '#b91c1c' : '#065f46' }}>{formatTaintPct(receiverTaint)} {receiverTaint >= 0.35 ? '· Strong link' : '· Weak link'}</strong>
+                  <span style={{ color: '#64748b', display: 'block' }}>Origin Target:</span>
+                  <strong style={{ fontSize: '0.95rem', color: '#0f172a' }}>{activeCase.suspectName}</strong>
                 </div>
-              )}
-              <div>
-                <span style={{ color: '#64748b', display: 'block' }}>Verification:</span>
-                <a href={`https://mempool.space/address/${receiverNode.details.address}`} target="_blank" rel="noopener noreferrer" style={{ color: '#0284c7', fontSize: '0.75rem' }}>mempool.space ↗</a>
+                <div>
+                  <span style={{ color: '#64748b', display: 'block' }}>Blockchain Asset:</span>
+                  <strong style={{ color: '#0f172a' }}>{activeCase.currency} Protocol (≈ {fiatVal.formattedUsd} / {fiatVal.formattedInr})</strong>
+                </div>
+                <div>
+                  <span style={{ color: '#64748b', display: 'block' }}>Calculated Risk Score:</span>
+                  <strong style={{ color: '#b91c1c' }}>{activeCase.riskScore}% Threat Index</strong>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
 
-        {/* Timeline */}
-        <div style={{ position: 'relative', zIndex: 1 }}>
-          <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
-            <Clock size={15} /> TIMELINE
-          </h4>
-          <table style={{ width: '100%', fontSize: '0.75rem', borderCollapse: 'collapse', border: '1px solid #e2e8f0' }}>
-            <thead>
-              <tr style={{ backgroundColor: '#f1f5f9', color: '#334155', textAlign: 'left' }}>
-                <th style={SHEET_CELL}>Step</th>
-                <th style={SHEET_CELL}>What happened</th>
-                <th style={SHEET_CELL}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td style={{ ...SHEET_CELL, fontWeight: 600 }}>1. Start</td>
-                <td style={SHEET_CELL}>Starting wallet noted.</td>
-                <td style={{ ...SHEET_CELL, color: '#059669', fontWeight: 600 }}>Done</td>
-              </tr>
-              <tr>
-                <td style={{ ...SHEET_CELL, fontWeight: 600 }}>2. Tracing</td>
-                <td style={SHEET_CELL}>Followed the money through {hops.length} middle steps.</td>
-                <td style={{ ...SHEET_CELL, color: '#059669', fontWeight: 600 }}>Done</td>
-              </tr>
-              <tr>
-                <td style={{ ...SHEET_CELL, fontWeight: 600 }}>3. End point</td>
-                <td style={SHEET_CELL}>Final deposit found at {receiverNode?.entityName || 'exchange'}.</td>
-                <td style={{ ...SHEET_CELL, color: '#0284c7', fontWeight: 600 }}>Ready for notice</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        {/* Chain of custody */}
-        {custody.eventCount > 0 && (
-          <div style={{ position: 'relative', zIndex: 1 }}>
-            <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
-              <Lock size={15} /> CHAIN OF CUSTODY
-              <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '0.15rem 0.45rem', borderRadius: '3px', backgroundColor: custodyVerification.valid ? '#dcfce7' : '#fee2e2', color: custodyVerification.valid ? '#166534' : '#991b1b' }}>
-                {custodyVerification.valid ? `Verified · ${custodyVerification.checkedEvents} events` : `Broken at seq ${custodyVerification.brokenAtSeq}`}
-              </span>
-            </h4>
-            <table style={{ width: '100%', fontSize: '0.72rem', borderCollapse: 'collapse', border: '1px solid #e2e8f0' }}>
-              <thead>
-                <tr style={{ backgroundColor: '#f1f5f9', color: '#334155', textAlign: 'left' }}>
-                  <th style={SHEET_CELL_SM}>#</th>
-                  <th style={SHEET_CELL_SM}>Transfer</th>
-                  <th style={SHEET_CELL_SM}>BTC</th>
-                  <th style={SHEET_CELL_SM}>Seal</th>
-                </tr>
-              </thead>
-              <tbody>
-                {custody.events.map(e => (
-                  <tr key={e.seq}>
-                    <td style={{ ...SHEET_CELL_SM, fontWeight: 600 }}>{e.seq}</td>
-                    <td style={{ ...SHEET_CELL_SM, fontFamily: 'monospace' }}>
-                      {shortRef(e.from)} → {shortRef(e.to)}{e.approximateOrder ? ' *' : ''}
-                    </td>
-                    <td style={{ ...SHEET_CELL_SM, fontWeight: 600 }}>{e.amountBtc.toFixed(4)}</td>
-                    <td style={{ ...SHEET_CELL_SM, fontFamily: 'monospace' }}>{e.eventHash.slice(0, 8)}…</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="mono-addr" style={{ fontSize: '0.7rem', color: '#475569', marginTop: '0.3rem' }}>
-              Terminal seal: {custody.terminalHash}
-              {custody.gaps.length > 0 && ` · ${custody.gaps.length} gap flag${custody.gaps.length === 1 ? '' : 's'}: ${custody.gaps.map(g => g.note).join(' ')}`}
-            </p>
-          </div>
-        )}
-
-        {/* Field notes */}
-        {activeCase.notesList && activeCase.notesList.length > 0 && (
-          <div style={{ position: 'relative', zIndex: 1, backgroundColor: '#f8fafc', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '0.3rem' }}>
-              FIELD NOTES ({activeCase.notesList.length}):
-            </span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-              {activeCase.notesList.map((n, i) => (
-                <div key={i} style={{ fontSize: '0.7rem', color: '#1e293b', display: 'flex', justifyContent: 'space-between', borderBottom: i < activeCase.notesList.length - 1 ? '1px dashed #cbd5e1' : 'none', paddingBottom: '0.2rem' }}>
-                  <span><strong>{n.author}:</strong> {n.content}</span>
-                  <span style={{ color: '#64748b' }}>{new Date(n.timestamp).toLocaleTimeString()}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Officer remarks */}
-        <div style={{ position: 'relative', zIndex: 1 }}>
-          <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '0.2rem' }}>OFFICER REMARKS:</label>
-          <textarea
-            rows={2}
-            disabled={isLocked}
-            value={investigatorNotes}
-            onChange={(e) => setInvestigatorNotes(e.target.value)}
-            style={{
-              width: '100%',
-              fontSize: '0.75rem',
-              color: '#0f172a',
-              border: isLocked ? 'none' : '1px solid #cbd5e1',
-              backgroundColor: isLocked ? 'transparent' : '#f8fafc',
-              padding: '0.4rem',
-              borderRadius: '4px',
-              resize: 'none'
-            }}
-          />
-        </div>
-
-        {/* Dynamic Signature */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '1rem', fontSize: '0.85rem', borderTop: '1px solid #e2e8f0', paddingTop: '1rem', position: 'relative', zIndex: 1 }}>
-          <div>
-            <span style={{ color: '#64748b', display: 'block', fontSize: '0.75rem', textTransform: 'uppercase' }}>Integrity hash</span>
-            <span className="mono-addr" style={{ fontSize: '0.75rem', fontWeight: 700, color: '#1e293b', wordBreak: 'break-all' }}>
-              {integrityHash}
-            </span>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem' }}>
-            <span style={{ color: '#64748b', fontSize: '0.75rem' }}>Signature</span>
-            
-            <div style={{ position: 'relative', border: isLocked ? 'none' : '1px dashed #cbd5e1', borderRadius: '4px', backgroundColor: '#f8fafc' }}>
-              <canvas
-                ref={canvasRef}
-                width="180"
-                height="70"
-                onMouseDown={startDrawing}
-                onMouseMove={draw}
-                onMouseUp={stopDrawing}
-                onMouseLeave={stopDrawing}
-                onTouchStart={startDrawing}
-                onTouchMove={draw}
-                onTouchEnd={stopDrawing}
-                style={{ display: 'block', cursor: isLocked ? 'default' : 'crosshair', touchAction: 'none' }}
-              />
-              {!isLocked && (
-                <div className="no-print" style={{ position: 'absolute', bottom: '2px', right: '2px', display: 'flex', gap: '0.25rem' }}>
-                  <label
-                    style={{ padding: '0.2rem 0.35rem', background: '#e0f2fe', border: 'none', color: '#0284c7', borderRadius: '3px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                    title="Upload Stamp / Signature Image"
-                  >
-                    <Upload size={12} />
-                    <input type="file" accept="image/*" onChange={handleImageUpload} style={{ display: 'none' }} />
-                  </label>
-                  <button 
-                    onClick={clearSignature}
-                    style={{ padding: '0.2rem 0.35rem', background: '#fee2e2', border: 'none', color: '#ef4444', borderRadius: '3px', cursor: 'pointer' }}
-                    title="Clear signature"
-                  >
-                    <Trash2 size={12} />
-                  </button>
+              {narrative && (
+                <div style={{ position: 'relative', zIndex: 1, border: '1px solid #cbd5e1', borderRadius: '6px', padding: '0.85rem', backgroundColor: '#f8fafc' }}>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                    <FileText size={15} /> SUMMARY
+                  </h4>
+                  <p style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a', marginBottom: '0.3rem' }}>{narrative.headline}</p>
+                  <p style={{ fontSize: '0.8rem', color: '#334155', marginBottom: '0.5rem' }}>{narrative.summary}</p>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#065f46', textTransform: 'uppercase' }}>Findings</span>
+                  <ul style={{ margin: '0.2rem 0 0.5rem 1rem', padding: 0, fontSize: '0.78rem', color: '#1e293b' }}>
+                    {narrative.findings.map((f, i) => <li key={i} style={{ marginBottom: '0.2rem' }}>{f}</li>)}
+                  </ul>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#991b1b', textTransform: 'uppercase' }}>Limits of this analysis</span>
+                  <ul style={{ margin: '0.2rem 0 0 1rem', padding: 0, fontSize: '0.78rem', color: '#475569' }}>
+                    {narrative.limitations.map((l, i) => <li key={i} style={{ marginBottom: '0.2rem' }}>{l}</li>)}
+                  </ul>
                 </div>
               )}
-            </div>
 
-            <div style={{ textAlign: 'center' }}>
-              <input
-                type="text"
-                value={officerName}
-                onChange={(e) => !isLocked && setOfficerName(e.target.value)}
-                style={{
-                  border: isLocked ? 'none' : '1px solid #cbd5e1',
-                  textAlign: 'center',
-                  fontWeight: 'bold',
-                  color: '#0f172a',
-                  background: 'transparent',
-                  fontSize: '0.8rem',
-                  outline: 'none',
-                  padding: '2px'
-                }}
-              />
-              <p style={{ color: '#64748b', fontSize: '0.7rem' }}>Badge No: {officerBadge} | {bureauZone}</p>
-            </div>
-          </div>
+              <div style={{ position: 'relative', zIndex: 1 }}>
+                <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                  <GitBranch size={16} /> TRANSACTION STEPS
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <HopRow
+                    pill="Start" pillStyle={{ backgroundColor: '#fca5a5', color: '#991b1b' }}
+                    address={suspectNode?.details?.address || suspectNode?.id || 'N/A'}
+                    balance={suspectNode?.balance || '0 BTC'}
+                  />
+                  {mixer && (
+                    <HopRow
+                      pill="Mixing" pillStyle={{ backgroundColor: '#ddd6fe', color: '#5b21b6' }}
+                      address={mixer.details?.address || mixer.id}
+                      balance={mixer.balance} dashed
+                    />
+                  )}
+                  {hops.map((hop, idx) => (
+                    <HopRow
+                      key={idx}
+                      pill={`Step #${idx + 1}`} pillStyle={{ backgroundColor: '#e2e8f0', color: '#475569' }}
+                      address={hop.details?.address || hop.id}
+                      balance={hop.balance}
+                    />
+                  ))}
+                  {receiverNode && (
+                    <HopRow
+                      pill="End receiver" pillStyle={{ backgroundColor: '#a7f3d0', color: '#065f46' }}
+                      address={receiverNode.details?.address || receiverNode.id}
+                      balance={receiverNode.balance} balanceColor="#065f46"
+                      bg="#ecfdf5" borderColor="#059669"
+                    />
+                  )}
+                </div>
+              </div>
+
+              {receiverNode && (
+                <div style={{ border: '1px solid #10b981', backgroundColor: '#f0fdf4', borderRadius: '6px', padding: '0.85rem', position: 'relative', zIndex: 1 }}>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#065f46', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                    <UserCheck size={16} /> END RECEIVER
+                  </h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', fontSize: '0.8rem' }}>
+                    <div>
+                      <span style={{ color: '#64748b', display: 'block' }}>Endpoint:</span>
+                      <strong style={{ color: '#0f172a' }}>{receiverNode.entityName}</strong>
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b', display: 'block' }}>Identity check:</span>
+                      <strong style={{ color: '#0f172a' }}>{receiverNode.details.kycStatus}</strong>
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b', display: 'block' }}>Address:</span>
+                      <span style={{ fontFamily: 'monospace', color: '#0f172a' }}>{receiverNode.details.address}</span>
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b', display: 'block' }}>Amount:</span>
+                      <strong style={{ color: '#065f46' }}>{receiverNode.balance}</strong>
+                    </div>
+                    {endpointProfile.status === 'ready' && endpointProfile.profile && (
+                      <div>
+                        <span style={{ color: '#64748b', display: 'block' }}>Past activity:</span>
+                        <strong style={{ color: '#0f172a' }}>
+                          {ENDPOINT_PROFILE_LABELS[endpointProfile.profile.profile] || endpointProfile.profile.profile}
+                          {' '}({(endpointProfile.profile.totalReceivedSats / 1e8).toFixed(4)} BTC in · {endpointProfile.profile.txCount} txs{endpointProfile.profile.isAggregator ? ' · aggregator' : ''})
+                        </strong>
+                      </div>
+                    )}
+                    {receiverTaint != null && (
+                      <div>
+                        <span style={{ color: '#64748b', display: 'block' }}>Traced funds:</span>
+                        <strong style={{ color: receiverTaint >= 0.5 ? '#b91c1c' : '#065f46' }}>{formatTaintPct(receiverTaint)} {receiverTaint >= 0.35 ? '· Strong link' : '· Weak link'}</strong>
+                      </div>
+                    )}
+                    <div>
+                      <span style={{ color: '#64748b', display: 'block' }}>Verification:</span>
+                      <a href={`https://mempool.space/address/${receiverNode.details.address}`} target="_blank" rel="noopener noreferrer" style={{ color: '#0284c7', fontSize: '0.75rem' }}>mempool.space ↗</a>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Cross-Chain Foreign Ledger Exits */}
+              {crossChainReport?.detected && (
+                <div style={{ border: '1px solid #0284c7', backgroundColor: '#f0f9ff', borderRadius: '6px', padding: '0.85rem', position: 'relative', zIndex: 1 }}>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#0369a1', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                    <Layers size={16} /> CROSS-CHAIN SETTLEMENTS & FOREIGN LEDGERS
+                  </h4>
+                  <p style={{ fontSize: '0.75rem', color: '#334155', margin: '0 0 0.5rem 0' }}>
+                    Identified {crossChainReport.bridgeCount} cross-chain bridge transaction(s) exiting into external distributed ledgers ({crossChainReport.targetChains.join(', ')}).
+                  </p>
+                  <table style={{ width: '100%', fontSize: '0.72rem', borderCollapse: 'collapse', border: '1px solid #bae6fd' }}>
+                    <thead>
+                      <tr style={{ backgroundColor: '#e0f2fe' }}>
+                        <TableCell isHeader>Protocol</TableCell>
+                        <TableCell isHeader>Target Chain / Asset</TableCell>
+                        <TableCell isHeader>Foreign Destination Address</TableCell>
+                        <TableCell isHeader>Verification</TableCell>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {crossChainReport.hops.map((hop, idx) => (
+                        <tr key={idx}>
+                          <TableCell bold>{hop.bridgeName}</TableCell>
+                          <TableCell>{hop.destinationChain} ({hop.targetAsset})</TableCell>
+                          <TableCell mono>{hop.destinationAddress}</TableCell>
+                          <TableCell>
+                            {hop.explorerUrl ? (
+                              <a href={hop.explorerUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#0284c7', textDecoration: 'underline' }}>
+                                {hop.destinationChain} Explorer ↗
+                              </a>
+                            ) : (
+                              'Manual Ledger Query'
+                            )}
+                          </TableCell>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div style={{ marginTop: '0.4rem', fontSize: '0.7rem', color: '#64748b', fontStyle: 'italic' }}>
+                    Note: Assets converted via decentralized cross-chain liquidity pools require separate subpoena/inquiry directed to foreign ledger relayers and target custodial exchanges.
+                  </div>
+                </div>
+              )}
+
+              {/* Timeline */}
+              <div style={{ position: 'relative', zIndex: 1 }}>
+                <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
+                  <Clock size={15} /> TIMELINE
+                </h4>
+                <table style={{ width: '100%', fontSize: '0.75rem', borderCollapse: 'collapse', border: '1px solid #e2e8f0' }}>
+                  <thead>
+                    <tr>
+                      <TableCell isHeader>Step</TableCell>
+                      <TableCell isHeader>What happened</TableCell>
+                      <TableCell isHeader>Status</TableCell>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <TableCell bold>1. Start</TableCell>
+                      <TableCell>Starting wallet noted.</TableCell>
+                      <TableCell style={{ color: '#059669', fontWeight: 600 }}>Done</TableCell>
+                    </tr>
+                    <tr>
+                      <TableCell bold>2. Tracing</TableCell>
+                      <TableCell>Followed the money through {hops.length} middle steps.</TableCell>
+                      <TableCell style={{ color: '#059669', fontWeight: 600 }}>Done</TableCell>
+                    </tr>
+                    <tr>
+                      <TableCell bold>3. End point</TableCell>
+                      <TableCell>Final deposit found at {receiverNode?.entityName || 'exchange'}.</TableCell>
+                      <TableCell style={{ color: '#0284c7', fontWeight: 600 }}>Ready for notice</TableCell>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Chain of custody */}
+              {custody.eventCount > 0 && (
+                <div style={{ position: 'relative', zIndex: 1 }}>
+                  <h4 style={{ fontSize: '0.9rem', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.4rem' }}>
+                    <Lock size={15} /> CHAIN OF CUSTODY
+                    <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '0.15rem 0.45rem', borderRadius: '3px', backgroundColor: custodyVerification.valid ? '#dcfce7' : '#fee2e2', color: custodyVerification.valid ? '#166534' : '#991b1b' }}>
+                      {custodyVerification.valid ? `Verified · ${custodyVerification.checkedEvents} events` : `Broken at seq ${custodyVerification.brokenAtSeq}`}
+                    </span>
+                  </h4>
+                  <table style={{ width: '100%', fontSize: '0.72rem', borderCollapse: 'collapse', border: '1px solid #e2e8f0' }}>
+                    <thead>
+                      <tr>
+                        <TableCell isHeader>#</TableCell>
+                        <TableCell isHeader>Transfer</TableCell>
+                        <TableCell isHeader>BTC</TableCell>
+                        <TableCell isHeader>Seal</TableCell>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {custody.events.map(e => (
+                        <tr key={e.seq}>
+                          <TableCell bold>{e.seq}</TableCell>
+                          <TableCell mono>{shortRef(e.from)} → {shortRef(e.to)}{e.approximateOrder ? ' *' : ''}</TableCell>
+                          <TableCell bold>{e.amountBtc.toFixed(4)}</TableCell>
+                          <TableCell mono>{e.eventHash.slice(0, 8)}…</TableCell>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="mono-addr" style={{ fontSize: '0.7rem', color: '#475569', marginTop: '0.3rem' }}>
+                    Terminal seal: {custody.terminalHash}
+                    {custody.gaps.length > 0 && ` · ${custody.gaps.length} gap flag${custody.gaps.length === 1 ? '' : 's'}: ${custody.gaps.map(g => g.note).join(' ')}`}
+                  </p>
+                </div>
+              )}
+
+              {/* Field notes */}
+              {activeCase.notesList && activeCase.notesList.length > 0 && (
+                <div style={{ position: 'relative', zIndex: 1, backgroundColor: '#f8fafc', padding: '0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '0.3rem' }}>
+                    FIELD NOTES ({activeCase.notesList.length}):
+                  </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                    {activeCase.notesList.map((n, i) => (
+                      <div key={i} style={{ fontSize: '0.7rem', color: '#1e293b', display: 'flex', justifyContent: 'space-between', borderBottom: i < activeCase.notesList.length - 1 ? '1px dashed #cbd5e1' : 'none', paddingBottom: '0.2rem' }}>
+                        <span><strong>{n.author}:</strong> {n.content}</span>
+                        <span style={{ color: '#64748b' }}>{new Date(n.timestamp).toLocaleTimeString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Officer remarks */}
+              <div style={{ position: 'relative', zIndex: 1 }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', display: 'block', marginBottom: '0.2rem' }}>OFFICER REMARKS:</label>
+                <textarea
+                  rows={2}
+                  disabled={isLocked}
+                  value={investigatorNotes}
+                  onChange={(e) => setInvestigatorNotes(e.target.value)}
+                  style={{
+                    width: '100%',
+                    fontSize: '0.75rem',
+                    color: '#0f172a',
+                    border: isLocked ? 'none' : '1px solid #cbd5e1',
+                    backgroundColor: isLocked ? 'transparent' : '#f8fafc',
+                    padding: '0.4rem',
+                    borderRadius: '4px',
+                    resize: 'none'
+                  }}
+                />
+              </div>
+
+              {/* Dynamic Signature */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '1rem', fontSize: '0.85rem', borderTop: '1px solid #e2e8f0', paddingTop: '1rem', position: 'relative', zIndex: 1 }}>
+                <div>
+                  <span style={{ color: '#64748b', display: 'block', fontSize: '0.75rem', textTransform: 'uppercase' }}>Integrity hash</span>
+                  <span className="mono-addr" style={{ fontSize: '0.75rem', fontWeight: 700, color: '#1e293b', wordBreak: 'break-all' }}>
+                    {integrityHash}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem' }}>
+                  <span style={{ color: '#64748b', fontSize: '0.75rem' }}>Signature</span>
+                  <div style={{ position: 'relative', border: isLocked ? 'none' : '1px dashed #cbd5e1', borderRadius: '4px', backgroundColor: '#f8fafc' }}>
+                    <canvas
+                      ref={canvasRef}
+                      width="180"
+                      height="70"
+                      onMouseDown={startDrawing}
+                      onMouseMove={draw}
+                      onMouseUp={stopDrawing}
+                      onMouseLeave={stopDrawing}
+                      onTouchStart={startDrawing}
+                      onTouchMove={draw}
+                      onTouchEnd={stopDrawing}
+                      style={{ display: 'block', cursor: isLocked ? 'default' : 'crosshair', touchAction: 'none' }}
+                    />
+                    {!isLocked && (
+                      <div className="no-print" style={{ position: 'absolute', bottom: '2px', right: '2px', display: 'flex', gap: '0.25rem' }}>
+                        <label style={{ padding: '0.2rem 0.35rem', background: '#e0f2fe', border: 'none', color: '#0284c7', borderRadius: '3px', cursor: 'pointer', display: 'flex', alignItems: 'center' }} title="Upload Stamp / Signature Image">
+                          <Upload size={12} />
+                          <input type="file" accept="image/*" onChange={handleImageUpload} style={{ display: 'none' }} />
+                        </label>
+                        <button onClick={clearSignature} style={{ padding: '0.2rem 0.35rem', background: '#fee2e2', border: 'none', color: '#ef4444', borderRadius: '3px', cursor: 'pointer' }} title="Clear signature">
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <input
+                      type="text"
+                      value={officerName}
+                      onChange={(e) => !isLocked && setOfficerName(e.target.value)}
+                      style={{
+                        border: isLocked ? 'none' : '1px solid #cbd5e1',
+                        textAlign: 'center',
+                        fontWeight: 'bold',
+                        color: '#0f172a',
+                        background: 'transparent',
+                        fontSize: '0.8rem',
+                        outline: 'none',
+                        padding: '2px'
+                      }}
+                    />
+                    <p style={{ color: '#64748b', fontSize: '0.7rem' }}>Badge No: {officerBadge} | {bureauZone}</p>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
-      </>
-    )}
-  </div>
 
-      {/* Options Panel */}
-      <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', height: 'fit-content' }}>
+        {/* Options Panel */}
+        <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', height: 'fit-content' }}>
           <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <FileText style={{ color: 'var(--primary)' }} size={18} /> Controls
           </h3>
 
-        {/* Watermark selection */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-          <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-            <Stamp size={13} /> Watermark
-          </label>
-          <select
-            value={watermark}
-            disabled={isLocked}
-            onChange={(e) => setWatermark(e.target.value)}
-            className="select-field"
-            style={{ width: '100%' }}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+              <Stamp size={13} /> Watermark
+            </label>
+            <select value={watermark} disabled={isLocked} onChange={(e) => setWatermark(e.target.value)} className="select-field" style={{ width: '100%' }}>
+              {WATERMARK_OPTIONS.map((wo, idx) => (
+                <option key={idx} value={wo.value}>{wo.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+              <Award size={13} /> Office
+            </label>
+            <select value={bureauZone} disabled={isLocked} onChange={(e) => setBureauZone(e.target.value)} className="select-field" style={{ width: '100%' }}>
+              {ZONAL_UNITS.map((zu, idx) => (
+                <option key={idx} value={zu.value}>{zu.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Badge</label>
+            <input type="text" disabled={isLocked} value={officerBadge} onChange={(e) => setOfficerBadge(e.target.value)} className="input-field" style={{ width: '100%' }} />
+          </div>
+
+          <button
+            onClick={toggleLock}
+            className={`btn ${isLocked ? 'btn-outline' : ''}`}
+            style={{
+              borderColor: isLocked ? 'var(--secondary)' : 'var(--border-color)',
+              color: isLocked ? 'var(--secondary)' : 'var(--text-secondary)',
+              backgroundColor: isLocked ? 'rgba(139, 92, 246, 0.1)' : 'rgba(255, 255, 255, 0.02)',
+              justifyContent: 'center'
+            }}
           >
-            {WATERMARK_OPTIONS.map((wo, idx) => (
-              <option key={idx} value={wo.value}>{wo.label}</option>
-            ))}
-          </select>
+            {isLocked ? <Lock size={14} /> : <LockOpen size={14} />}
+            {isLocked ? "Unlock" : "Lock"}
+          </button>
+          
+          <button onClick={handleCopy} className="btn btn-outline" style={{ justifyContent: 'center' }}>
+            <Copy size={14} /> Copy text
+          </button>
+
+          <button onClick={handleExport} className="btn btn-outline" style={{ justifyContent: 'center' }}>
+            <Download size={14} /> Export text
+          </button>
+
+          <button onClick={handlePrint} className="btn btn-primary" style={{ justifyContent: 'center' }}>
+            <Printer size={16} /> Print / PDF
+          </button>
         </div>
 
-        {/* Bureau selection */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-          <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-            <Award size={13} /> Office
-          </label>
-          <select 
-            value={bureauZone}
-            disabled={isLocked}
-            onChange={(e) => setBureauZone(e.target.value)}
-            className="select-field"
-            style={{ width: '100%' }}
-          >
-            {ZONAL_UNITS.map((zu, idx) => (
-              <option key={idx} value={zu.value}>{zu.label}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* Badge */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-          <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Badge</label>
-          <input
-            type="text"
-            disabled={isLocked}
-            value={officerBadge}
-            onChange={(e) => setOfficerBadge(e.target.value)}
-            className="input-field"
-            style={{ width: '100%' }}
-          />
-        </div>
-
-        <button
-          onClick={toggleLock}
-          className={`btn ${isLocked ? 'btn-outline' : ''}`}
-          style={{
-            borderColor: isLocked ? 'var(--secondary)' : 'var(--border-color)',
-            color: isLocked ? 'var(--secondary)' : 'var(--text-secondary)',
-            backgroundColor: isLocked ? 'rgba(139, 92, 246, 0.1)' : 'rgba(255, 255, 255, 0.02)',
-            justifyContent: 'center'
-          }}
-        >
-          {isLocked ? <Lock size={14} /> : <LockOpen size={14} />}
-          {isLocked ? "Unlock" : "Lock"}
-        </button>
-        
-        <button
-          onClick={handleCopyMarkdown}
-          className="btn btn-outline"
-          style={{ justifyContent: 'center' }}
-          title="Copy formatted forensic report Markdown to clipboard"
-        >
-          <Copy size={14} /> Copy text
-        </button>
-
-        <button
-          onClick={handleExportMarkdown}
-          className="btn btn-outline"
-          style={{ justifyContent: 'center' }}
-        >
-          <Download size={14} /> Export text
-        </button>
-
-        <button
-          onClick={handlePrint}
-          className="btn btn-primary"
-          style={{ justifyContent: 'center' }}
-        >
-          <Printer size={16} /> Print / PDF
-        </button>
       </div>
-
     </div>
-  </div>
   );
 }

@@ -7,22 +7,23 @@ import {
   Layers, 
   Cpu, 
   Copy,
-  Search,
-  FileCode,
-  Zap,
-  CheckCircle2,
-  Eye,
-  EyeOff,
-  FileEdit,
-  Plus,
-  Trash2,
-  Clock,
-  Code2,
-  Star,
-  ExternalLink,
-  Tag,
-  BarChart3,
-  Timer
+  Search, 
+  FileCode, 
+  Zap, 
+  CheckCircle2, 
+  Eye, 
+  EyeOff, 
+  FileEdit, 
+  Plus, 
+  Trash2, 
+  Clock, 
+  Code2, 
+  Star, 
+  ExternalLink, 
+  Tag, 
+  BarChart3, 
+  Timer,
+  ArrowRightLeft
 } from 'lucide-react';
 import { useToast } from '../../hooks/useToast';
 import { decodeScriptPubkey } from '../../utils/scriptDecoder';
@@ -31,10 +32,18 @@ import { calculateTaintMap, formatTaintPct, taintTier } from '../../utils/taintA
 import { scanCaseSweeps } from '../../utils/obfuscationForensics';
 import { scanCaseStructuring } from '../../utils/structuringAnalysis';
 import { tagKnownEntity, getExplorerUrls } from '../../utils/knownEntities';
+import { parseCrossChainMemo, identifyBridgeEntity } from '../../utils/crossChainForensics';
 import { useWatchlist } from '../../hooks/useWatchlist';
 import { useEndpointProfile } from '../../hooks/useEndpointProfile';
 import { getFeeTier } from '../../utils/traceHeuristics';
 import { ENDPOINT_PROFILE_LABELS } from '../../utils/bitcoinApi';
+
+const RISK_BADGES = {
+  critical: { bg: 'rgba(239, 68, 68, 0.2)', color: '#ef4444' },
+  high: { bg: 'rgba(239, 68, 68, 0.1)', color: '#f87171' },
+  medium: { bg: 'rgba(245, 158, 11, 0.1)', color: '#fbbf24' },
+  low: { bg: 'rgba(16, 185, 129, 0.1)', color: '#34d399' }
+};
 
 function KVRow({ icon, label, children }) {
   return (
@@ -43,6 +52,22 @@ function KVRow({ icon, label, children }) {
         {icon}{label}:
       </span>
       <span style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.3rem', textAlign: 'right' }}>{children}</span>
+    </div>
+  );
+}
+
+function ScoreBarRow({ label, val }) {
+  if (val == null) return null;
+  const isPositive = val > 0;
+  const isNegative = val < 0;
+  const color = isPositive ? '#10b981' : isNegative ? '#ef4444' : 'var(--text-muted)';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.7rem' }}>
+      <span style={{ width: '70px', color: 'var(--text-muted)' }}>{label}</span>
+      <div style={{ flex: 1, height: '6px', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
+        <div style={{ width: `${Math.min(100, Math.abs(val) * 20)}%`, marginLeft: isNegative ? 'auto' : undefined, height: '100%', backgroundColor: color }} />
+      </div>
+      <span style={{ width: '36px', textAlign: 'right', color, fontWeight: 600 }}>{isPositive ? `+${val}` : val}</span>
     </div>
   );
 }
@@ -98,32 +123,54 @@ export default function MetadataSidebar({
     return { value: val, formatted: formatTaintPct(val), tier: taintTier(val) };
   }, [activeCase, selectedNode]);
 
-  // Compute node centrality metrics
   const centralityMetrics = useMemo(() => {
     if (!activeCase?.nodes?.length || !activeCase?.links?.length || !selectedNode) return null;
-    const allMetrics = computeNodeCentralityMetrics(activeCase.nodes, activeCase.links);
-    return allMetrics[selectedNode.id] || null;
+    return computeNodeCentralityMetrics(activeCase.nodes, activeCase.links)[selectedNode.id] || null;
   }, [activeCase, selectedNode]);
 
-  // Typology flags: sweep involvement and structuring-source role for this node
   const typologyFlags = useMemo(() => {
     if (!activeCase?.nodes?.length || !activeCase?.links?.length || !selectedNode) return { sweep: null, structuring: null };
     const sweeps = scanCaseSweeps(activeCase.nodes, activeCase.links);
     const structuring = scanCaseStructuring(activeCase.nodes, activeCase.links);
     return {
       sweep: sweeps.detected ? (sweeps.sweeps.find(s => s.nodeId === selectedNode.id) || null) : null,
-      structuring: structuring.detected
-        ? (structuring.sources.find(s => s.sourceId === selectedNode.id) || null)
-        : null,
+      structuring: structuring.detected ? (structuring.sources.find(s => s.sourceId === selectedNode.id) || null) : null,
     };
   }, [activeCase, selectedNode]);
 
-  // Decode Script template & opcodes
   const scriptAnalysis = useMemo(() => {
     const target = details.address || details.opReturnHex || selectedNode?.id;
-    if (!target) return null;
-    return decodeScriptPubkey(target);
+    return target ? decodeScriptPubkey(target) : null;
   }, [details.address, details.opReturnHex, selectedNode]);
+
+  const crossChainData = useMemo(() => {
+    if (!selectedNode) return null;
+    const nodeDetails = selectedNode.details || {};
+    const memo = nodeDetails.opReturnDecoded || nodeDetails.memo || (nodeDetails.opReturnHex ? decodeScriptPubkey(nodeDetails.opReturnHex)?.asm : null);
+    const parsed = parseCrossChainMemo(memo);
+    const bridge = identifyBridgeEntity(selectedNode);
+    if (!parsed && !bridge && !nodeDetails.crossChain) return null;
+
+    const destChain = parsed?.destinationChain || nodeDetails.crossChain?.destinationChain || 'Ethereum';
+    const destAddr = parsed?.destinationAddress || nodeDetails.crossChain?.destinationAddress || null;
+    const asset = parsed?.targetAsset || nodeDetails.crossChain?.targetAsset || 'USDT';
+    const protocol = bridge?.name || parsed?.protocol || 'Cross-Chain Protocol';
+    const bridgeType = bridge?.type || 'Non-Custodial Liquidity Bridge';
+    const explorerUrl = parsed?.explorerUrl || (destAddr?.startsWith('0x') ? `https://etherscan.io/address/${destAddr}` : destAddr?.startsWith('T') ? `https://tronscan.org/#/address/${destAddr}` : null);
+
+    return {
+      protocol,
+      bridgeType,
+      destinationChain: destChain,
+      destinationAddress: destAddr,
+      targetAsset: asset,
+      explorerUrl,
+      rawMemo: parsed?.rawMemo || memo || null,
+      riskLevel: bridge?.riskLevel || 'HIGH'
+    };
+  }, [selectedNode]);
+
+  const riskStyle = RISK_BADGES[selectedNode?.risk] || RISK_BADGES.low;
 
   return (
     <div className="glass-panel" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -137,14 +184,8 @@ export default function MetadataSidebar({
                 textTransform: 'uppercase', 
                 padding: '0.2rem 0.5rem', 
                 borderRadius: '4px',
-                backgroundColor: 
-                  selectedNode.risk === 'critical' ? 'rgba(239, 68, 68, 0.2)' : 
-                  selectedNode.risk === 'high' ? 'rgba(239, 68, 68, 0.1)' : 
-                  selectedNode.risk === 'medium' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(16, 185, 129, 0.1)',
-                color: 
-                  selectedNode.risk === 'critical' ? '#ef4444' : 
-                  selectedNode.risk === 'high' ? '#f87171' : 
-                  selectedNode.risk === 'medium' ? '#fbbf24' : '#34d399'
+                backgroundColor: riskStyle.bg,
+                color: riskStyle.color
               }}>
                 {selectedNode.risk} risk
               </span>
@@ -168,10 +209,10 @@ export default function MetadataSidebar({
             </h3>
           </div>
 
-          {/* Address / Tx Reference Bar */}
+          {/* Address / Reference Bar */}
           <div style={{ backgroundColor: 'rgba(5, 8, 16, 0.9)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Address / reference</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Address / reference</span>
               <button
                 onClick={() => {
                   const result = toggle(details.address);
@@ -191,13 +232,7 @@ export default function MetadataSidebar({
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
               <span className="mono-addr" style={{ fontSize: '0.8rem', wordBreak: 'break-all', marginRight: '0.5rem' }}>{details.address}</span>
-              <button 
-                onClick={() => handleCopy(details.address)}
-                aria-label="Copy reference"
-                type="button"
-                style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}
-                title="Copy Reference"
-              >
+              <button onClick={() => handleCopy(details.address)} aria-label="Copy reference" type="button" style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }} title="Copy Reference">
                 <Copy size={16} aria-hidden="true" />
               </button>
             </div>
@@ -223,6 +258,7 @@ export default function MetadataSidebar({
               </strong>
             </div>
           )}
+
           {/* Flow signals */}
           {(typologyFlags.sweep || typologyFlags.structuring || taintInfo || (selectedNode.type === 'receiver' && endpointProfile.status === 'ready' && endpointProfile.profile)) && (
             <div style={{ backgroundColor: 'rgba(5, 8, 16, 0.6)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.6rem 0.75rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.75rem' }}>
@@ -261,16 +297,12 @@ export default function MetadataSidebar({
 
           {/* Details */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', fontSize: '0.825rem' }}>
-            <KVRow label="Type">
-              <span style={{ textTransform: 'capitalize' }}>{selectedNode.type}</span>
-            </KVRow>
-
+            <KVRow label="Type"><span style={{ textTransform: 'capitalize' }}>{selectedNode.type}</span></KVRow>
             {details.scriptStandard && (
               <KVRow icon={<FileCode size={13} style={{ color: 'var(--primary)' }} />} label="Address type">
                 <span style={{ color: 'var(--primary)' }}>{details.scriptStandard}</span>
               </KVRow>
             )}
-
             {details.feeRateSatVb && (
               <KVRow icon={<Zap size={13} style={{ color: '#f59e0b' }} />} label="Fee">
                 <>{details.feeRateSatVb}{details.vsize ? ` · ${details.vsize}` : ''}{feeReplaceable ? ' · can be replaced' : ''} {feeTier && <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.3rem', borderRadius: '3px', backgroundColor: `${feeTier.color}18`, color: feeTier.color }}>{feeTier.label}</span>}</>
@@ -281,17 +313,11 @@ export default function MetadataSidebar({
                 <span style={{ fontFamily: 'monospace' }}>Block {details.blockHeight}</span>
               </KVRow>
             )}
-
             {details.confirmations && (
-              <KVRow icon={<CheckCircle2 size={13} style={{ color: '#10b981' }} />} label="Status">
-                {details.confirmations}
-              </KVRow>
+              <KVRow icon={<CheckCircle2 size={13} style={{ color: '#10b981' }} />} label="Status">{details.confirmations}</KVRow>
             )}
-
             <KVRow label="Last seen:">{details.lastActive}</KVRow>
-            <KVRow icon={<MapPin size={12} style={{ color: '#ef4444' }} />} label="Network">
-              {details.ipLog}
-            </KVRow>
+            <KVRow icon={<MapPin size={12} style={{ color: '#ef4444' }} />} label="Network">{details.ipLog}</KVRow>
             <KVRow label="Identity check">
               <span style={{ color: selectedNode.type === 'receiver' ? '#10b981' : 'var(--text-muted)' }}>
                 {details.kycStatus}
@@ -305,11 +331,7 @@ export default function MetadataSidebar({
                   <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                     <Code2 size={13} /> Script details
                   </span>
-                  <button
-                    onClick={() => setShowScriptDetails(!showScriptDetails)}
-                    className="btn btn-outline"
-                    style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem' }}
-                  >
+                  <button onClick={() => setShowScriptDetails(!showScriptDetails)} className="btn btn-outline" style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem' }}>
                     {showScriptDetails ? "Hide" : "Inspect"}
                   </button>
                 </div>
@@ -326,20 +348,18 @@ export default function MetadataSidebar({
               </div>
             )}
 
-            {/* Heuristic Breakdown — weighted change vs payment */}
+            {/* Heuristic Breakdown */}
             {details.heuristicBreakdown && (
               <div style={{ marginTop: '0.5rem', backgroundColor: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.18)', borderRadius: '6px', padding: '0.75rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.4rem' }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}><BarChart3 size={13} /> Score: {details.heuristicScore != null ? `${details.heuristicScore > 0 ? '+' : ''}${details.heuristicScore}` : '—'} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>({(details.heuristicConfidence*100).toFixed(0)}%)</span></span>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                    <BarChart3 size={13} /> Score: {details.heuristicScore != null ? `${details.heuristicScore > 0 ? '+' : ''}${details.heuristicScore}` : '—'} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>({(details.heuristicConfidence*100).toFixed(0)}%)</span>
+                  </span>
                   <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                    <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem', borderRadius: '3px', backgroundColor: details.heuristicScore > 1 ? 'rgba(16,185,129,0.15)' : details.heuristicScore < -1 ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.06)', color: details.heuristicScore > 1 ? '#10b981' : details.heuristicScore < -1 ? '#ef4444' : 'var(--text-muted)' }}>{details.heuristicScore > 1 ? 'Payment' : details.heuristicScore < -1 ? 'Change' : 'Ambiguous'}</span>
-                    <button
-                      onClick={() => setShowHeuristics(!showHeuristics)}
-                      className="btn btn-outline"
-                      type="button"
-                      aria-expanded={showHeuristics}
-                      style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem' }}
-                    >
+                    <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem', borderRadius: '3px', backgroundColor: details.heuristicScore > 1 ? 'rgba(16,185,129,0.15)' : details.heuristicScore < -1 ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.06)', color: details.heuristicScore > 1 ? '#10b981' : details.heuristicScore < -1 ? '#ef4444' : 'var(--text-muted)' }}>
+                      {details.heuristicScore > 1 ? 'Payment' : details.heuristicScore < -1 ? 'Change' : 'Ambiguous'}
+                    </span>
+                    <button onClick={() => setShowHeuristics(!showHeuristics)} className="btn btn-outline" type="button" aria-expanded={showHeuristics} style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem' }}>
                       {showHeuristics ? "Hide" : "Why"}
                     </button>
                   </span>
@@ -355,16 +375,10 @@ export default function MetadataSidebar({
                         ['Spent', details.heuristicBreakdown.spentScore],
                         ...(details.heuristicBreakdown.fingerprintScore != null ? [['Pattern', details.heuristicBreakdown.fingerprintScore]] : []),
                         ...(details.heuristicBreakdown.feeScore != null ? [['Fee', details.heuristicBreakdown.feeScore]] : []),
-                    ...(details.heuristicBreakdown.identityScore ? [['Identity', details.heuristicBreakdown.identityScore]] : []),
-                    ...(details.heuristicBreakdown.chainReuseScore ? [['Chain use', details.heuristicBreakdown.chainReuseScore]] : []),
-                  ].map(([label, val]) => (
-                        <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.7rem' }}>
-                          <span style={{ width: '70px', color: 'var(--text-muted)' }}>{label}</span>
-                          <div style={{ flex: 1, height: '6px', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: '3px', overflow: 'hidden' }}>
-                            <div style={{ width: `${Math.min(100, Math.abs(val)*20)}%`, marginLeft: val < 0 ? 'auto' : undefined, height: '100%', backgroundColor: val > 0 ? '#10b981' : val < 0 ? '#ef4444' : 'var(--text-muted)' }} />
-                          </div>
-                          <span style={{ width: '36px', textAlign: 'right', color: val > 0 ? '#10b981' : val < 0 ? '#ef4444' : 'var(--text-muted)', fontWeight: 600 }}>{val > 0 ? `+${val}` : val}</span>
-                        </div>
+                        ...(details.heuristicBreakdown.identityScore ? [['Identity', details.heuristicBreakdown.identityScore]] : []),
+                        ...(details.heuristicBreakdown.chainReuseScore ? [['Chain use', details.heuristicBreakdown.chainReuseScore]] : []),
+                      ].map(([label, val]) => (
+                        <ScoreBarRow key={label} label={label} val={val} />
                       ))}
                     </div>
                     {details.heuristicBreakdown.dwellBlocks != null && (
@@ -377,7 +391,8 @@ export default function MetadataSidebar({
                 )}
               </div>
             )}
-            {/* OP_RETURN Decoded Payload Banner */}
+
+            {/* OP_RETURN Decoded Payload */}
             {details.opReturnHex && (
               <div style={{ marginTop: '0.5rem', backgroundColor: 'rgba(168, 85, 247, 0.08)', border: '1px solid #a855f7', borderRadius: '6px', padding: '0.75rem' }}>
                 <span style={{ fontSize: '0.75rem', color: '#a855f7', fontWeight: 700, textTransform: 'uppercase', display: 'block', marginBottom: '0.3rem' }}>
@@ -394,6 +409,98 @@ export default function MetadataSidebar({
               </div>
             )}
 
+            {/* Cross-Chain Bridge & Protocol Forensics Card */}
+            {crossChainData && (
+              <div style={{ 
+                marginTop: '0.5rem', 
+                backgroundColor: 'rgba(56, 189, 248, 0.08)', 
+                border: '1px solid rgba(56, 189, 248, 0.35)', 
+                borderRadius: '6px', 
+                padding: '0.75rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.4rem'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#38bdf8', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <ArrowRightLeft size={13} /> Cross-Chain Swap
+                  </span>
+                  <span style={{ 
+                    fontSize: '0.65rem', 
+                    padding: '0.1rem 0.35rem', 
+                    borderRadius: '3px', 
+                    backgroundColor: 'rgba(239, 68, 68, 0.15)', 
+                    color: '#ef4444', 
+                    fontWeight: 700 
+                  }}>
+                    {crossChainData.riskLevel}
+                  </span>
+                </div>
+
+                <div style={{ fontSize: '0.8rem', color: '#fff', fontWeight: 600 }}>
+                  {crossChainData.protocol}
+                </div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  {crossChainData.bridgeType}
+                </div>
+
+                <div style={{ 
+                  marginTop: '0.2rem', 
+                  padding: '0.45rem', 
+                  backgroundColor: 'rgba(5, 8, 16, 0.8)', 
+                  borderRadius: '4px', 
+                  border: '1px solid var(--border-color)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.25rem',
+                  fontSize: '0.72rem'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Target:</span>
+                    <strong style={{ color: '#38bdf8' }}>{crossChainData.destinationChain} ({crossChainData.targetAsset})</strong>
+                  </div>
+
+                  {crossChainData.destinationAddress && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', marginTop: '0.15rem' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Destination address:</span>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.3rem' }}>
+                        <span className="mono-addr" style={{ fontSize: '0.7rem', color: '#cbd5e1', wordBreak: 'break-all' }}>
+                          {crossChainData.destinationAddress}
+                        </span>
+                        <button 
+                          onClick={() => handleCopy(crossChainData.destinationAddress)} 
+                          aria-label="Copy destination address" 
+                          type="button" 
+                          style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.1rem', flexShrink: 0 }} 
+                          title="Copy destination"
+                        >
+                          <Copy size={13} aria-hidden="true" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {crossChainData.rawMemo && (
+                    <div style={{ marginTop: '0.2rem', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '0.25rem', color: 'var(--text-muted)', fontSize: '0.67rem' }}>
+                      <strong>Protocol memo:</strong> <code style={{ color: '#a855f7' }}>{crossChainData.rawMemo}</code>
+                    </div>
+                  )}
+                </div>
+
+                {crossChainData.explorerUrl && (
+                  <a 
+                    href={crossChainData.explorerUrl} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="btn btn-outline" 
+                    style={{ fontSize: '0.7rem', padding: '0.25rem 0.5rem', justifyContent: 'center', marginTop: '0.25rem', textDecoration: 'none' }}
+                  >
+                    <ExternalLink size={12} aria-hidden="true" /> Track on {crossChainData.destinationChain} Explorer
+                  </a>
+                )}
+              </div>
+            )}
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', marginTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.75rem' }}>
               <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}><ShieldAlert size={12} /> Why flagged:</span>
               <p style={{ color: 'var(--text-muted)', fontSize: '0.75rem', lineHeight: '1.4' }}>{details.riskReason}</p>
@@ -406,11 +513,7 @@ export default function MetadataSidebar({
               <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                 <FileEdit size={13} style={{ color: 'var(--primary)' }} /> Notes ({notesList.length})
               </span>
-              <button
-                onClick={() => setShowNotesSection(!showNotesSection)}
-                className="btn btn-outline"
-                style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem' }}
-              >
+              <button onClick={() => setShowNotesSection(!showNotesSection)} className="btn btn-outline" style={{ fontSize: '0.65rem', padding: '0.15rem 0.4rem' }}>
                 {showNotesSection ? "Collapse" : "Open Log"}
               </button>
             </div>
@@ -456,7 +559,7 @@ export default function MetadataSidebar({
             )}
           </div>
 
-          {/* Expand and notice options */}
+          {/* Action options */}
           {selectedNode.type === 'receiver' ? (
             <div className="pulse-glow-border" style={{ 
               backgroundColor: 'rgba(16, 185, 129, 0.05)', 
@@ -474,13 +577,7 @@ export default function MetadataSidebar({
               <button
                 onClick={() => onSelectTab('osint')}
                 className="btn btn-primary"
-                style={{
-                  width: '100%',
-                  marginTop: '0.75rem',
-                  padding: '0.4rem',
-                  justifyContent: 'center',
-                  fontSize: '0.8rem'
-                }}
+                style={{ width: '100%', marginTop: '0.75rem', padding: '0.4rem', justifyContent: 'center', fontSize: '0.8rem' }}
               >
                 Prepare notice
               </button>
@@ -489,13 +586,7 @@ export default function MetadataSidebar({
             <button
               onClick={() => onExpandAddress(details.address)}
               className="btn btn-outline"
-              style={{
-                width: '100%',
-                marginTop: 'auto',
-                padding: '0.6rem',
-                justifyContent: 'center',
-                fontSize: '0.85rem'
-              }}
+              style={{ width: '100%', marginTop: 'auto', padding: '0.6rem', justifyContent: 'center', fontSize: '0.85rem' }}
             >
               <Search size={14} /> Trace forward
             </button>

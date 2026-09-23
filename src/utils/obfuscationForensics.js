@@ -10,6 +10,7 @@
 import { scanCaseStructuring } from './structuringAnalysis';
 import { exchangeDepositConfidence } from './traceHeuristics';
 import { parseBtcAmount } from './forensicUtils';
+import { analyzeCaseCrossChainActivity } from './crossChainForensics';
 
 // Known bridge/swap router fingerprints & prefixes
 export const KNOWN_SWAP_ROUTERS = [
@@ -322,6 +323,7 @@ export function generateObfuscationDossier(activeCase) {
 
   const peeling = analyzeCasePeelingChains(nodes, links);
   const bridgeScan = scanCrossChainBridgeActivity(nodes);
+  const crossChain = analyzeCaseCrossChainActivity(nodes, links);
   const structuring = scanCaseStructuring(nodes, links);
   const sweeps = scanCaseSweeps(nodes, links);
 
@@ -333,7 +335,7 @@ export function generateObfuscationDossier(activeCase) {
   let score = 10;
   if (hasMixer) score += 40;
   if (peeling.isPeelingChain) score += Math.min(30, peeling.hopCount * 8);
-  if (bridgeScan.detected) score += 25;
+  if (crossChain.detected || bridgeScan.detected) score += 25;
   if (structuring.detected) score += Math.min(20, 10 + structuring.maxBandSize * 2);
   if (sweeps.detected) score += sweeps.confidence >= 80 ? 15 : 8;
 
@@ -352,7 +354,11 @@ export function generateObfuscationDossier(activeCase) {
   const recommendations = [];
   if (hasMixer) recommendations.push('Mixer involved: amounts past this point are estimates, not proven funds.');
   if (peeling.isPeelingChain) recommendations.push('Follow the largest change outputs downstream to find where the money gathers.');
-  if (bridgeScan.detected) recommendations.push('Ask the swap service for records (a foreign legal request may be needed).');
+  if (crossChain.detected) {
+    recommendations.push(`${crossChain.summary} Track foreign destination addresses and query protocol relayers.`);
+  } else if (bridgeScan.detected) {
+    recommendations.push('Ask the swap service for records (a foreign legal request may be needed).');
+  }
   if (structuring.detected) recommendations.push(`Batch of ${structuring.maxBandSize} similar payments found — trace the shared funding source one step back to find who controls it.`);
   if (sweeps.detected) {
     const imminent = sweeps.sweeps.some(s => s.cashoutUrgency === 'IMMINENT');
@@ -369,6 +375,7 @@ export function generateObfuscationDossier(activeCase) {
     badgeColor,
     peeling,
     bridgeScan,
+    crossChain,
     structuring,
     sweeps,
     hasMixer,

@@ -59,4 +59,15 @@ describe('caseHelpers utilities', () => {
     expect(custom.links.length).toBe(2);
     expect(custom.nodes[0].balance).toBe('3.2000 BTC');
   });
+
+  it('contains and validates the cross-chain swap scenario case-crosschain-01', () => {
+    const crossChainCase = SCENARIOS.find(s => s.id === 'case-crosschain-01');
+    expect(crossChainCase).toBeDefined();
+    expect(crossChainCase.title).toContain('Cross-Chain');
+    const bridgeNode = crossChainCase.nodes.find(n => n.type === 'bridge');
+    expect(bridgeNode).toBeDefined();
+    expect(bridgeNode.label).toContain('THORChain');
+    expect(bridgeNode.details.crossChain.destinationChain).toBe('Ethereum');
+    expect(bridgeNode.details.opReturnDecoded).toContain('SWAP:ETH.USDT');
+  });
 });

@@ -286,6 +286,7 @@ export default function GraphCanvas({
             <option value="hop">Step / hub</option>
             <option value="receiver">End Receiver</option>
             <option value="mixer">Mixer</option>
+            <option value="bridge">Bridge / Swap</option>
           </select>
 
           {/* Flow Playback Stepper Controls */}

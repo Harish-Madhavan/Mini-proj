@@ -1,5 +1,6 @@
 import React from 'react';
 import { taintTier } from '../../utils/taintAnalysis';
+import { identifyBridgeEntity } from '../../utils/crossChainForensics';
 
 export default function NodeRenderer({
   nodes,
@@ -134,18 +135,21 @@ export default function NodeRenderer({
         const isCriticalNode = criticalTrail && criticalNodeSet.has(node.id);
 
         // Filter matching check
+        const isBridge = node.type === 'bridge' || Boolean(node.details?.crossChain) || Boolean(identifyBridgeEntity(node));
         const matchesSearch = !searchFilter.trim() ||
           node.label.toLowerCase().includes(searchFilter.toLowerCase()) ||
           node.details?.address?.toLowerCase().includes(searchFilter.toLowerCase()) ||
           node.entityName?.toLowerCase().includes(searchFilter.toLowerCase());
 
-        const matchesType = typeFilter === 'all' || node.type === typeFilter;
+        const matchesType = typeFilter === 'all' || 
+          (typeFilter === 'bridge' ? isBridge : node.type === typeFilter);
         const isDimmed = !matchesSearch || !matchesType || !isIsolatedNode || (criticalTrail && !isCriticalNode && !isolatedNodeId);
 
         let nodeColor = '#3b82f6';
         if (node.type === 'suspect') nodeColor = '#ef4444';
         if (node.type === 'mixer') nodeColor = '#a855f7';
         if (node.type === 'receiver') nodeColor = '#10b981';
+        if (isBridge) nodeColor = '#06b6d4';
 
         const nodeTaint = taintMap.get(node.id) ?? 0;
         const taintHaloColor = taintTier(nodeTaint).color;
@@ -194,7 +198,7 @@ export default function NodeRenderer({
             />
 
             <text textAnchor="middle" y="5" fill={isSelected ? '#fff' : 'var(--text-primary)'} fontSize="12" fontWeight="bold">
-              {node.id.startsWith('tx_') ? '⚙️' : node.type === 'suspect' ? '🕵️' : node.type === 'receiver' ? '🏦' : node.type === 'mixer' ? '🌪️' : '🔗'}
+              {node.id.startsWith('tx_') ? '⚙️' : node.type === 'suspect' ? '🕵️' : isBridge ? '🌉' : node.type === 'receiver' ? '🏦' : node.type === 'mixer' ? '🌪️' : '🔗'}
             </text>
 
             <text textAnchor="middle" y="36" fill="var(--text-primary)" fontSize="10" fontWeight="500">

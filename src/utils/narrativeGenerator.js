@@ -58,6 +58,9 @@ export function generateForensicNarrative(activeCase) {
       ? 'Likely cash-out: gathered funds reached an exchange-held account. The freeze window is closing.'
       : 'Funds were gathered into one wallet: aggregation before the next stage, not a cash-out.');
   }
+  if (dossier?.crossChain?.detected) {
+    findings.push(`Cross-chain bridge protocol detected (${dossier.crossChain.bridgeCount} hop${dossier.crossChain.bridgeCount === 1 ? '' : 's'} transferring funds to ${dossier.crossChain.targetChains.join(', ')}): funds have crossed consensus boundaries to secondary networks.`);
+  }
   if (risk.isKycVerified) findings.push('Terminal endpoint is an identity-checked exchange: subscriber identity is obtainable via Section 67 NDPS notice.');
   else if (receivers.length > 0) findings.push('Terminal endpoint has no identity records (unspent output / unknown wallet): keep watching for the next move before naming anyone.');
   if (findings.length === 0) findings.push('No splitting, mixing, or gathering patterns detected in the traced window.');
@@ -68,7 +71,10 @@ export function generateForensicNarrative(activeCase) {
   if (mixers > 0) limitations.push('CoinJoin outputs carry broken trails by design: amounts past a mix round are estimates, not proven funds.');
   if (typeof traceConf === 'number' && traceConf < 0.55) limitations.push('Trace confidence is LOW: treat the endpoint as investigative lead, not evidentiary fact.');
   limitations.push('A Bitcoin address is not a person: identity requires exchange identity records obtained through lawful process (Sec. 67 NDPS / foreign legal request).');
-  if (dossier?.bridgeScan?.detected) limitations.push('Cross-chain swap hops exit Bitcoin visibility entirely — destination-chain tracing needs a separate investigation.');
+  if (dossier?.crossChain?.detected || dossier?.bridgeScan?.detected) {
+    const chainInfo = dossier?.crossChain?.targetChains?.length ? ` to ${dossier.crossChain.targetChains.join(', ')}` : '';
+    limitations.push(`Cross-chain swap hops exit Bitcoin visibility${chainInfo} — destination-chain tracing requires external blockchain ledger queries.`);
+  }
 
   return {
     headline,

@@ -117,4 +117,27 @@ describe('riskScoring engine', () => {
       }
     }
   });
+
+  it('identifies cross-chain bridge hops and elevates obfuscation risk score', () => {
+    const bridgeNodes = [
+      { id: 'suspect', type: 'suspect', balance: '3.0 BTC' },
+      { id: 'hop1', type: 'hop', balance: '2.99 BTC' },
+      { 
+        id: 'bridge', 
+        type: 'bridge', 
+        label: 'THORChain Asgard Vault', 
+        balance: '2.95 BTC',
+        details: { 
+          address: 'bc1qthorvault9981247asgard001',
+          opReturnDecoded: 'SWAP:ETH.USDT:0x71C8364437F5Fa0128509890F0D8E8170D30d6F9:1000'
+        } 
+      }
+    ];
+
+    const result = calculateForensicRiskScore(bridgeNodes);
+    expect(result.hasBridge).toBe(true);
+    expect(result.dimensions.obfuscationScore).toBeGreaterThan(0);
+    expect(result.threatSignatures.some(s => s.name === 'Cross-chain bridge exit')).toBe(true);
+    expect(result.threatBadge.level).toBe('HIGH');
+  });
 });
