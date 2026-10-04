@@ -10,6 +10,9 @@
  */
 
 import { identifyBridgeEntity, parseCrossChainMemo } from './crossChainForensics';
+import { scanCaseSweeps } from './obfuscationForensics';
+import { tagKnownEntity } from './knownEntities';
+import { RISK_SIGNAL_SCORES } from '../constants/config';
 
 export const DEFAULT_RISK_WEIGHTS = {
   mixerWeight: 35,
@@ -17,6 +20,15 @@ export const DEFAULT_RISK_WEIGHTS = {
   kycDiscountWeight: 15,
   baseScore: 20
 };
+
+// Re-exported from constants/config.js (single source) so tests and the
+// dossier read the same numbers the aggregate uses.
+export const {
+  CONSOLIDATION_IMMINENT: CONSOLIDATION_IMMINENT_SCORE,
+  CONSOLIDATION_WATCH: CONSOLIDATION_WATCH_SCORE,
+  SANCTIONED_ENTITY: SANCTIONED_ENTITY_SCORE,
+  DARKNET_ENTITY: DARKNET_ENTITY_SCORE,
+} = RISK_SIGNAL_SCORES;
 
 /**
  * Calculate multi-dimensional forensic risk score for a case graph.
@@ -46,6 +58,9 @@ function isIdentityVerified(node) {
 
 export function calculateForensicRiskScore(caseOrNodes, customWeights = {}) {
   const nodes = Array.isArray(caseOrNodes) ? caseOrNodes : (caseOrNodes?.nodes || []);
+  // Sweep detection needs graph links; node-only callers (unit fixtures)
+  // simply score no consolidation signal instead of crashing.
+  const links = Array.isArray(caseOrNodes) ? [] : (caseOrNodes?.links || []);
   const weights = sanitizeWeights(customWeights);
 
   const hasMixer = nodes.some(n => n.type === 'mixer');
@@ -88,16 +103,45 @@ export function calculateForensicRiskScore(caseOrNodes, customWeights = {}) {
   const hasRbf = nodes.some(n => n.details?.rbfStatus?.includes('Replaceable fee'));
   const anomalyScore = isHistoricalEra ? 0 : (hasRbf ? 6 : 0);
 
+  // Consolidation-sweep signal: a fan-in hub (4+ inputs collapsing into one
+  // or one dominant output) is cash-out preparation. Never throws: a
+  // malformed graph degrades to no-signal rather than breaking scoring.
+  let sweepScan = { detected: false, sweeps: [], confidence: 0 };
+  if (!isHistoricalEra && links.length > 0) {
+    try {
+      sweepScan = scanCaseSweeps(nodes, links);
+    } catch {
+      sweepScan = { detected: false, sweeps: [], confidence: 0 };
+    }
+  }
+  const sweepImminent = sweepScan.detected && sweepScan.sweeps.some(s => s.cashoutUrgency === 'IMMINENT');
+  const consolidationScore = isHistoricalEra || !sweepScan.detected
+    ? 0
+    : (sweepImminent ? CONSOLIDATION_IMMINENT_SCORE : CONSOLIDATION_WATCH_SCORE);
+
+  // Attribution signal: any case address matching a curated sanctioned or
+  // darknet entity tag (OFAC SDN, seized darknet clusters). Historical-era
+  // transfers predate every listed designation, so they score nothing.
+  const entityHits = isHistoricalEra ? [] : collectEntityHits(nodes);
+  const hasSanctionedHit = entityHits.some(h => h.category === 'sanctioned');
+  const hasDarknetHit = entityHits.some(h => h.category === 'darknet');
+  const attributionScore = hasSanctionedHit
+    ? SANCTIONED_ENTITY_SCORE
+    : (hasDarknetHit ? DARKNET_ENTITY_SCORE : 0);
+
   // Aggregate across every dimension so no sub-score is silently discarded.
   const baseScore = isHistoricalEra ? 10 : weights.baseScore;
   const rawCalculatedScore = isHistoricalEra
     ? Math.min(25, baseScore + layeringScore + obfuscationScore)
-    : baseScore + obfuscationScore + layeringScore + destinationScore + velocityScore + anomalyScore - (isKycVerified ? weights.kycDiscountWeight : 0);
+    : baseScore + obfuscationScore + layeringScore + destinationScore + velocityScore + anomalyScore + consolidationScore + attributionScore - (isKycVerified ? weights.kycDiscountWeight : 0);
 
   const calculatedRiskScore = Math.round(Math.min(99, Math.max(5, rawCalculatedScore)));
 
   const threatBadge = getThreatBadge(calculatedRiskScore);
-  const statutoryAction = getStatutoryLegalAction(calculatedRiskScore, isKycVerified, isHistoricalEra);
+  const statutoryAction = getStatutoryLegalAction(calculatedRiskScore, isKycVerified, isHistoricalEra, {
+    sweepImminent,
+    hasSanctionedHit,
+  });
   const threatSignatures = evaluateThreatSignatures(nodes, {
     hasMixer,
     hasBridge,
@@ -107,7 +151,12 @@ export function calculateForensicRiskScore(caseOrNodes, customWeights = {}) {
     obfuscationScore,
     layeringScore,
     destinationScore,
-    kycDiscountWeight: weights.kycDiscountWeight
+    kycDiscountWeight: weights.kycDiscountWeight,
+    consolidationScore,
+    sweepImminent,
+    sweepCount: sweepScan.sweeps.length,
+    attributionScore,
+    entityHits,
   });
 
   return {
@@ -117,6 +166,9 @@ export function calculateForensicRiskScore(caseOrNodes, customWeights = {}) {
     hasBridge,
     hopCount,
     isKycVerified,
+    hasSweep: sweepScan.detected,
+    sweepImminent,
+    entityHits,
     threatBadge,
     statutoryAction,
     dimensions: {
@@ -124,10 +176,40 @@ export function calculateForensicRiskScore(caseOrNodes, customWeights = {}) {
       layeringScore,
       destinationScore,
       velocityScore,
-      anomalyScore
+      anomalyScore,
+      consolidationScore,
+      attributionScore
     },
     threatSignatures
   };
+}
+
+/**
+ * Collect curated-entity attributions for every address-bearing node.
+ * Pure scan over node identifiers — never throws, never fetches.
+ */
+export function collectEntityHits(nodes = []) {
+  const hits = [];
+  for (const n of nodes || []) {
+    const candidates = [
+      n.details?.address,
+      n.entityName,
+      typeof n.id === 'string' ? n.id.replace(/^(in_|out_|tx_|op_)/, '') : null,
+    ].filter(v => typeof v === 'string' && v.length > 0);
+    for (const c of candidates) {
+      let tag = null;
+      try {
+        tag = tagKnownEntity(c);
+      } catch {
+        tag = null;
+      }
+      if (tag && (tag.category === 'sanctioned' || tag.category === 'darknet')) {
+        hits.push({ nodeId: n.id, address: c, label: tag.label, category: tag.category, risk: tag.risk });
+        break;
+      }
+    }
+  }
+  return hits;
 }
 
 /**
@@ -174,7 +256,12 @@ export function evaluateThreatSignatures(nodes = [], context = {}) {
     obfuscationScore = 0,
     layeringScore = 0,
     destinationScore = 0,
-    kycDiscountWeight = 15
+    kycDiscountWeight = 15,
+    consolidationScore = 0,
+    sweepImminent = false,
+    sweepCount = 0,
+    attributionScore = 0,
+    entityHits = []
   } = context;
 
   if (isHistoricalEra) {
@@ -241,13 +328,37 @@ export function evaluateThreatSignatures(nodes = [], context = {}) {
     });
   }
 
+  if (consolidationScore > 0) {
+    signatures.push({
+      name: sweepImminent ? "Consolidation sweep (custodial cash-out)" : "Consolidation sweep (watch)",
+      score: `+${consolidationScore}%`,
+      category: "Sweep check",
+      description: sweepImminent
+        ? `${sweepCount} fan-in hub(s) collapsing into custodial-held output — imminent cash-out preparation.`
+        : `${sweepCount} fan-in hub(s) gathering dispersed funds — watch the destination for the next move.`,
+      status: "detected"
+    });
+  }
+
+  if (attributionScore > 0 && entityHits.length > 0) {
+    const top = entityHits[0];
+    signatures.push({
+      name: top.category === 'sanctioned' ? "Sanctioned entity contact" : "Darknet entity contact",
+      score: `+${attributionScore}%`,
+      category: "Attribution check",
+      description: `${entityHits.length} address(es) match curated ${top.category} tag "${top.label}" (e.g. ${top.address?.slice(0, 18)}…). Confirm with Section 67 notice before funds move.`,
+      status: "detected"
+    });
+  }
+
   return signatures;
 }
 
 /**
  * Recommend statutory law enforcement actions (NDPS Act, CrPC / Bharatiya Nagarik Suraksha Sanhita).
  */
-export function getStatutoryLegalAction(riskScore, isKycVerified = false, isHistoricalEra = false) {
+export function getStatutoryLegalAction(riskScore, isKycVerified = false, isHistoricalEra = false, signals = {}) {
+  const { sweepImminent = false, hasSanctionedHit = false } = signals || {};
   if (isHistoricalEra) {
     return {
       actionRequired: false,
@@ -260,25 +371,36 @@ export function getStatutoryLegalAction(riskScore, isKycVerified = false, isHist
   }
 
   if (riskScore >= 70) {
+    const recommendations = [
+      "Issue Section 67 NDPS Act statutory notice to destination exchange gateway.",
+      "Request immediate administrative freeze on target account and linked cash withdrawal rails.",
+      "Expand shared-spending cluster analysis across all co-spent input addresses."
+    ];
+    if (sweepImminent) {
+      recommendations.push("Sweep hub at custodial output: freeze before the consolidated balance leaves the exchange.");
+    }
+    if (hasSanctionedHit) {
+      recommendations.push("Sanctioned-entity contact: file OFAC-referral memorandum alongside the Section 67 notice.");
+    }
     return {
       actionRequired: true,
       urgency: 'CRITICAL_ACTION_REQUIRED',
-      recommendations: [
-        "Issue Section 67 NDPS Act statutory notice to destination exchange gateway.",
-        "Request immediate administrative freeze on target account and linked cash withdrawal rails.",
-        "Expand shared-spending cluster analysis across all co-spent input addresses."
-      ]
+      recommendations
     };
   }
 
   if (riskScore >= 35) {
+    const recommendations = [
+      "Deploy on-chain address monitoring for subsequent outgoing sweeps.",
+      "Request identity records from the destination exchange."
+    ];
+    if (sweepImminent) {
+      recommendations.push("Consolidation in progress: prioritize the sweep destination in the watchlist.");
+    }
     return {
       actionRequired: true,
       urgency: 'MONITORING_RECOMMENDED',
-      recommendations: [
-        "Deploy on-chain address monitoring for subsequent outgoing sweeps.",
-        "Request identity records from the destination exchange."
-      ]
+      recommendations
     };
   }
 

@@ -6,11 +6,8 @@ import {
   UserCheck,
   PlusCircle,
   Trash2,
-  ChevronRight,
   Download,
   Upload,
-  CheckCircle,
-  AlertCircle,
   Fingerprint
 } from 'lucide-react';
 import { fetchAddressTxs, fetchTx } from '../utils/bitcoinApi';
@@ -21,13 +18,13 @@ import { computeAddressClusters, detectPeelingChain, feeFingerprintSimilarity, e
 import { downloadJson } from '../utils/download';
 import EmptyState from './EmptyState';
 
-function StatBox({ label, value, valueColor = '#fff', sub = null }) {
+function StatBox({ label, value, sub = null }) {
   return (
-    <div style={{ backgroundColor: 'rgba(5, 8, 16, 0.8)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-      <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.75rem' }}>{label}</span>
-      <strong style={{ fontSize: '1.1rem', color: valueColor }}>{value}</strong>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem', padding: '0.25rem 0' }}>
+      <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>{label}</span>
+      <strong style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-primary)' }}>{value}</strong>
       {sub && (
-        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '0.7rem', marginTop: '0.15rem' }}>{sub}</span>
+        <span style={{ color: 'var(--text-muted)', fontSize: '0.76rem' }}>{sub}</span>
       )}
     </div>
   );
@@ -37,27 +34,25 @@ function AddressRow({ addr, onRemove }) {
   const isEvm = addr.startsWith('0x');
   const isTron = addr.startsWith('T') && addr.length >= 33 && addr.length <= 35;
   const validation = validateBtcAddress(addr);
-  const isValid = validation.isValid;
-  const badgeColor = isValid ? '#10b981' : (isEvm || isTron) ? '#06b6d4' : '#f59e0b';
-  const label = isEvm 
+  const label = isEvm
     ? 'EVM address (cross-chain)'
     : isTron
       ? 'Tron address (cross-chain)'
-      : validation.type;
+      : validation.isValid ? validation.type : 'Unverified format';
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.6rem 0.8rem', borderRadius: '6px', backgroundColor: 'rgba(5, 8, 16, 0.8)', border: '1px solid var(--border-color)', gap: '0.5rem' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', overflow: 'hidden' }}>
-        <span className="mono-addr" style={{ fontSize: '0.8rem', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{addr}</span>
-        <span style={{ fontSize: '0.65rem', color: badgeColor, display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
-          {isValid ? <CheckCircle size={10} /> : <AlertCircle size={10} />}
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.55rem 0', borderBottom: '1px solid var(--border-soft)', gap: '0.5rem' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <span className="mono-addr" style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{addr}</span>
+        <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
           {label}
         </span>
       </div>
       <button
         onClick={onRemove}
-        style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', opacity: 0.7 }}
+        className="icon-btn"
         title="Remove address"
+        aria-label={`Remove ${addr}`}
       >
         <Trash2 size={14} />
       </button>
@@ -165,9 +160,17 @@ export default function HeuristicClustering() {
           btcAddrs.map(addr => fetchAddressTxs(addr))
         );
 
+        const seenTxIds = new Set();
         txHistories.forEach(res => {
           if (res.status === 'fulfilled' && Array.isArray(res.value)) {
-            res.value.forEach(tx => transactions.push(tx));
+            res.value.forEach(tx => {
+              const id = tx?.txid || tx?.id;
+              if (id) {
+                if (seenTxIds.has(id)) return;
+                seenTxIds.add(id);
+              }
+              transactions.push(tx);
+            });
           }
         });
       } catch (e) {
@@ -238,29 +241,24 @@ export default function HeuristicClustering() {
     INCONCLUSIVE: 'Unclear',
   };
 
-  const feeVerdictColor = feeResult
-    ? feeResult.verdict === 'SAME_WALLET_LIKELY' ? '#f59e0b'
-      : feeResult.verdict === 'DISTINCT_WALLETS' ? '#10b981' : 'var(--text-secondary)'
-    : null;
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-    <div className="responsive-split-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', minHeight: '500px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', paddingBottom: '1rem' }}>
+    <div className="responsive-split-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
       
       {/* Input Wallet List panel */}
-      <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+      <div className="glass-panel" style={{ padding: '1.75rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <GitMerge style={{ color: '#a855f7' }} /> Shared spending
+              <h3 style={{ fontSize: '0.95rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                <GitMerge size={15} style={{ color: 'var(--text-muted)' }} /> Shared spending
               </h3>
-              <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Group addresses that spend together — they are probably one wallet.</p>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: '0.2rem' }}>Addresses that spend together are probably one wallet.</p>
           </div>
 
           <button
             onClick={handleImportFromGraph}
-            className="btn btn-outline"
-            style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }}
+            className="btn-quiet"
+            style={{ fontSize: '0.8rem' }}
             title="Import all addresses from the open case"
           >
             <Upload size={13} /> From graph
@@ -275,18 +273,19 @@ export default function HeuristicClustering() {
             value={newAddr}
             onChange={(e) => setNewAddr(e.target.value)}
             className="mono-addr input-field"
-            style={{ flex: 1, fontSize: '0.8rem' }}
+            style={{ flex: 1, fontSize: '0.83rem' }}
           />
           <button
             onClick={handleAddAddress}
-            className="btn btn-outline"
+            className="btn btn-primary"
+            style={{ fontSize: '0.82rem' }}
           >
-            <PlusCircle size={16} /> Add
+            <PlusCircle size={14} /> Add
           </button>
         </div>
 
         {/* List of Addresses */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1, overflowY: 'auto', maxHeight: '280px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflowY: 'auto', maxHeight: '280px' }}>
           {suspectAddresses.map((addr, idx) => (
             <AddressRow
               key={idx}
@@ -300,31 +299,33 @@ export default function HeuristicClustering() {
           onClick={runClustering}
           disabled={isClustering || suspectAddresses.length < 2}
           className="btn btn-primary"
-          style={{ width: '100%', padding: '0.75rem', justifyContent: 'center', fontSize: '0.85rem' }}
+          style={{ width: '100%', padding: '0.7rem', justifyContent: 'center', fontSize: '0.84rem', marginTop: '0.25rem' }}
         >
-          <Shuffle size={16} /> {isClustering ? "Grouping..." : `Find groups (${suspectAddresses.length} addresses)`}
+          <Shuffle size={14} /> {isClustering ? "Grouping..." : `Find groups (${suspectAddresses.length} addresses)`}
         </button>
       </div>
 
       {/* Cluster Output panel */}
-      <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <UserCheck style={{ color: '#10b981' }} size={18} /> Results
+      <div className="glass-panel" style={{ padding: '1.75rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <h3 style={{ fontSize: '0.95rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+            <UserCheck size={15} style={{ color: 'var(--text-muted)' }} /> Results
           </h3>
 
           {clusteringResult && (
-            <div style={{ display: 'flex', gap: '0.4rem' }}>
+            <div style={{ display: 'flex', gap: '0.25rem' }}>
               <button
                 onClick={handleExportCsv}
-                className="btn"
+                className="btn-quiet"
+                style={{ fontSize: '0.8rem' }}
                 title="Download CSV Evidence Table"
               >
                 <Download size={13} /> CSV
               </button>
               <button
                 onClick={handleExportJson}
-                className="btn btn-outline"
+                className="btn-quiet"
+                style={{ fontSize: '0.8rem' }}
                 title="Download JSON Data"
               >
                 <Download size={13} /> JSON
@@ -334,27 +335,27 @@ export default function HeuristicClustering() {
         </div>
 
         {clusteringResult ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
             {/* Cluster ID Header */}
-            <div style={{ backgroundColor: 'rgba(168, 85, 247, 0.1)', border: '1px solid #a855f7', borderRadius: '8px', padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', paddingBottom: '0.75rem', borderBottom: '1px solid var(--border-soft)' }}>
               <div>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Group ID:</span>
-                <h4 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#fff', marginTop: '0.1rem' }}>{clusteringResult.clusterId}</h4>
+                <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>{clusteringResult.clusterId}</span>
+                {clusteringResult.isSplit && (
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+                    Split into {clusteringResult.clustersCount} groups — largest holds {clusteringResult.largestCluster?.length || 0}/{clusteringResult.addressCount}
+                  </div>
+                )}
               </div>
-              <div style={{ textAlign: 'right' }}>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Confidence:</span>
-                <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#10b981' }}>{clusteringResult.confidenceScore}%</div>
-              </div>
+              <div style={{ fontSize: '1.2rem', fontWeight: 600, letterSpacing: '-0.02em' }}>{clusteringResult.confidenceScore}%</div>
             </div>
 
             {/* Metrics Breakdown */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', fontSize: '0.85rem' }}>
-              <StatBox label="Addresses:" value={clusteringResult.addressCount} />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', fontSize: '0.85rem' }}>
+              <StatBox label="Addresses" value={clusteringResult.addressCount} />
               <StatBox
-                label="Received:"
+                label="Received"
                 value={clusteringResult.totalBalance}
-                valueColor="var(--primary)"
                 sub={clusteringResult.observedTxCount > 0
                   ? `Across ${clusteringResult.observedTxCount} checked transaction${clusteringResult.observedTxCount === 1 ? '' : 's'}`
                   : 'No history fetched'}
@@ -362,18 +363,18 @@ export default function HeuristicClustering() {
             </div>
 
             {/* Heuristics Applied */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Why grouped:</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Why grouped</span>
               {clusteringResult.heuristicsApplied.map((h, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', color: '#cbd5e1', backgroundColor: 'rgba(255,255,255,0.02)', padding: '0.4rem 0.6rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                  <ChevronRight size={12} style={{ color: '#a855f7' }} /> {h}
+                <div key={i} style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', padding: '0.3rem 0', borderBottom: i < clusteringResult.heuristicsApplied.length - 1 ? '1px solid var(--border-soft)' : 'none' }}>
+                  <span style={{ color: 'var(--text-muted)', marginRight: '0.45rem' }}>·</span>{h}
                 </div>
               ))}
             </div>
 
           </div>
         ) : (
-          <EmptyState icon={<HelpCircle size={36} />}>
+          <EmptyState icon={<HelpCircle size={32} />}>
             Add 2 or more addresses, then Find groups.
           </EmptyState>
         )}
@@ -381,18 +382,18 @@ export default function HeuristicClustering() {
     </div>
 
       {/* Fee habits */}
-      <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        <div>
-          <h3 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <Fingerprint size={18} /> Fee habits
+      <div className="glass-panel" style={{ padding: '1.75rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <h3 style={{ fontSize: '0.95rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+            <Fingerprint size={15} style={{ color: 'var(--text-muted)' }} /> Fee habits
           </h3>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
-            Compare fee habits across two transactions.
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+            Same wallet often pays similar fees.
           </p>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '0.5rem', alignItems: 'end' }} className="responsive-split-grid">
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-            <label htmlFor="fee-tx-a" style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Transaction A</label>
+            <label htmlFor="fee-tx-a" style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>Transaction A</label>
             <input
               id="fee-tx-a"
               type="text"
@@ -401,11 +402,11 @@ export default function HeuristicClustering() {
               placeholder="64-character transaction ID"
               list="case-txids"
               className="mono-addr input-field"
-              style={{ fontSize: '0.75rem' }}
+              style={{ fontSize: '0.8rem' }}
             />
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-            <label htmlFor="fee-tx-b" style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Transaction B</label>
+            <label htmlFor="fee-tx-b" style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>Transaction B</label>
             <input
               id="fee-tx-b"
               type="text"
@@ -414,44 +415,41 @@ export default function HeuristicClustering() {
               placeholder="64-character transaction ID"
               list="case-txids"
               className="mono-addr input-field"
-              style={{ fontSize: '0.75rem' }}
+              style={{ fontSize: '0.8rem' }}
             />
           </div>
           <button
             onClick={handleCompareFees}
             disabled={isComparingFees}
             className="btn btn-primary"
-            style={{ fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+            style={{ fontSize: '0.82rem', whiteSpace: 'nowrap' }}
           >
-            <Fingerprint size={14} /> {isComparingFees ? 'Fetching…' : 'Compare'}
+            <Fingerprint size={14} /> {isComparingFees ? 'Checking…' : 'Compare'}
           </button>
         </div>
         <datalist id="case-txids">
           {caseTxIds.map(txid => <option key={txid} value={txid} />)}
         </datalist>
         {feeResult ? (
-          <div style={{ border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.9rem 1rem', backgroundColor: 'rgba(5,8,16,0.5)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-              <span className="badge-pill" style={{ color: feeVerdictColor, border: `1px solid ${feeVerdictColor}55`, backgroundColor: `${feeVerdictColor}14` }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', padding: '0.75rem 0', borderTop: '1px solid var(--border-soft)' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.6rem', flexWrap: 'wrap' }}>
+              <strong style={{ fontSize: '0.88rem' }}>
                 {FEE_VERDICTS[feeResult.verdict] || feeResult.verdict}
-              </span>
-              <span style={{ fontSize: '0.8rem' }}>Similarity <strong>{Math.round(feeResult.similarity * 100)}%</strong></span>
-              <span className="mono-addr" style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
-                {feeResult.rateA} vs {feeResult.rateB} satoshis per byte
+              </strong>
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>{Math.round(feeResult.similarity * 100)}% similar</span>
+              <span className="mono-addr" style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                {feeResult.rateA} vs {feeResult.rateB} sat/vB
               </span>
             </div>
-            <div style={{ height: '5px', borderRadius: '3px', backgroundColor: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
-              <div style={{ width: `${Math.round(feeResult.similarity * 100)}%`, height: '100%', backgroundColor: feeVerdictColor }} />
-            </div>
-            <div className="mono-addr" style={{ fontSize: '0.68rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
-              A: {feeResult.txidA.slice(0, 16)}… · B: {feeResult.txidB.slice(0, 16)}… (checked live)
+            <div className="mono-addr" style={{ fontSize: '0.72rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
+              {feeResult.txidA.slice(0, 12)}… · {feeResult.txidB.slice(0, 12)}…
             </div>
           </div>
         ) : (
-          <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
             {caseTxIds.length > 0
-              ? `Enter two transaction IDs — or pick from the ${caseTxIds.length} in the open case — then compare.`
-              : 'Enter two transaction IDs. Transactions from the open case appear as suggestions once traced.'}
+              ? `Pick from the ${caseTxIds.length} transactions in the open case, then compare.`
+              : 'Enter two transaction IDs, then compare.'}
           </p>
         )}
       </div>

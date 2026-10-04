@@ -5,8 +5,13 @@ import {
   removeFromWatchlist,
   checkAddressMempoolStatus,
   normalizeWatchlist,
-  makeWatchEntry
+  makeWatchEntry,
+  getWebSocketStatus,
+  onMempoolAlert,
+  emitMempoolAlert,
+  getMempoolAlerts
 } from './watchlistManager';
+
 
 describe('watchlistManager', () => {
   let mockStore = {};
@@ -77,4 +82,33 @@ describe('watchlistManager', () => {
     const status = await checkAddressMempoolStatus('bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', false);
     expect(status).toHaveProperty('hasMempoolTx');
   });
+
+  it('manages real-time mempool WebSocket alerts and status listeners', () => {
+    expect(['DISCONNECTED', 'CONNECTING', 'CONNECTED', 'UNSUPPORTED', 'ERROR']).toContain(getWebSocketStatus());
+
+    let receivedAlert = null;
+    const unsubscribe = onMempoolAlert((alert) => {
+      receivedAlert = alert;
+    });
+
+    const testAlert = {
+      id: 'test_alert_001',
+      address: 'bc1qtesttarget',
+      txid: '00112233445566778899aabbccddeeff',
+      feeRate: '22 sat/vB',
+      amount: '1.5000 BTC',
+      type: '0-Conf Push'
+    };
+
+    emitMempoolAlert(testAlert);
+
+    expect(receivedAlert).not.toBeNull();
+    expect(receivedAlert.txid).toBe(testAlert.txid);
+
+    const savedAlerts = getMempoolAlerts();
+    expect(savedAlerts.some(a => a.txid === testAlert.txid)).toBe(true);
+
+    unsubscribe();
+  });
 });
+

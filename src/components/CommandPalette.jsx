@@ -97,12 +97,12 @@ export default function CommandPalette({ isOpen, onClose }) {
         }}
       >
         {/* Search Header */}
-        <div style={{ display: 'flex', alignItems: 'center', padding: '0.75rem 1rem', borderBottom: '1px solid var(--border-color)', gap: '0.6rem', backgroundColor: '#121215' }}>
-          <Search size={18} style={{ color: 'var(--primary)' }} />
+        <div style={{ display: 'flex', alignItems: 'center', padding: '0.75rem 1rem', borderBottom: '1px solid var(--border-soft)', gap: '0.6rem' }}>
+          <Search size={15} style={{ color: 'var(--text-muted)' }} />
           <input
             type="text"
             autoFocus
-            placeholder="Type a command, or search a transaction/address..."
+            placeholder="Type a command, or search..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             style={{ 
@@ -110,15 +110,12 @@ export default function CommandPalette({ isOpen, onClose }) {
               background: 'none', 
               border: 'none', 
               outline: 'none', 
-              color: '#fff', 
-              fontSize: '0.95rem' 
+              color: 'var(--text-primary)', 
+              fontSize: '0.88rem' 
             }}
           />
-          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', backgroundColor: 'rgba(255,255,255,0.06)', padding: '0.15rem 0.4rem', borderRadius: '4px' }}>
-            ESC to close
-          </span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '0.2rem' }}>
-            <X size={16} />
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '0.2rem', display: 'flex' }} aria-label="Close">
+            <X size={15} />
           </button>
         </div>
 
@@ -148,38 +145,29 @@ export default function CommandPalette({ isOpen, onClose }) {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    padding: '0.65rem 0.85rem',
-                    borderRadius: '6px',
+                    padding: '0.6rem 0.75rem',
+                    borderRadius: '8px',
                     cursor: 'pointer',
-                    backgroundColor: isSelected ? 'rgba(14, 165, 233, 0.15)' : 'transparent',
-                    border: isSelected ? '1px solid rgba(14, 165, 233, 0.3)' : '1px solid transparent',
-                    transition: 'all 0.15s ease'
+                    backgroundColor: isSelected ? 'var(--bg-card-hover)' : 'transparent'
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <div style={{ 
-                      padding: '0.35rem', 
-                      borderRadius: '4px', 
-                      backgroundColor: isSelected ? 'rgba(14, 165, 233, 0.3)' : 'rgba(255, 255, 255, 0.05)',
-                      color: isSelected ? 'var(--primary)' : 'var(--text-secondary)'
-                    }}>
-                      <Icon size={15} />
-                    </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                    <Icon size={14} style={{ color: 'var(--text-muted)' }} />
                     <div>
-                      <span style={{ fontSize: '0.85rem', fontWeight: 500, color: isSelected ? '#fff' : 'var(--text-primary)' }}>
+                      <span style={{ fontSize: '0.83rem', color: 'var(--text-primary)' }}>
                         {item.label}
                       </span>
                       {item.category && (
-                        <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginLeft: '0.5rem' }}>
-                          [{item.category}]
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: '0.5rem' }}>
+                          {item.category}
                         </span>
                       )}
                     </div>
                   </div>
 
                   {item.shortcut && (
-                    <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', backgroundColor: 'rgba(255,255,255,0.06)', padding: '0.1rem 0.35rem', borderRadius: '3px' }}>
-                      Alt+{item.shortcut}
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      ⌥{item.shortcut}
                     </span>
                   )}
                 </div>
@@ -189,13 +177,12 @@ export default function CommandPalette({ isOpen, onClose }) {
         </div>
 
         {/* Footer info */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 1rem', borderTop: '1px solid var(--border-color)', backgroundColor: 'rgba(5, 8, 16, 0.8)', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 1rem', borderTop: '1px solid var(--border-soft)', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
           <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <span>↑↓ Navigate</span>
-            <span>↵ Select</span>
-            <span>ESC Close</span>
+            <span>↑↓ move</span>
+            <span>↵ open</span>
           </div>
-          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+          <span>
             {filteredItems.length} result{filteredItems.length === 1 ? '' : 's'}
           </span>
         </div>

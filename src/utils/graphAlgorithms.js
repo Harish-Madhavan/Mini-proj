@@ -204,7 +204,7 @@ export function findCriticalMoneyTrail(nodes = [], links = [], startNodeId = nul
     }
   }
 
-  if (topo.length === nodes.length) {
+    if (topo.length === nodes.length) {
     // DAG DP
     const dist = new Map();
     const prev = new Map();
@@ -224,11 +224,40 @@ export function findCriticalMoneyTrail(nodes = [], links = [], startNodeId = nul
         }
       }
     }
-    if (dist.get(end) !== -Infinity) {
+
+    // Determine target node: if endNodeId was explicitly given, use it;
+    // otherwise, choose the best reachable endpoint from candidates (receivers, sinks, or max distance)
+    let targetEnd = end;
+    if (!endNodeId || dist.get(targetEnd) === -Infinity) {
+      const candidateNodes = nodes.filter(n => (n.type === 'receiver' || n.id.startsWith('out_') || (adj.get(n.id) || []).length === 0) && n.id !== start);
+      let bestEnd = null;
+      let maxDist = -Infinity;
+      for (const cand of candidateNodes) {
+        const d = dist.get(cand.id);
+        if (d !== undefined && d > maxDist && d > 0) {
+          maxDist = d;
+          bestEnd = cand.id;
+        }
+      }
+      // If no receiver candidate is reachable, pick any reachable node with max distance > 0
+      if (!bestEnd) {
+        for (const [nId, d] of dist) {
+          if (nId !== start && d > maxDist && d > 0) {
+            maxDist = d;
+            bestEnd = nId;
+          }
+        }
+      }
+      if (bestEnd) {
+        targetEnd = bestEnd;
+      }
+    }
+
+    if (dist.get(targetEnd) !== -Infinity && dist.get(targetEnd) > 0) {
       // Reconstruct
       const path = [];
       const linkIndices = [];
-      let cur = end;
+      let cur = targetEnd;
       while (cur) {
         path.push(cur);
         const pl = prevLink.get(cur);
@@ -238,7 +267,7 @@ export function findCriticalMoneyTrail(nodes = [], links = [], startNodeId = nul
         if (path.length > nodes.length + 5) break; // safety
       }
       path.reverse(); linkIndices.reverse();
-      return { path, totalValue: dist.get(end), linkIndices };
+      return { path, totalValue: dist.get(targetEnd), linkIndices };
     }
     // No path in DAG -> fall through to heap search for best reachable
   }
@@ -248,12 +277,18 @@ export function findCriticalMoneyTrail(nodes = [], links = [], startNodeId = nul
   heap.push({ id: start, cost: 0, path: [start], linksUsed: [] });
   const bestCost = new Map(); // node -> best cost seen
   let bestPath = null;
+  let bestReachableAny = null;
 
   while (!heap.isEmpty()) {
     const cur = heap.pop();
     if ((bestCost.get(cur.id) ?? -Infinity) > cur.cost) continue;
     bestCost.set(cur.id, cur.cost);
-    if (cur.id === end) { bestPath = cur; break; }
+    if (endNodeId && cur.id === endNodeId) { bestPath = cur; break; }
+    if (!endNodeId && (cur.id === end || nodes.some(n => n.id === cur.id && (n.type === 'receiver' || n.id.startsWith('out_'))))) {
+      if (!bestPath || cur.cost > bestPath.cost) bestPath = cur;
+    }
+    if (cur.cost > (bestReachableAny?.cost || 0)) bestReachableAny = cur;
+
     for (const edge of adj.get(cur.id) || []) {
       const nextCost = cur.cost + edge.value;
       if (nextCost <= (bestCost.get(edge.target) ?? -Infinity)) continue;
@@ -263,10 +298,11 @@ export function findCriticalMoneyTrail(nodes = [], links = [], startNodeId = nul
     }
   }
 
+  const chosen = bestPath || bestReachableAny;
   return {
-    path: bestPath ? bestPath.path : (start === end ? [start] : []),
-    totalValue: bestPath ? bestPath.cost : 0,
-    linkIndices: bestPath ? bestPath.linksUsed : []
+    path: chosen ? chosen.path : (start === end ? [start] : []),
+    totalValue: chosen ? chosen.cost : 0,
+    linkIndices: chosen ? chosen.linksUsed : []
   };
 }
 
@@ -275,14 +311,16 @@ export function findCriticalMoneyTrail(nodes = [], links = [], startNodeId = nul
  */
 export function detectCircularFlows(nodes = [], links = []) {
   const adj = new Map();
+  const nodeSet = new Set((nodes || []).map(n => n.id));
   nodes.forEach(n => adj.set(n.id, []));
   links.forEach(l => {
     const src = typeof l.source === 'object' ? l.source.id : l.source;
     const tgt = typeof l.target === 'object' ? l.target.id : l.target;
-    if (adj.has(src)) adj.get(src).push(tgt);
+    if (adj.has(src) && nodeSet.has(tgt)) adj.get(src).push(tgt);
   });
 
   const cycles = [];
+  const seenCycleKeys = new Set();
   const visited = new Set();
   const recursionStack = new Set();
   const pathStack = []; // current path
@@ -309,7 +347,14 @@ export function detectCircularFlows(nodes = [], links = []) {
           if (startIdx !== undefined) {
             const cycle = pathStack.slice(startIdx);
             cycle.push(neighbor);
-            cycles.push(cycle);
+            const cycleNodes = cycle.slice(0, -1);
+            const minNode = [...cycleNodes].sort()[0];
+            const minIdx = cycleNodes.indexOf(minNode);
+            const rotated = [...cycleNodes.slice(minIdx), ...cycleNodes.slice(0, minIdx)].join('->');
+            if (!seenCycleKeys.has(rotated)) {
+              seenCycleKeys.add(rotated);
+              cycles.push(cycle);
+            }
           }
         }
       } else {
@@ -355,3 +400,109 @@ export function computeNodeCentralityMetrics(nodes = [], links = []) {
   });
   return metrics;
 }
+
+/**
+ * Detects fan-in input clusters connected to transaction hubs.
+ * Returns a Map of txId -> { txId, inputCount, inputs: Node[], totalBtc: number }
+ */
+export function getCollapsibleInputClusters(nodes = [], links = [], minClusterSize = 3) {
+  const nodeMap = new Map(nodes.map(n => [n.id, n]));
+  const txInputs = new Map();
+
+  links.forEach(l => {
+    const src = typeof l.source === 'object' ? l.source.id : l.source;
+    const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+    // An input is feeding into a tx hub
+    if (tgt.startsWith('tx_') && (src.startsWith('in_') || nodeMap.get(src)?.type === 'hop')) {
+      if (!txInputs.has(tgt)) txInputs.set(tgt, []);
+      const srcNode = nodeMap.get(src);
+      if (srcNode) txInputs.get(tgt).push(srcNode);
+    }
+  });
+
+  const collapsible = new Map();
+  for (const [txId, inNodes] of txInputs.entries()) {
+    if (inNodes.length >= minClusterSize) {
+      const totalBtc = inNodes.reduce((acc, n) => acc + parseBtcAmount(n.balance), 0);
+      collapsible.set(txId, {
+        txId,
+        inputCount: inNodes.length,
+        inputs: inNodes,
+        totalBtc: parseFloat(totalBtc.toFixed(4))
+      });
+    }
+  }
+
+  return collapsible;
+}
+
+/**
+ * Transforms graph nodes and links by collapsing multi-input clusters into consolidated entity badges.
+ */
+export function collapseGraphClusters(nodes = [], links = [], options = {}) {
+  const { minClusterSize = 3, collapsedTxIds = null, collapseAll = true } = options;
+  const clusters = getCollapsibleInputClusters(nodes, links, minClusterSize);
+  
+  if (clusters.size === 0) {
+    return { nodes: [...nodes], links: [...links], clusterMap: clusters, isCollapsed: false };
+  }
+
+  const toCollapse = new Set();
+  clusters.forEach((_info, txId) => {
+    if (collapseAll || (collapsedTxIds && collapsedTxIds.has(txId))) {
+      toCollapse.add(txId);
+    }
+  });
+
+  if (toCollapse.size === 0) {
+    return { nodes: [...nodes], links: [...links], clusterMap: clusters, isCollapsed: false };
+  }
+
+  const nodesToRemove = new Set();
+  const newClusterNodes = [];
+  const newClusterLinks = [];
+
+  toCollapse.forEach(txId => {
+    const cluster = clusters.get(txId);
+    cluster.inputs.forEach(n => nodesToRemove.add(n.id));
+
+    const clusterNodeId = `cluster_${txId}`;
+    newClusterNodes.push({
+      id: clusterNodeId,
+      type: 'cluster',
+      label: `Cluster (${cluster.inputCount} Inputs)`,
+      entityName: `CIOH Cluster (${cluster.inputCount} Addrs)`,
+      balance: `${cluster.totalBtc} BTC`,
+      isCollapsedCluster: true,
+      subNodeIds: cluster.inputs.map(n => n.id),
+      subNodes: cluster.inputs,
+      targetTxId: txId,
+      details: {
+        addressCount: cluster.inputCount,
+        totalBalance: `${cluster.totalBtc} BTC`,
+        heuristics: 'CIOH Co-Spending Input Group (Collapsed)'
+      }
+    });
+
+    newClusterLinks.push({
+      source: clusterNodeId,
+      target: txId,
+      value: `${cluster.totalBtc} BTC`,
+      timestamp: 'Co-spent'
+    });
+  });
+
+  const filteredNodes = nodes.filter(n => !nodesToRemove.has(n.id));
+  const filteredLinks = links.filter(l => {
+    const src = typeof l.source === 'object' ? l.source.id : l.source;
+    return !nodesToRemove.has(src);
+  });
+
+  return {
+    nodes: [...newClusterNodes, ...filteredNodes],
+    links: [...newClusterLinks, ...filteredLinks],
+    clusterMap: clusters,
+    isCollapsed: true
+  };
+}
+

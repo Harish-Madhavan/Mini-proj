@@ -145,8 +145,7 @@ describe('trace branch behavior', () => {
     expect(res.meta.stats.depthReached).toBe(4);
   });
 
-  it('refines ambiguous unspent end receivers with chain data', async () => {
-    const ROOT = 'd'.repeat(64);
+  it('refines ambiguous unspent end receivers with chain data', async () => {    const ROOT = 'd'.repeat(64);
     const RECV = 'bc1qrecv1111111111111111111111111';
     const root = txShape({
       txid: ROOT,
@@ -167,5 +166,39 @@ describe('trace branch behavior', () => {
     expect(node).toBeDefined();
     expect(node.label).toContain('End receiver');
     expect(node.details.heuristicScore).toBeGreaterThan(1.0);
+  });
+
+  it('follows spent branches past a heavy fan-in root (seizure-sweep shape)', async () => {
+    // e60887… shape: 150 inputs collapse into a spent branch + an unspent
+    // terminal. Input leaves must not spend the node budget, or the trace
+    // halts at depth 0 and the user only ever sees the root transaction.
+    const ROOT = 'd'.repeat(64);
+    const CHILD = 'e'.repeat(64);
+    const ins = Array.from({ length: 150 }, (_, i) => [`bc1qin${String(i).padStart(3, '0')}1111111111111111`, 100000]);
+    const root = txShape({
+      txid: ROOT,
+      ins,
+      outs: [['bc1qsmall11111111111111111111111', 5000000], ['bc1qgov11111111111111111111111111', 9990000]],
+    });
+    const child = txShape({
+      txid: CHILD,
+      ins: [['bc1qsmall11111111111111111111111', 5000000]],
+      outs: [['bc1qend11111111111111111111111111', 4999000]],
+    });
+    stubRoutes([
+      [`/tx/${ROOT}/outspends`, [
+        { spent: true, txid: CHILD, status: { confirmed: true, block_height: 800001 } },
+        { spent: false },
+      ]],
+      [`/tx/${ROOT}`, root],
+      [`/tx/${CHILD}/outspends`, [{ spent: false }]],
+      [`/tx/${CHILD}`, child],
+    ]);
+    const res = await traceEndReceiver(ROOT, 2);
+    // 153 total nodes (>120 cap) but the spent branch is still followed.
+    expect(res.nodes.length).toBeGreaterThan(120);
+    expect(res.nodes.some(n => n.id === `tx_${CHILD}`)).toBe(true);
+    expect(res.nodes.some(n => n.id === 'out_bc1qend11111111111111111111111111')).toBe(true);
+    expect(res.meta.haltReason).not.toBe('NODE_LIMIT');
   });
 });

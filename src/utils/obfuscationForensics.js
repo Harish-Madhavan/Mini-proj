@@ -11,6 +11,7 @@ import { scanCaseStructuring } from './structuringAnalysis';
 import { exchangeDepositConfidence } from './traceHeuristics';
 import { parseBtcAmount } from './forensicUtils';
 import { analyzeCaseCrossChainActivity } from './crossChainForensics';
+import { SWEEP_CONFIG } from '../constants/config';
 
 // Known bridge/swap router fingerprints & prefixes
 export const KNOWN_SWAP_ROUTERS = [
@@ -224,9 +225,11 @@ export function scanCrossChainBridgeActivity(nodes = []) {
 
 /**
  * Inspects a raw transaction for a consolidation sweep: many inputs collapsing
- * into a single output. When that output scores as custodial, the operator is
- * aggregating dispersed proceeds for imminent fiat cash-out — the highest
- * urgency pre-seizure signal in the toolkit.
+ * into a single output — or into a DOMINANT output alongside one small
+ * payout/change branch (N-in-2-out, e.g. the Feb-2022 Bitfinex 592-in-2-out
+ * 10,000 BTC seizure sweeps). When the swept output scores as custodial, the
+ * operator is aggregating dispersed proceeds for imminent fiat cash-out — the
+ * highest urgency pre-seizure signal in the toolkit.
  */
 export function detectConsolidationSweep(tx) {
   const empty = { isSweep: false, inputCount: 0, sweptBtc: '0.0000', exchangeConf: 0, cashoutUrgency: 'none', confidence: 0 };
@@ -234,28 +237,78 @@ export function detectConsolidationSweep(tx) {
 
   const inputs = tx.vin.filter(v => (v.prevout?.value || 0) > 0);
   const valueOutputs = tx.vout.filter(o => (o.value || 0) > 0);
-  if (inputs.length < 4 || valueOutputs.length !== 1) return empty;
+  if (inputs.length < SWEEP_CONFIG.MIN_INPUTS) return empty;
 
   const inputSum = (tx.vin || []).reduce((s, v) => s + (v.prevout?.value || 0), 0);
-  const swept = valueOutputs[0].value || 0;
-  // A real sweep delivers ~all input value (minus fee) to one output
-  if (inputSum <= 0 || swept < inputSum * 0.8) return empty;
+  if (inputSum <= 0) return empty;
 
-  const out = valueOutputs[0];
-  const addr = out.scriptpubkey_address || '';
-  const exchangeConf = exchangeDepositConfidence(addr, out.scriptpubkey_type || '', { spent: false });
-  const isCustodialCashout = exchangeConf > 0.4;
-  const confidence = Math.min(95, 55 + Math.min(25, (inputs.length - 4) * 6) + (isCustodialCashout ? 15 : 0));
-
-  return {
-    isSweep: true,
-    inputCount: inputs.length,
-    sweptBtc: (swept / 1e8).toFixed(4),
-    sweptSats: swept,
-    exchangeConf: parseFloat(exchangeConf.toFixed(2)),
-    cashoutUrgency: isCustodialCashout ? 'IMMINENT' : 'WATCH',
-    confidence,
+  const custodialConfidence = (inputCount) => Math.min(
+    SWEEP_CONFIG.MAX_CONFIDENCE,
+    SWEEP_CONFIG.BASE_CONFIDENCE
+      + Math.min(SWEEP_CONFIG.MAX_INPUT_BONUS, (inputCount - SWEEP_CONFIG.MIN_INPUTS) * SWEEP_CONFIG.INPUT_CONFIDENCE_STEP)
+  );
+  const scoreCustodial = (addr, scriptType, base) => {
+    const exchangeConf = exchangeDepositConfidence(addr, scriptType || '', { spent: false });
+    const isCustodialCashout = exchangeConf > 0.4;
+    return {
+      exchangeConf,
+      isCustodialCashout,
+      confidence: Math.min(SWEEP_CONFIG.MAX_CONFIDENCE, base + (isCustodialCashout ? SWEEP_CONFIG.CUSTODIAL_BONUS : 0)),
+    };
   };
+
+  // Classic lane: everything (minus fee) lands on one output.
+  if (valueOutputs.length === 1) {
+    const swept = valueOutputs[0].value || 0;
+    // A real sweep delivers ~all input value (minus fee) to one output
+    if (swept < inputSum * SWEEP_CONFIG.DOMINANT_INPUT_SHARE) return empty;
+
+    const out = valueOutputs[0];
+    const scored = scoreCustodial(out.scriptpubkey_address || '', out.scriptpubkey_type, custodialConfidence(inputs.length));
+
+    return {
+      isSweep: true,
+      inputCount: inputs.length,
+      sweptBtc: (swept / 1e8).toFixed(4),
+      sweptSats: swept,
+      exchangeConf: parseFloat(scored.exchangeConf.toFixed(2)),
+      cashoutUrgency: scored.isCustodialCashout ? 'IMMINENT' : 'WATCH',
+      confidence: scored.confidence,
+      shape: 'single-out',
+    };
+  }
+
+  // Dominant-output lane: 2 value-bearing outputs where one carries ~all
+  // input value (minus fee) and the other is a small payout/fee branch.
+  // The share gate mirrors the single-out lane, so balanced splits
+  // still reject while 99%+ consolidations flag.
+  if (valueOutputs.length === 2) {
+    const sorted = [...valueOutputs].sort((a, b) => (b.value || 0) - (a.value || 0));
+    const dominant = sorted[0].value || 0;
+    const secondary = sorted[1].value || 0;
+    if (dominant < inputSum * SWEEP_CONFIG.DOMINANT_INPUT_SHARE) return empty;
+    if (secondary <= 0 || dominant < secondary * SWEEP_CONFIG.DOMINANT_OUTPUT_RATIO) return empty;
+
+    const out = sorted[0];
+    const scored = scoreCustodial(out.scriptpubkey_address || '', out.scriptpubkey_type, custodialConfidence(inputs.length));
+    // Slightly below the single-out lane: the side branch adds ambiguity.
+    const confidence = Math.max(SWEEP_CONFIG.MIN_CONFIDENCE, scored.confidence - SWEEP_CONFIG.DOMINANT_TWO_OUT_HAIRCUT);
+
+    return {
+      isSweep: true,
+      inputCount: inputs.length,
+      sweptBtc: (dominant / 1e8).toFixed(4),
+      sweptSats: dominant,
+      secondarySats: secondary,
+      secondaryBtc: (secondary / 1e8).toFixed(4),
+      exchangeConf: parseFloat(scored.exchangeConf.toFixed(2)),
+      cashoutUrgency: scored.isCustodialCashout ? 'IMMINENT' : 'WATCH',
+      confidence,
+      shape: 'dominant-2-out',
+    };
+  }
+
+  return empty;
 }
 
 /**
@@ -289,8 +342,13 @@ export function scanCaseSweeps(nodes = [], links = []) {
     const inSum = ins.reduce((s, e) => s + e.sats, 0);
     const outSum = outs.reduce((s, e) => s + e.sats, 0);
     // Consolidation shape: fan-in of 4+, single onward output (or terminal),
-    // value preserved through the node (minus fees).
-    if (ins.length >= 4 && outs.length <= 1 && inSum > 0 && outSum >= inSum * 0.8) {
+    // value preserved through the node (minus fees). Dominant-2-out lane:
+    // two onward outputs where the largest carries ~all input value (the
+    // Bitfinex 592-in-2-out seizure shape) — balanced splits still reject.
+    const dominantOut = outs.length > 0 ? Math.max(...outs.map(e => e.sats)) : 0;
+    const isSingleOut = outs.length <= 1 && inSum > 0 && outSum >= inSum * SWEEP_CONFIG.DOMINANT_INPUT_SHARE;
+    const isDominantTwoOut = outs.length === 2 && inSum > 0 && dominantOut >= inSum * SWEEP_CONFIG.DOMINANT_INPUT_SHARE && dominantOut >= (outSum - dominantOut) * SWEEP_CONFIG.DOMINANT_OUTPUT_RATIO;
+    if (ins.length >= SWEEP_CONFIG.MIN_INPUTS && (isSingleOut || isDominantTwoOut)) {
       const kyc = n.details?.kycStatus || '';
       const custodial = /IDENTITY|VERIFIED|EXCHANGE|DEPOSIT/i.test(kyc) || /exchange|gateway/i.test(n.entityName || '');
       sweeps.push({
@@ -299,6 +357,7 @@ export function scanCaseSweeps(nodes = [], links = []) {
         consolidatedBtc: (Math.max(inSum, outSum) / 1e8).toFixed(4),
         custodial,
         cashoutUrgency: custodial ? 'IMMINENT' : 'WATCH',
+        shape: isDominantTwoOut ? 'dominant-2-out' : 'single-out',
       });
     }
   });

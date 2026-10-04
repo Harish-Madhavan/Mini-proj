@@ -99,6 +99,26 @@ describe('clusteringAlgorithms', () => {
       expect(analysis.coSpentTransactions.length).toBe(2);
       expect(analysis.clustersCount).toBe(2); // ['addr_1', 'addr_2', 'addr_3'] and ['addr_solo']
     });
+
+    it('marks zero-evidence pools as unproven with low confidence', () => {
+      const analysis = computeAddressClusters(['addr_a', 'addr_b'], []);
+      expect(analysis.hasEvidence).toBe(false);
+      expect(analysis.confidenceScore).toBeLessThanOrEqual(45);
+      expect(analysis.heuristicsApplied.join(' ')).toMatch(/No joint transactions/i);
+    });
+
+    it('excludes CoinJoin-style mixes from co-spend linkage', () => {
+      const addresses = ['addr_1', 'addr_2'];
+      const mixTx = {
+        txid: 'tx_mix',
+        vin: Array.from({ length: 6 }, (_, i) => ({ prevout: { scriptpubkey_address: i % 2 ? 'addr_2' : 'addr_1' } })),
+        vout: Array.from({ length: 6 }, () => ({ value: 10000000 })),
+      };
+      const analysis = computeAddressClusters(addresses, [mixTx]);
+      expect(analysis.coSpentTransactions.length).toBe(0);
+      expect(analysis.skippedCoinJoinTxs).toBe(1);
+      expect(analysis.clustersCount).toBe(2);
+    });
   });
 
   describe('estimatePoolReceived', () => {
@@ -158,6 +178,40 @@ describe('clusteringAlgorithms', () => {
 
       const peeling = detectPeelingChain(normalTxs);
       expect(peeling.isPeelingChain).toBe(false);
+    });
+
+    it('deduplicates transactions to prevent inflated hop counts', () => {
+      const mockTxs = [
+        { txid: 'hop1', vout: [{ value: 100000 }, { value: 900000 }] },
+        { txid: 'hop1', vout: [{ value: 100000 }, { value: 900000 }] }, // duplicate
+        { txid: 'hop2', vout: [{ value: 90000 }, { value: 810000 }] },
+      ];
+
+      const peeling = detectPeelingChain(mockTxs);
+      expect(peeling.hopCount).toBe(2);
+    });
+  });
+
+  describe('transaction deduplication', () => {
+    it('deduplicates transactions in computeAddressClusters to prevent double-counting', () => {
+      const addresses = ['addr_1', 'addr_2'];
+      const duplicateTx = {
+        txid: 'tx_multispend_dup',
+        vin: [
+          { prevout: { scriptpubkey_address: 'addr_1' } },
+          { prevout: { scriptpubkey_address: 'addr_2' } }
+        ]
+      };
+
+      const analysis = computeAddressClusters(addresses, [duplicateTx, duplicateTx]);
+      expect(analysis.coSpentTransactions.length).toBe(1);
+    });
+
+    it('deduplicates transactions in estimatePoolReceived to prevent balance inflation', () => {
+      const tx = { txid: 'tx1', vout: [{ scriptpubkey_address: 'addr_1', value: 1000000 }] };
+      const r = estimatePoolReceived(['addr_1'], [tx, tx]);
+      expect(r.totalSats).toBe(1000000);
+      expect(r.observedTxCount).toBe(1);
     });
   });
 });

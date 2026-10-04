@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import GraphCanvas from './graph/GraphCanvas';
 import MetadataSidebar from './graph/MetadataSidebar';
 import TransactionTimeline from './graph/TransactionTimeline';
 import { useCase } from '../hooks/useCase';
 
-import { computeLayeredGraphLayout } from '../utils/graphAlgorithms';
+import { computeLayeredGraphLayout, collapseGraphClusters } from '../utils/graphAlgorithms';
 
 export default function GraphExplorer() {
   const { 
@@ -19,6 +19,7 @@ export default function GraphExplorer() {
   const [selectedNode, setSelectedNode] = useState(null);
   const [highlightReceiver, setHighlightReceiver] = useState(false);
   const [isolatedNodeId, setIsolatedNodeId] = useState(null);
+  const [isClusterCollapsed, setIsClusterCollapsed] = useState(false);
   
   // Interactive Pan and Zoom States
   const [zoom, setZoom] = useState(1);
@@ -52,14 +53,40 @@ export default function GraphExplorer() {
     setPlaybackStep(null);
   }, [activeCase]);
 
+  // Compute cluster-collapsed or full graph
+  const { displayNodes, displayLinks } = useMemo(() => {
+    if (!activeCase?.nodes?.length) return { displayNodes: [], displayLinks: [] };
+    if (!isClusterCollapsed) {
+      return { displayNodes: activeCase.nodes, displayLinks: activeCase.links || [] };
+    }
+    const result = collapseGraphClusters(activeCase.nodes, activeCase.links || [], { minClusterSize: 3, collapseAll: true });
+    return {
+      displayNodes: result.nodes,
+      displayLinks: result.links
+    };
+  }, [activeCase, isClusterCollapsed]);
+
+  // If active selection was condensed into a cluster, select parent cluster
+  useEffect(() => {
+    if (isClusterCollapsed && selectedNode) {
+      const exists = displayNodes.some(n => n.id === selectedNode.id);
+      if (!exists) {
+        const parentCluster = displayNodes.find(n => n.isCollapsedCluster && n.subNodeIds?.includes(selectedNode.id));
+        if (parentCluster) {
+          setSelectedNode(parentCluster);
+        }
+      }
+    }
+  }, [isClusterCollapsed, displayNodes, selectedNode]);
+
   // Flow Playback Timer
   useEffect(() => {
-    if (!isPlaying || !activeCase?.links?.length) return;
+    if (!isPlaying || !displayLinks.length) return;
 
     const interval = setInterval(() => {
       setPlaybackStep(prev => {
         const next = prev === null ? 0 : prev + 1;
-        if (next >= activeCase.links.length) {
+        if (next >= displayLinks.length) {
           setIsPlaying(false);
           return null;
         }
@@ -68,12 +95,12 @@ export default function GraphExplorer() {
     }, 1400);
 
     return () => clearInterval(interval);
-  }, [isPlaying, activeCase]);
+  }, [isPlaying, displayLinks]);
 
   if (!activeCase) return <div style={{ color: 'var(--text-secondary)' }}>No case selected.</div>;
 
   // Precompute layered layout
-  const computedLayout = computeLayeredGraphLayout(activeCase.nodes || [], activeCase.links || []);
+  const computedLayout = computeLayeredGraphLayout(displayNodes, displayLinks);
 
   // Dynamic layout generator with custom drag coordinates support
   const getNodeCoords = (nodeId) => {
@@ -86,11 +113,17 @@ export default function GraphExplorer() {
     return { x: 380, y: 180 };
   };
 
+  const effectiveCase = {
+    ...activeCase,
+    nodes: displayNodes,
+    links: displayLinks
+  };
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <div className="responsive-split-grid" style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: '1.5rem', minHeight: '500px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+      <div className="responsive-split-grid" style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: '2rem', minHeight: '540px' }}>
         <GraphCanvas
-          activeCase={activeCase}
+          activeCase={effectiveCase}
           selectedNode={selectedNode}
           highlightReceiver={highlightReceiver}
           setHighlightReceiver={setHighlightReceiver}
@@ -122,19 +155,23 @@ export default function GraphExplorer() {
           isLoadingLive={isLoadingLive}
           onSelectNode={setSelectedNode}
           onSelectTab={setActiveTab}
+          isClusterCollapsed={isClusterCollapsed}
+          setIsClusterCollapsed={setIsClusterCollapsed}
         />
         <MetadataSidebar
           selectedNode={selectedNode}
-          activeCase={activeCase}
+          activeCase={effectiveCase}
           isolatedNodeId={isolatedNodeId}
           onToggleIsolate={(nodeId) => setIsolatedNodeId(prev => prev === nodeId ? null : nodeId)}
           onSelectTab={setActiveTab}
           onExpandAddress={handleExpandAddress}
           onAddNote={handleAddCaseNote}
           onDeleteNote={handleDeleteCaseNote}
+          setIsClusterCollapsed={setIsClusterCollapsed}
+          onSelectNode={setSelectedNode}
         />
       </div>
-      <TransactionTimeline activeCase={activeCase} />
+      <TransactionTimeline activeCase={effectiveCase} />
     </div>
   );
 }

@@ -1,11 +1,16 @@
 /**
- * AegisTrace Verified Forensic Test Corpus
+ * AegisTrace Forensic Reference List — KNOWN TRANSACTION IDS (REFERENCE ONLY)
  *
- * Every entry below is a REAL Bitcoin mainnet transaction/address, verified
- * live against Blockstream + Mempool.space gateways (shape, block height and
- * spend status confirmed on-chain — not taken on trust from literature).
- * Each exercises a distinct capability of the tracing system:
+ * This file is the investigator's personal reference notebook: real Bitcoin
+ * mainnet transaction/address identifiers once verified live against
+ * Blockstream + Mempool.space gateways. Nothing in the application reads
+ * this file at runtime — no Dashboard samples, no tracing shortcuts, no
+ * scoring hints. Every trace is computed live from gateway data for
+ * whatever identifier the investigator pastes in. Only
+ * src/utils/forensicCorpus.test.js imports this file, solely to check the
+ * reference list itself is well-formed.
  *
+ * Shape key:
  * - genesis coinbase  → coinbase-input handling, unspendable early-format output
  * - first-tx          → public-key identity (change reuse vs fresh payment) + dwell timing
  * - pizza purchase    → single-output identity (131 funder inputs, one fresh round output)
@@ -72,8 +77,8 @@ export const FORENSIC_CORPUS = [
     value: '1HB5XMLmzFVj8ALj6mfBsbifRoD4miY36v',
     typology: 'Rich multi-year history',
     block: null,
-    tests: 'Address-trace path (latest-tx forward trace across mixed historic wallet activity)',
-    expectation: 'Latest activity traced; batch spends and peel shapes resolve per-output',
+    tests: 'Address-trace path (most-significant recent movement traced; dust pages skipped)',
+    expectation: 'Largest significant movement traced; batch spends and peel shapes resolve per-output',
   },
   {
     key: 'ransom-sweep',
@@ -104,6 +109,56 @@ export const FORENSIC_CORPUS = [
     block: 478795,
     tests: 'Gather-then-split in one transaction (8.73 BTC in, 1.23M-sat payout + 8.72 BTC remainder)',
     expectation: 'Remainder → change step via dominant-share rule; payout resolved independently',
+  },
+  {
+    key: 'bitfinex-gov-seizure',
+    label: 'Bitfinex Seizure Wallet (DOJ 2022)',
+    kind: 'address',
+    value: 'bc1qazcm763858nkj2dj986etajv6wquslv8uxwczt',
+    typology: 'Government consolidation wallet (183 funding txs, ~94,643 BTC, 0 spends)',
+    block: 721292,
+    tests: 'Reference: heavy fan-in seizure sink; cross-check aggregator profiling',
+    expectation: 'Reference only — trace live; expect unspent aggregator holding ~94,643.48 BTC',
+  },
+  {
+    key: 'bitfinex-sweep-592',
+    label: 'Bitfinex Sweep (592→2, 10k BTC)',
+    kind: 'tx',
+    value: 'e6088723889de70fa985e7b8c012c77ea693a6ef9379fb26a951a2bb5c722525',
+    typology: 'Heavy multi-input consolidation (592 inputs, 10,000 BTC + 4.52 BTC outputs)',
+    block: 721292,
+    tests: 'Reference: heavy multi-input capacity probe for live tracing',
+    expectation: 'Reference only — trace live; expect dominant-2-out sweep and a followed 4.52 BTC branch',
+  },
+  {
+    key: 'silkroad-gov-seizure',
+    label: 'Silk Road Seizure Wallet (FBI 2020)',
+    kind: 'address',
+    value: 'bc1qa5wkgaew2dkv56kfvj49j0av5nml45x9ek9hz6',
+    typology: 'Government consolidation wallet (189 funding txs, ~69,370.18 BTC, 0 spends)',
+    block: 655283,
+    tests: 'Reference: unspent government sink for live-trace comparison',
+    expectation: 'Reference only — trace live; expect unspent aggregator holding ~69,370.18 BTC',
+  },
+  {
+    key: 'silkroad-seizure-move',
+    label: 'Silk Road Seizure Move (69,369 BTC)',
+    kind: 'tx',
+    value: '3f036ff88bb851b57a1e28780dbce35a6457a8b57995c095b55b3b0cf48ba9fd',
+    typology: 'Single-output identity seizure (1-in-1-out, 69,369.16 BTC, 1HQ3→FBI)',
+    block: 655283,
+    tests: 'Reference: single-output identity probe for live tracing',
+    expectation: 'Reference only — trace live; expect high-confidence payment hop, no change split',
+  },
+  {
+    key: 'silkroad-hacker-cluster',
+    label: 'Silk Road Hacker Cluster (1HQ3)',
+    kind: 'address',
+    value: '1HQ3Go3ggs8pFnXuHVHRytPCq5fGG8Hbhx',
+    typology: 'Hacker consolidation wallet (274 txs, ~208,210 BTC lifetime in, converges 1BAD+1BBq)',
+    block: 655283,
+    tests: 'Reference: dust-heavy address for significant-movement picker checks',
+    expectation: 'Reference only — trace live; newest pages are dust, significance lies deeper',
   },
 ];
 

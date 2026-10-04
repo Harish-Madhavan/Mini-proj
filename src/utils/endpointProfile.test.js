@@ -37,6 +37,17 @@ describe('classifyEndpointActivity', () => {
     expect(r.profile).toBe('DORMANT_HOLDER');
   });
 
+  it('detects active mempool transactions', () => {
+    const r = classifyEndpointActivity({
+      chain_stats: { funded_txo_count: 2, funded_txo_sum: 500000, spent_txo_count: 0, spent_txo_sum: 0, tx_count: 2 },
+      mempool_stats: { funded_txo_count: 1, funded_txo_sum: 100000, spent_txo_count: 0, spent_txo_sum: 0, tx_count: 1 }
+    });
+    expect(r.hasMempoolActivity).toBe(true);
+
+    const idle = classifyEndpointActivity(summary({ funded_txo_count: 1, funded_txo_sum: 100, spent_txo_count: 0, spent_txo_sum: 0, tx_count: 1 }));
+    expect(idle.hasMempoolActivity).toBe(false);
+  });
+
   it('returns UNPROFILED without chain stats', () => {
     expect(classifyEndpointActivity({}).profile).toBe('UNPROFILED');
     expect(classifyEndpointActivity(null).profile).toBe('UNPROFILED');

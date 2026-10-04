@@ -26,13 +26,18 @@ import {
   ArrowRightLeft
 } from 'lucide-react';
 import { useToast } from '../../hooks/useToast';
-import { decodeScriptPubkey } from '../../utils/scriptDecoder';
+import { decodeScriptPubkey, detectLightningAndHtlc } from '../../utils/scriptDecoder';
 import { computeNodeCentralityMetrics } from '../../utils/graphAlgorithms';
 import { calculateTaintMap, formatTaintPct, taintTier } from '../../utils/taintAnalysis';
 import { scanCaseSweeps } from '../../utils/obfuscationForensics';
 import { scanCaseStructuring } from '../../utils/structuringAnalysis';
 import { tagKnownEntity, getExplorerUrls } from '../../utils/knownEntities';
-import { parseCrossChainMemo, identifyBridgeEntity } from '../../utils/crossChainForensics';
+import { 
+  parseCrossChainMemo, 
+  identifyBridgeEntity, 
+  validateMultiChainAddress, 
+  KNOWN_STABLECOIN_CONTRACTS 
+} from '../../utils/crossChainForensics';
 import { useWatchlist } from '../../hooks/useWatchlist';
 import { useEndpointProfile } from '../../hooks/useEndpointProfile';
 import { getFeeTier } from '../../utils/traceHeuristics';
@@ -80,7 +85,9 @@ export default function MetadataSidebar({
   onSelectTab, 
   onExpandAddress, 
   onAddNote, 
-  onDeleteNote 
+  onDeleteNote,
+  setIsClusterCollapsed,
+  onSelectNode
 }) {
   const { showToast } = useToast();
   const { isWatched, toggle } = useWatchlist();
@@ -143,6 +150,28 @@ export default function MetadataSidebar({
     return target ? decodeScriptPubkey(target) : null;
   }, [details.address, details.opReturnHex, selectedNode]);
 
+  const lightningData = useMemo(() => {
+    if (!selectedNode) return null;
+    const nodeDetails = selectedNode.details || {};
+    const target = nodeDetails.scriptPubkeyHex || nodeDetails.redeemScript || nodeDetails.address || selectedNode.id;
+    const detected = detectLightningAndHtlc(target, nodeDetails.scriptStandard, selectedNode.balance);
+    if (detected) return detected;
+    if (nodeDetails.lightningInfo) return nodeDetails.lightningInfo;
+    if (selectedNode.type === 'lightning_channel') {
+      return {
+        isLightning: true,
+        isSubmarineSwap: false,
+        protocol: 'Lightning Payment Channel',
+        channelType: '2-of-2 Multisig Channel',
+        layer: 'Layer-2 (Lightning Network)',
+        riskLevel: 'HIGH',
+        description: 'Bidirectional payment channel funding. Transacts off-chain via payment routing.',
+        actionRecommendation: 'Flag as Layer-2 exit. Track node gossip announcements or cooperative close.'
+      };
+    }
+    return null;
+  }, [selectedNode]);
+
   const crossChainData = useMemo(() => {
     if (!selectedNode) return null;
     const nodeDetails = selectedNode.details || {};
@@ -158,6 +187,18 @@ export default function MetadataSidebar({
     const bridgeType = bridge?.type || 'Non-Custodial Liquidity Bridge';
     const explorerUrl = parsed?.explorerUrl || (destAddr?.startsWith('0x') ? `https://etherscan.io/address/${destAddr}` : destAddr?.startsWith('T') ? `https://tronscan.org/#/address/${destAddr}` : null);
 
+    let contractDetails = null;
+    let validatedNetwork = null;
+    if (destAddr) {
+      const v = validateMultiChainAddress(destAddr);
+      validatedNetwork = v.network;
+      if (v.network === 'Ethereum' || destChain.toLowerCase().includes('eth')) {
+        contractDetails = KNOWN_STABLECOIN_CONTRACTS.ETH_USDT;
+      } else if (v.network === 'Tron' || destChain.toLowerCase().includes('tron')) {
+        contractDetails = KNOWN_STABLECOIN_CONTRACTS.TRX_USDT;
+      }
+    }
+
     return {
       protocol,
       bridgeType,
@@ -166,7 +207,9 @@ export default function MetadataSidebar({
       targetAsset: asset,
       explorerUrl,
       rawMemo: parsed?.rawMemo || memo || null,
-      riskLevel: bridge?.riskLevel || 'HIGH'
+      riskLevel: bridge?.riskLevel || 'HIGH',
+      contractDetails,
+      validatedNetwork
     };
   }, [selectedNode]);
 
@@ -209,46 +252,104 @@ export default function MetadataSidebar({
             </h3>
           </div>
 
-          {/* Address / Reference Bar */}
-          <div style={{ backgroundColor: 'rgba(5, 8, 16, 0.9)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Address / reference</span>
-              <button
-                onClick={() => {
-                  const result = toggle(details.address);
-                  if (result === 'added') showToast('Address added to watchlist.', 'success');
-                  else if (result === 'removed') showToast('Address removed.', 'info');
-                  else if (result === 'full') showToast('Watchlist is full (100).', 'warning');
-                  else showToast('Only Bitcoin addresses can be watched.', 'warning');
-                }}
-                className="btn"
-                aria-pressed={watched}
-                aria-label={watched ? 'Remove from watchlist' : 'Add to watchlist'}
-                title={watched ? 'Remove from watchlist' : 'Add to watchlist'}
-                style={{ padding: '0.15rem 0.35rem', fontSize: '0.7rem', backgroundColor: watched ? 'rgba(245,158,11,0.15)' : undefined, color: watched ? '#f59e0b' : undefined, borderColor: watched ? 'rgba(245,158,11,0.4)' : undefined }}
-              >
-                <Star size={12} fill={watched ? 'currentColor' : 'none'} aria-hidden="true" /> {watched ? 'Watching' : 'Watch'}
-              </button>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
-              <span className="mono-addr" style={{ fontSize: '0.8rem', wordBreak: 'break-all', marginRight: '0.5rem' }}>{details.address}</span>
-              <button onClick={() => handleCopy(details.address)} aria-label="Copy reference" type="button" style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }} title="Copy Reference">
-                <Copy size={16} aria-hidden="true" />
-              </button>
-            </div>
-            {explorer && (
-              <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.5rem' }}>
-                <a href={explorer.mempool} target="_blank" rel="noopener noreferrer" className="btn btn-outline" style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', textDecoration: 'none' }} aria-label="Open in mempool.space"><ExternalLink size={12} aria-hidden="true" /> mempool.space</a>
-                <a href={explorer.blockstream} target="_blank" rel="noopener noreferrer" className="btn" style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', textDecoration: 'none' }} aria-label="Open in Blockstream"><ExternalLink size={12} aria-hidden="true" /> Blockstream</a>
+          {/* Address / Reference Bar OR Collapsed Cluster Inspector */}
+          {selectedNode.isCollapsedCluster ? (
+            <div style={{ backgroundColor: 'rgba(56, 189, 248, 0.08)', padding: '0.75rem', borderRadius: '6px', border: '1px solid rgba(56, 189, 248, 0.35)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.75rem', color: '#38bdf8', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <Layers size={13} /> Collapsed Input Cluster
+                </span>
+                {setIsClusterCollapsed && (
+                  <button
+                    onClick={() => {
+                      setIsClusterCollapsed(false);
+                      showToast("Cluster uncollapsed to individual inputs.", "info");
+                    }}
+                    className="btn btn-outline"
+                    style={{ fontSize: '0.68rem', padding: '0.15rem 0.45rem', borderColor: 'rgba(56, 189, 248, 0.4)', color: '#38bdf8' }}
+                  >
+                    Uncollapse
+                  </button>
+                )}
               </div>
-            )}
-            {knownTag && (
-              <div style={{ marginTop: '0.5rem', padding: '0.4rem 0.5rem', borderRadius: '4px', backgroundColor: knownTag.risk === 'high' ? 'rgba(239,68,68,0.12)' : 'rgba(59,130,246,0.08)', border: `1px solid ${knownTag.risk === 'high' ? 'rgba(239,68,68,0.3)' : 'rgba(59,130,246,0.2)'}`, fontSize: '0.7rem', display: 'flex', gap: '0.3rem', alignItems: 'flex-start' }}>
-                <Tag size={12} style={{ marginTop: '0.15rem', color: knownTag.risk === 'high' ? '#ef4444' : 'var(--primary)' }} aria-hidden="true" />
-                <div><strong>{knownTag.label}</strong> <span style={{ color: 'var(--text-muted)' }}>· {knownTag.note}</span></div>
+
+              <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
+                <strong>{selectedNode.subNodes?.length || selectedNode.details?.addressCount || '10+'}</strong> inputs grouped by Common-Input-Ownership Heuristic (CIOH) co-spent into hub <code style={{ color: '#fff', fontSize: '0.7rem' }}>{selectedNode.targetTxId}</code>.
               </div>
-            )}
-          </div>
+
+              {/* Scrollable list of addresses */}
+              <div style={{ marginTop: '0.2rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', maxHeight: '160px', overflowY: 'auto' }}>
+                {(selectedNode.subNodes || []).map((subNode, idx) => {
+                  const addr = subNode.details?.address || subNode.id;
+                  return (
+                    <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.35rem 0.45rem', backgroundColor: 'rgba(5, 8, 16, 0.75)', borderRadius: '4px', border: '1px solid var(--border-soft)', fontSize: '0.72rem' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                        <span className="mono-addr" style={{ color: '#cbd5e1', fontSize: '0.7rem' }}>
+                          {addr.length > 18 ? `${addr.slice(0, 10)}...${addr.slice(-6)}` : addr}
+                        </span>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>{subNode.balance}</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.3rem' }}>
+                        <button onClick={() => handleCopy(addr)} aria-label="Copy address" type="button" style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.1rem' }} title="Copy">
+                          <Copy size={12} />
+                        </button>
+                        {onExpandAddress && (
+                          <button onClick={() => onExpandAddress(addr)} className="btn btn-quiet" style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem' }} title="Trace Address">
+                            Trace
+                          </button>
+                        )}
+                        {onSelectNode && (
+                          <button onClick={() => onSelectNode(subNode)} className="btn btn-outline" style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem' }} title="Inspect Node">
+                            Inspect
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div style={{ backgroundColor: 'rgba(5, 8, 16, 0.9)', padding: '0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Address / reference</span>
+                <button
+                  onClick={() => {
+                    const result = toggle(details.address);
+                    if (result === 'added') showToast('Address added to watchlist.', 'success');
+                    else if (result === 'removed') showToast('Address removed.', 'info');
+                    else if (result === 'full') showToast('Watchlist is full (100).', 'warning');
+                    else showToast('Only Bitcoin addresses can be watched.', 'warning');
+                  }}
+                  className="btn"
+                  aria-pressed={watched}
+                  aria-label={watched ? 'Remove from watchlist' : 'Add to watchlist'}
+                  title={watched ? 'Remove from watchlist' : 'Add to watchlist'}
+                  style={{ padding: '0.15rem 0.35rem', fontSize: '0.7rem', backgroundColor: watched ? 'rgba(245,158,11,0.15)' : undefined, color: watched ? '#f59e0b' : undefined, borderColor: watched ? 'rgba(245,158,11,0.4)' : undefined }}
+                >
+                  <Star size={12} fill={watched ? 'currentColor' : 'none'} aria-hidden="true" /> {watched ? 'Watching' : 'Watch'}
+                </button>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
+                <span className="mono-addr" style={{ fontSize: '0.8rem', wordBreak: 'break-all', marginRight: '0.5rem' }}>{details.address}</span>
+                <button onClick={() => handleCopy(details.address)} aria-label="Copy reference" type="button" style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }} title="Copy Reference">
+                  <Copy size={16} aria-hidden="true" />
+                </button>
+              </div>
+              {explorer && (
+                <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.5rem' }}>
+                  <a href={explorer.mempool} target="_blank" rel="noopener noreferrer" className="btn btn-outline" style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', textDecoration: 'none' }} aria-label="Open in mempool.space"><ExternalLink size={12} aria-hidden="true" /> mempool.space</a>
+                  <a href={explorer.blockstream} target="_blank" rel="noopener noreferrer" className="btn" style={{ fontSize: '0.7rem', padding: '0.2rem 0.4rem', textDecoration: 'none' }} aria-label="Open in Blockstream"><ExternalLink size={12} aria-hidden="true" /> Blockstream</a>
+                </div>
+              )}
+              {knownTag && (
+                <div style={{ marginTop: '0.5rem', padding: '0.4rem 0.5rem', borderRadius: '4px', backgroundColor: knownTag.risk === 'high' ? 'rgba(239,68,68,0.12)' : 'rgba(59,130,246,0.08)', border: `1px solid ${knownTag.risk === 'high' ? 'rgba(239,68,68,0.3)' : 'rgba(59,130,246,0.2)'}`, fontSize: '0.7rem', display: 'flex', gap: '0.3rem', alignItems: 'flex-start' }}>
+                  <Tag size={12} style={{ marginTop: '0.15rem', color: knownTag.risk === 'high' ? '#ef4444' : 'var(--primary)' }} aria-hidden="true" />
+                  <div><strong>{knownTag.label}</strong> <span style={{ color: 'var(--text-muted)' }}>· {knownTag.note}</span></div>
+                </div>
+              )}
+            </div>
+          )}
 
           {centralityMetrics && (
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', fontSize: '0.75rem', padding: '0 0.1rem' }}>
@@ -409,6 +510,68 @@ export default function MetadataSidebar({
               </div>
             )}
 
+            {/* Lightning Network / HTLC Off-Ramp Forensics Card */}
+            {lightningData && (
+              <div style={{
+                marginTop: '0.5rem',
+                backgroundColor: 'rgba(250, 204, 21, 0.08)',
+                border: '1px solid rgba(250, 204, 21, 0.35)',
+                borderRadius: '6px',
+                padding: '0.75rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.4rem'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#facc15', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <Zap size={13} /> {lightningData.isSubmarineSwap ? 'Atomic Submarine Swap' : 'Lightning Off-Ramp'}
+                  </span>
+                  <span style={{
+                    fontSize: '0.65rem',
+                    padding: '0.1rem 0.35rem',
+                    borderRadius: '3px',
+                    backgroundColor: lightningData.riskLevel === 'CRITICAL' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                    color: lightningData.riskLevel === 'CRITICAL' ? '#ef4444' : '#f59e0b',
+                    fontWeight: 700
+                  }}>
+                    {lightningData.riskLevel || 'HIGH'}
+                  </span>
+                </div>
+
+                <div style={{ fontSize: '0.8rem', color: '#fff', fontWeight: 600 }}>
+                  {lightningData.protocol}
+                </div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  {lightningData.channelType} · {lightningData.layer}
+                </div>
+
+                <div style={{
+                  marginTop: '0.2rem',
+                  padding: '0.45rem',
+                  backgroundColor: 'rgba(5, 8, 16, 0.8)',
+                  borderRadius: '4px',
+                  border: '1px solid var(--border-color)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.25rem',
+                  fontSize: '0.72rem'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Forensic status:</span>
+                    <strong style={{ color: '#facc15' }}>{lightningData.isSubmarineSwap ? 'Layer-1 to LN Bridge' : 'Off-Chain Channel'}</strong>
+                  </div>
+                  <div style={{ color: '#cbd5e1', lineHeight: '1.4' }}>
+                    {lightningData.description}
+                  </div>
+                  {lightningData.actionRecommendation && (
+                    <div style={{ marginTop: '0.2rem', paddingTop: '0.25rem', borderTop: '1px solid rgba(255,255,255,0.06)', color: '#fbbf24', fontSize: '0.68rem' }}>
+                      <strong>Action:</strong> {lightningData.actionRecommendation}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Cross-Chain Bridge & Protocol Forensics Card */}
             {crossChainData && (
               <div style={{ 
@@ -473,6 +636,26 @@ export default function MetadataSidebar({
                           type="button" 
                           style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.1rem', flexShrink: 0 }} 
                           title="Copy destination"
+                        >
+                          <Copy size={13} aria-hidden="true" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {crossChainData.contractDetails && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', marginTop: '0.15rem', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '0.25rem' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>USDT Token Contract ({crossChainData.contractDetails.standard}):</span>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.3rem' }}>
+                        <span className="mono-addr" style={{ fontSize: '0.68rem', color: '#38bdf8', wordBreak: 'break-all' }}>
+                          {crossChainData.contractDetails.contractAddress}
+                        </span>
+                        <button 
+                          onClick={() => handleCopy(crossChainData.contractDetails.contractAddress)} 
+                          aria-label="Copy contract address" 
+                          type="button" 
+                          style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '0.1rem', flexShrink: 0 }} 
+                          title="Copy contract"
                         >
                           <Copy size={13} aria-hidden="true" />
                         </button>
@@ -582,7 +765,7 @@ export default function MetadataSidebar({
                 Prepare notice
               </button>
             </div>
-          ) : !selectedNode.id.startsWith('tx_') && onExpandAddress ? (
+          ) : !selectedNode.id.startsWith('tx_') && !selectedNode.isCollapsedCluster && details.address && onExpandAddress ? (
             <button
               onClick={() => onExpandAddress(details.address)}
               className="btn btn-outline"

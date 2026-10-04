@@ -37,6 +37,12 @@ describe('scriptDecoder', () => {
     const op = decodeScriptPubkey('6a48656c6c6f20426974636f696e');
     expect(op.type).toContain('OP_RETURN');
     expect(op.securityRating).toContain('Provably unspendable');
+    expect(op.decodedText).toBe('Hello Bitcoin');
+
+    // With standard pushdata length byte (0x0d = 13 bytes)
+    const opWithPush = decodeScriptPubkey('6a0d48656c6c6f20426974636f696e');
+    expect(opWithPush.decodedText).toBe('Hello Bitcoin');
+    expect(opWithPush.programLength).toBe('13 bytes');
   });
 
   it('decodes raw P2PK pubkey curve points', () => {

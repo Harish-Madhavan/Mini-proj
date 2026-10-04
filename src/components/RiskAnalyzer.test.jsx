@@ -67,7 +67,7 @@ describe('RiskAnalyzer Component', () => {
     expect(screen.getByText('Select a case first.')).toBeDefined();
   });
 
-  it('renders all 5 forensic dimensional meters', () => {
+  it('renders all 7 forensic dimensional meters', () => {
     useCaseModule.useCase.mockReturnValue({ activeCase: mockCase });
     render(<RiskAnalyzer />);
 
@@ -77,6 +77,8 @@ describe('RiskAnalyzer Component', () => {
     expect(screen.getByText('Destination')).toBeDefined();
     expect(screen.getByText('Velocity')).toBeDefined();
     expect(screen.getByText('Protocol / RBF')).toBeDefined();
+    expect(screen.getByText('Sweep hub')).toBeDefined();
+    expect(screen.getByText('Attribution')).toBeDefined();
   });
 
   it('toggles weights adjustment slider configuration panel', () => {

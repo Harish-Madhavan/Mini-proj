@@ -487,12 +487,13 @@ A forensic tool must be flawless in its mathematical computations. A single calc
 +-----------------------------------------------------------------------------------+
 |  [✓] Test Engine: Vitest 3.2 (Sub-second In-Memory Execution)                     |
 |  [✓] Test Suites: 21 Dedicated Forensic Suites Passed (100% Green)                |
-|  [✓] Unit Tests: 125 Individual Assertions Validating:                            |
+|  [✓] Unit Tests: 221 Automated Assertions across 33 Suites Validating:             |
 |      * Satoshi-level arithmetic correctness (no floating-point rounding bugs)     |
 |      * Taint propagation parity across FIFO, Haircut, and Poison models           |
 |      * DSU disjoint-set union path compression & cluster consolidation            |
 |      * SHA-256 cryptographic chain-of-custody hash verification                   |
-|      * Dual-gateway failover simulation and rate-limiting timeouts                |
+|      * Cross-chain bridge memo decoding & multi-chain destination extraction      |
+|      * Dual-gateway failover simulation and rate-limiting circuit breakers        |
 |  [✓] Linter: OxLint (Rust-based ultra-fast linter, zero undefined symbol tolerance)|
 |  [✓] Production Build: Pure ESM via Vite 8; zero server runtime vulnerabilities   |
 +-----------------------------------------------------------------------------------+
@@ -501,7 +502,7 @@ A forensic tool must be flawless in its mathematical computations. A single calc
 ---
 
 > 🎙️ **Speaker Notes:**  
-> *"In legal forensics, technical rigor is paramount. A single floating-point rounding error in JavaScript could invalidate evidence regarding seized funds. AegisTrace is built with strict Satoshi-level integer arithmetic. Our codebase has 21 comprehensive Vitest test suites comprising over 125 individual unit tests covering our 8-factor heuristics, DSU clustering, taint mathematics, and hash-chained custody ledgers. Our code adheres to OxLint's strict Rust-based linting standards, ensuring high performance, zero memory leaks, and total reproducibility."*
+> *"In legal forensics, technical rigor is paramount. A single floating-point rounding error in JavaScript could invalidate evidence regarding seized funds. AegisTrace is built with strict Satoshi-level integer arithmetic. Our codebase has 33 comprehensive Vitest test suites comprising 221 automated unit tests covering our 8-factor heuristics, DSU clustering, cross-chain bridge parsers, taint mathematics, and hash-chained custody ledgers. Our code adheres to OxLint's strict Rust-based linting standards, ensuring high performance, zero memory leaks, and total reproducibility."*
 
 ---
 
@@ -516,16 +517,15 @@ Duration: 1.0 min
 
 | Phase | Milestone | Technological Capability |
 |---|---|---|
-| **Phase 1 (Current)** | **Bitcoin Mainnet Complete** | Client-side tracing, 8-factor classification, DSU clustering, Section 65B. |
-| **Phase 2 (Q3 2026)** | **EVM & Smart Contract Tokens** | Tracing ERC-20 stablecoins (USDT / USDC) on Ethereum, Tron (TRC-20), and Polygon. |
-| **Phase 3 (Q4 2026)** | **Cross-Chain Bridge Heuristics** | Graph stitching across Thorchain, Wormhole, and centralized bridge swap routers. |
-| **Phase 4 (2027)** | **Local LLM Forensic Assistant** | Air-gapped on-device AI for generating natural-language court prosecution briefs. |
-| **Phase 5 (2027)** | **Hardware Security Module (HSM)** | Direct USB cryptographic token signing (e-Mudhra / FIPS-140) for Section 65B seals. |
+| **Phase 1 (Complete)** | **Bitcoin Mainnet Engine** | Client-side tracing, 8-factor classification, DSU clustering, Section 65B & 67 notices (221 tests). |
+| **Phase 2 (Q4 2026)** | **Encrypted Local Storage** | IndexedDB migration (unlimited capacity), AES-GCM at-rest vault encryption & private node RPC mode. |
+| **Phase 3 (Q1 2027)** | **Evidence Interoperability** | WebCrypto ECDSA/Ed25519 digital signing, STIX 2.1 intelligence sharing & Neo4j Cypher export. |
+| **Phase 4 (Q2 2027)** | **Advanced De-anonymization**| CoinJoin Knapsack subset-sum solver, Lightning Network HTLC detection, and live Tron/EVM USDT tracing. |
 
 ---
 
 > 🎙️ **Speaker Notes:**  
-> *"Looking ahead, our roadmap builds directly upon AegisTrace's modular foundation. In Phase 2, we are expanding our heuristic graph model to EVM chains and Tron TRC-20, which handle high volumes of illicit stablecoin transfers like USDT. In Phase 3, we address cross-chain bridges. In Phase 4, we plan to integrate lightweight, local air-gapped LLMs to synthesize complex graph topologies into automated narrative charge-sheets. AegisTrace is designed not just for today's Bitcoin cases, but as an evolving platform for the future of digital asset law enforcement."*
+> *"Looking ahead, our roadmap builds directly upon AegisTrace's modular foundation. In Phase 2, we are expanding our persistence layer to IndexedDB with zero-knowledge AES-GCM vault encryption and private RPC support for air-gapped labs. In Phase 3, we add WebCrypto ECDSA asymmetric digital signing and STIX 2.1 threat intelligence export for inter-agency coordination with CERT-In and Interpol. In Phase 4, we introduce CoinJoin subset-sum unmixing and live multi-chain token tracing across Tron and Ethereum. AegisTrace is designed not just for today's Bitcoin cases, but as an evolving platform for digital asset law enforcement."*
 
 ---
 
@@ -542,7 +542,7 @@ Duration: 1.0 min
 * **Zero-Trust OPSEC**: Runs 100% client-side; no suspect queries or case metadata are ever leaked to external commercial cloud providers.
 * **Mathematically Transparent**: Every score, taint satoshi, and cluster grouping is backed by explainable, open algorithms.
 * **Statutorily Compliant**: Bridges the critical gap between raw computer science and courtroom admissibility under the NDPS Act & Bharatiya Sakshya Adhiniyam.
-* **Production-Ready & Tested**: Powered by React 19, Vite 8, dual live mainnet gateways, and 125+ passing unit tests.
+* **Production-Ready & Tested**: Powered by React 19, Vite 8, dual live mainnet gateways, and 221 passing unit tests across 33 suites.
 
 ---
 

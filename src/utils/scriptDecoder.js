@@ -205,10 +205,34 @@ export function decodeScriptPubkey(hexOrAddress) {
   // Handle OP_RETURN null data
   if (trimmed.toUpperCase().startsWith('6A') || trimmed.toUpperCase().startsWith('OP_RETURN')) {
     const hexData = trimmed.replace(/^6a/i, '').replace(/^OP_RETURN\s*/i, '');
+    let payloadHex = hexData;
+
+    // Strip pushdata length prefix if present (standard scriptPubKeys have 6a followed by push length)
+    if (hexData.length >= 2) {
+      const firstByte = parseInt(hexData.slice(0, 2), 16);
+      const remainingBytes = (hexData.length - 2) / 2;
+      if (firstByte <= 75 && firstByte === remainingBytes) {
+        payloadHex = hexData.slice(2);
+      } else if (firstByte === 0x4c && hexData.length >= 4) { // OP_PUSHDATA1
+        const pushLen = parseInt(hexData.slice(2, 4), 16);
+        if (pushLen === (hexData.length - 4) / 2) {
+          payloadHex = hexData.slice(4);
+        }
+      } else if (firstByte === 0x4d && hexData.length >= 6) { // OP_PUSHDATA2
+        const pushLen = parseInt(hexData.slice(2, 4), 16) + (parseInt(hexData.slice(4, 6), 16) << 8);
+        if (pushLen === (hexData.length - 6) / 2) {
+          payloadHex = hexData.slice(6);
+        }
+      }
+    }
+
     let asciiText = '';
     try {
-      const bytes = hexData.match(/.{1,2}/g)?.map(b => parseInt(b, 16)) || [];
-      asciiText = bytes.map(b => (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.').join('');
+      const bytes = payloadHex.match(/.{1,2}/g)?.map(b => parseInt(b, 16)) || [];
+      const printable = bytes.map(b => (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.').join('');
+      if (printable.replace(/\./g, '').length >= 1) {
+        asciiText = printable;
+      }
     } catch {
       asciiText = '';
     }
@@ -218,11 +242,30 @@ export function decodeScriptPubkey(hexOrAddress) {
       standard: 'Data carrier standard',
       witnessVersion: 'Unspendable Script',
       hrp: 'Script Opcode 0x6a',
-      programLength: `${Math.floor(hexData.length / 2)} bytes`,
+      programLength: `${Math.floor(payloadHex.length / 2)} bytes`,
       asm: `OP_RETURN ${hexData}`,
       decodedText: asciiText || 'Binary / Non-ASCII payload',
       securityRating: 'Provably unspendable (removed from circulation)',
       spendRequirement: 'Cannot be spent. Used for timestamps, notary proofs, and metadata anchoring.'
+    };
+  }
+
+  // Check for Lightning Channel or Submarine Swap / HTLC script
+  const lightningHit = detectLightningAndHtlc(trimmed);
+  if (lightningHit) {
+    const tokens = disassembleScriptHex(trimmed);
+    const tokenAsm = tokens.map(t => t.isData ? `<${t.hex}>` : t.opcode).join(' ');
+    return {
+      type: lightningHit.isSubmarineSwap ? 'Submarine Swap HTLC (Layer-2 Cross-Hop)' : 'Lightning Channel (2-of-2 multisig)',
+      standard: lightningHit.layer,
+      witnessVersion: 'Layer-2 Off-Ramp Contract',
+      hrp: lightningHit.protocol,
+      programLength: `${Math.floor(trimmed.length / 2)} bytes`,
+      asm: tokenAsm || trimmed,
+      tokens,
+      lightningInfo: lightningHit,
+      securityRating: `${lightningHit.riskLevel} - Off-Chain Transit`,
+      spendRequirement: lightningHit.description
     };
   }
 
@@ -242,3 +285,73 @@ export function decodeScriptPubkey(hexOrAddress) {
     spendRequirement: 'Follows custom on-chain rules.'
   };
 }
+
+/**
+ * Detects Lightning Network channel funding (2-of-2 multisig) and Submarine Swap / HTLC contracts.
+ * Inspects raw script bytecode, ASM strings, or witness scripts.
+ *
+ * @param {string} scriptHexOrAsm - Hex bytecode or ASM representation
+ * @returns {Object|null} Lightning / HTLC detection details
+ */
+export function detectLightningAndHtlc(scriptHexOrAsm) {
+  if (!scriptHexOrAsm || typeof scriptHexOrAsm !== 'string') return null;
+  const raw = scriptHexOrAsm.trim();
+  const cleanHex = raw.replace(/^0x/i, '').toLowerCase();
+
+  // 1. Detect 2-of-2 Multisig Lightning Channel Funding
+  // ASM pattern: OP_2 <pubkey1> <pubkey2> OP_2 OP_CHECKMULTISIG
+  // Hex pattern: starts with 52 (OP_2) and ends with 52ae (OP_2 OP_CHECKMULTISIG)
+  const is2of2Asm = /OP_2\s+.*?\s+.*?\s+OP_2\s+OP_CHECKMULTISIG/i.test(raw);
+  const is2of2Hex = (cleanHex.startsWith('52') && cleanHex.endsWith('52ae')) ||
+                    (cleanHex.includes('5221') && cleanHex.endsWith('52ae'));
+
+  if (is2of2Asm || is2of2Hex) {
+    return {
+      isLightning: true,
+      isSubmarineSwap: false,
+      protocol: 'Lightning Channel',
+      channelType: '2-of-2 Multisig Funding',
+      layer: 'Layer-2 (Lightning Network)',
+      riskLevel: 'HIGH',
+      description: 'Funding transaction for a bidirectional Layer-2 Lightning Network channel. Funds transition off-chain.',
+      actionRecommendation: 'Flag as Layer-2 exit. Subpoena node pubkeys or track cooperative channel close.'
+    };
+  }
+
+  // 2. Submarine Swap / HTLC (Atomic Swaps: Boltz Exchange, Loop, SideShift LN)
+  // Characteristic opcodes:
+  // - Hashlock: OP_HASH160 (or OP_SHA256) + OP_EQUAL
+  // - Branching: OP_IF / OP_ELSE / OP_ENDIF
+  // - Timelock: OP_CHECKLOCKTIMEVERIFY (b1) or OP_CHECKSEQUENCEVERIFY (b2)
+  const hasHashLock = /OP_HASH160|OP_SHA256|a9|a8/i.test(raw);
+  const hasTimeLock = /OP_CHECKLOCKTIMEVERIFY|OP_CHECKSEQUENCEVERIFY|b1|b2/i.test(raw);
+  const hasBranching = /OP_IF|OP_ELSE|OP_ENDIF|63|67|68/i.test(raw);
+
+  const isSubmarineSwapAsm = /OP_HASH160.*OP_EQUAL.*OP_IF.*OP_ELSE.*OP_CHECKLOCKTIMEVERIFY/is.test(raw) ||
+                            /OP_SIZE.*OP_EQUALVERIFY.*OP_HASH160.*OP_EQUAL/is.test(raw);
+
+  const isSubmarineSwapHex = (cleanHex.includes('a9') && cleanHex.includes('b1')) ||
+                             (cleanHex.includes('63') && cleanHex.includes('67') && cleanHex.includes('b1'));
+
+  if ((hasHashLock && hasTimeLock && hasBranching) || isSubmarineSwapAsm || isSubmarineSwapHex) {
+    const isBoltz = /boltz/i.test(raw) || (cleanHex.includes('8763') && cleanHex.includes('b175'));
+    const protocolName = isBoltz ? 'Boltz Submarine Swap' : 'Submarine Swap HTLC (Layer-2 Cross-Hop)';
+
+    return {
+      isLightning: true,
+      isSubmarineSwap: true,
+      protocol: protocolName,
+      channelType: 'Hash Time-Locked Contract (HTLC)',
+      layer: 'Atomic Layer-1 to Layer-2 Bridge',
+      riskLevel: 'CRITICAL',
+      description: 'Atomic cross-layer swap contract (e.g. Boltz / Loop). Swaps on-chain UTXO for instant Lightning satoshis.',
+      actionRecommendation: 'Urgent: Funds bridged directly into Lightning Network off-chain balance.'
+    };
+  }
+
+  return null;
+}
+
+export const classifyScriptTemplate = decodeScriptPubkey;
+
+

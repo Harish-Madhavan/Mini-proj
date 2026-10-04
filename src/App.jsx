@@ -74,86 +74,64 @@ function AppContent() {
 
       {/* Top Banner Header */}
       <header className="header-banner" role="banner">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
           <div className="brand-badge">
-            <Radio size={20} />
+            <Radio size={16} />
           </div>
           <div>
-            <h1 style={{ fontSize: '1.25rem', fontWeight: 700, letterSpacing: '-0.02em', color: '#fff' }}>
-              AEGISTRACE
+            <h1 style={{ fontSize: '0.95rem', fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--text-primary)' }}>
+              AegisTrace
             </h1>
-            <p style={{ fontSize: '0.725rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-              <span>NCB blockchain forensics</span>
-              <span>•</span>
+            <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '1px' }}>
               {liveMode ? (
-                <span style={{ color: 'var(--risk-low)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <span className="live-beacon"></span> Mainnet Active
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <span className="live-beacon"></span> Live
                 </span>
               ) : (
-                <span style={{ color: 'var(--risk-medium)', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-                  <span className="live-beacon" style={{ backgroundColor: '#f59e0b' }}></span> Local Sandbox (Offline)
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <span className="live-beacon" style={{ backgroundColor: 'var(--text-muted)' }}></span> Offline
                 </span>
               )}
+              <span style={{ opacity: 0.5 }}>·</span>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '220px' }} title={activeCase.title}>
+                {activeCase.title}
+              </span>
             </p>
           </div>
         </div>
 
-        {/* Current Active Case status pill & Command Palette Launcher */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+        {/* Minimal actions */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
           <button
             onClick={() => setIsCommandOpen(true)}
-            className="btn btn-outline"
+            className="btn-quiet"
             type="button"
             aria-haspopup="dialog"
             aria-expanded={isCommandOpen}
             aria-label="Open command palette (Ctrl+K)"
-            style={{
-              fontSize: '0.75rem',
-              padding: '0.35rem 0.65rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.35rem',
-              color: 'var(--text-secondary)'
-            }}
-            title="Global Command Palette (Ctrl+K)"
+            title="Commands (Ctrl+K)"
           >
-            <Command size={12} aria-hidden="true" />
-            <span style={{ fontSize: '0.7rem' }}>Commands</span>
-            <kbd aria-hidden="true" style={{ fontSize: '0.6rem', backgroundColor: 'rgba(255,255,255,0.1)', padding: '0.1rem 0.3rem', borderRadius: '3px', color: 'var(--text-muted)' }}>
-              Ctrl+K
+            <Command size={14} aria-hidden="true" />
+            <kbd aria-hidden="true" style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontFamily: 'inherit' }}>
+              ⌘K
             </kbd>
           </button>
 
           <button
             onClick={toggleLiveMode}
-            className={`btn ${liveMode ? 'btn-outline' : 'btn-warning'}`}
+            className="btn-quiet"
             type="button"
             aria-pressed={liveMode}
             aria-label={liveMode ? 'Switch to offline mode' : 'Switch to live data mode'}
-            style={{
-              fontSize: '0.775rem',
-              padding: '0.35rem 0.75rem'
-            }}
-            title={liveMode ? "Live blockchain data on. Switch to offline mode." : "Offline mode. Switch to live data."}
+            title={liveMode ? "Live — switch to offline" : "Offline — switch to live"}
           >
-            {liveMode ? <Wifi size={13} aria-hidden="true" /> : <WifiOff size={13} aria-hidden="true" />}
-            {liveMode ? "Live data" : "Offline"}
+            {liveMode ? <Wifi size={14} aria-hidden="true" /> : <WifiOff size={14} aria-hidden="true" />}
           </button>
-          
-          <div className="glass-panel" style={{ padding: '0.35rem 0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.775rem', borderRadius: '8px' }}>
-            <span style={{ color: 'var(--text-muted)' }}>Case:</span>
-            <strong style={{ color: 'var(--primary)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={activeCase.title}>
-              {activeCase.title}
-            </strong>
-            <span style={{ fontSize: '0.675rem', backgroundColor: 'rgba(255,255,255,0.06)', padding: '0.1rem 0.35rem', borderRadius: '4px', color: 'var(--text-muted)' }}>
-              {activeCase.nodes?.length || 0} nodes · {activeCase.links?.length || 0} links
-            </span>
-          </div>
         </div>
       </header>
 
       {/* Main Tab Navigation */}
-      <nav className="main-nav" aria-label="Primary forensic navigation">
+      <nav className="main-nav" aria-label="Primary">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
           const isActive = currentTab === item.id || location.pathname === item.path;
@@ -166,7 +144,7 @@ function AppContent() {
               aria-label={`Go to ${item.label}`}
               type="button"
             >
-              <Icon size={15} aria-hidden="true" />
+              <Icon size={14} aria-hidden="true" strokeWidth={isActive ? 2 : 1.75} />
               {item.label}
             </button>
           );
@@ -195,8 +173,8 @@ function AppContent() {
 
       {/* Footer information */}
       <footer className="footer-bar" role="contentinfo">
-        <span>{APP_METADATA.SYSTEM_VERSION}</span>
-        <span>Local session</span>
+        <span style={{ color: 'var(--text-muted)' }}>{APP_METADATA.SYSTEM_VERSION}</span>
+        <span style={{ color: 'var(--text-muted)', opacity: 0.7 }}>Local session</span>
       </footer>
 
     </div>

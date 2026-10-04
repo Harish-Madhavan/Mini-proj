@@ -166,9 +166,25 @@ export function computeAddressClusters(addresses = [], transactionHistory = []) 
 
   const coSpentTransactions = [];
   const sharedTxFrequency = {};
+  let skippedCoinJoinTxs = 0;
 
-  // Process transaction inputs for co-spending
-  transactionHistory.forEach(tx => {
+  // Deduplicate transactions by txid if present
+  const seenTxIds = new Set();
+  const uniqueTxs = [];
+  (Array.isArray(transactionHistory) ? transactionHistory : []).forEach(tx => {
+    if (!tx) return;
+    const id = tx.txid || tx.id;
+    if (id) {
+      if (seenTxIds.has(id)) return;
+      seenTxIds.add(id);
+    }
+    uniqueTxs.push(tx);
+  });
+
+  // Process transaction inputs for co-spending. CoinJoin-style mixes are
+  // explicitly excluded: co-spending inside a privacy pool does NOT imply
+  // common ownership (CIOH exception) and linking it would poison the case.
+  uniqueTxs.forEach(tx => {
     const vin = tx.vin || [];
     const inputAddrs = vin
       .map(v => v.prevout?.scriptpubkey_address || v.address)
@@ -177,6 +193,14 @@ export function computeAddressClusters(addresses = [], transactionHistory = []) 
     const relevantInputs = inputAddrs.filter(addr => addressSet.has(addr));
 
     if (relevantInputs.length >= 2) {
+      const entropy = calculateCoinJoinEntropy(
+        (tx.vout || []).map(o => ({ value: o?.value || o?.scriptpubkey_value || 0 }))
+      );
+      const looksLikeMix = entropy.isCoinJoin || (vin.length >= 5 && relevantInputs.length >= 3 && entropy.anonymityRatio > 0.8);
+      if (looksLikeMix) {
+        skippedCoinJoinTxs++;
+        return;
+      }
       coSpentTransactions.push({
         txid: tx.txid || tx.id,
         inputs: relevantInputs
@@ -193,49 +217,73 @@ export function computeAddressClusters(addresses = [], transactionHistory = []) 
   });
 
   const clusters = dsu.getClusters();
+  const largestCluster = clusters.reduce((best, c) => (c.length > (best?.length || 0) ? c : best), clusters[0] || []);
+  const isSplit = clusters.length > 1;
 
   // Generate deterministic cluster identifier
   const clusterHash = cyrb53Hex([...addresses].sort().join('|')).slice(0, 8);
 
-  // Script type and format analysis
-  const hasSegwit = addresses.some(a => a.startsWith('bc1q') || a.startsWith('bc1p'));
-  const hasLegacy = addresses.some(a => a.startsWith('1'));
-  const hasP2SH = addresses.some(a => a.startsWith('3'));
+  // Script-type uniformity: a same-type claim is only valid when the pool is
+  // actually uniform. Mixed pools get no type heuristic, not a wrong one.
+  const typeOf = (a) =>
+    a.startsWith('bc1q') || a.startsWith('bc1p') ? 'segwit'
+    : a.startsWith('1') ? 'legacy'
+    : a.startsWith('3') ? 'script'
+    : 'other';
+  const poolTypes = new Set(addresses.map(typeOf));
+  const uniformType = poolTypes.size === 1 ? [...poolTypes][0] : null;
 
   // Confidence must be *earned* by on-chain evidence: a pool with zero
-  // co-spends is an unproven hypothesis, not an 80% attribution.
-  let confidence = 50;
-  if (coSpentTransactions.length > 0) {
-    confidence += Math.min(30, coSpentTransactions.length * 15);
+  // co-spends is an unproven hypothesis, not a 50%+ attribution.
+  const hasEvidence = coSpentTransactions.length > 0;
+  let confidence;
+  if (hasEvidence) {
+    confidence = 50 + Math.min(30, coSpentTransactions.length * 15);
+    if (uniformType === 'segwit') confidence += 4;
+    if (addresses.length >= 3) confidence += 3;
+    confidence = Math.min(99, Math.max(30, confidence));
+  } else {
+    confidence = 30;
+    if (addresses.length >= 3) confidence += 3;
+    confidence = Math.min(45, confidence);
   }
-  if (hasSegwit && !hasLegacy) confidence += 4;
-  if (addresses.length >= 3) confidence += 3;
-  confidence = Math.min(99, Math.max(30, confidence));
 
   const heuristicsApplied = [];
   if (coSpentTransactions.length > 0) {
-    heuristicsApplied.push(`Verified: ${coSpentTransactions.length} joint transactions`);
+    heuristicsApplied.push(`Verified: ${coSpentTransactions.length} joint transaction${coSpentTransactions.length === 1 ? '' : 's'}`);
+    if (isSplit) {
+      heuristicsApplied.push(
+        `Split into ${clusters.length} groups — largest holds ${largestCluster.length}/${addresses.length} addresses`
+      );
+    }
   } else {
-    heuristicsApplied.push(`Shared-spending pattern across ${addresses.length} addresses`);
+    heuristicsApplied.push(`No joint transactions found across ${addresses.length} addresses — unproven`);
   }
 
-  if (hasSegwit && !hasLegacy) {
+  if (uniformType === 'segwit') {
     heuristicsApplied.push("Same address type (SegWit)");
-  } else if (hasLegacy) {
+  } else if (uniformType === 'legacy') {
     heuristicsApplied.push("Same address type (legacy)");
-  } else if (hasP2SH) {
+  } else if (uniformType === 'script') {
     heuristicsApplied.push("Same address type (script)");
   }
 
-  heuristicsApplied.push("Change reuse pattern");
-  heuristicsApplied.push("Timing and fee pattern");
+  if (skippedCoinJoinTxs > 0) {
+    heuristicsApplied.push(
+      `Excluded ${skippedCoinJoinTxs} CoinJoin-style mix${skippedCoinJoinTxs === 1 ? '' : 'es'} (co-spend inside mixes proves nothing)`
+    );
+  }
 
   return {
     clusterId: `CLUS-BTC-${clusterHash}`,
     confidenceScore: confidence,
     addressCount: addresses.length,
     clustersCount: clusters.length,
-    clusters: clusters,
+    clusters,
+    largestCluster,
+    isSplit,
+    hasEvidence,
+    skippedCoinJoinTxs,
     heuristicsApplied,
     coSpentTransactions,
     addresses: [...addresses]
@@ -296,7 +344,19 @@ export function estimatePoolReceived(addresses = [], transactions = []) {
   const pool = new Set(addresses);
   const perAddressSats = {};
   let totalSats = 0;
-  const txs = Array.isArray(transactions) ? transactions : [];
+  const rawTxs = Array.isArray(transactions) ? transactions : [];
+  const seenTxIds = new Set();
+  const txs = [];
+  for (const tx of rawTxs) {
+    if (!tx) continue;
+    const id = tx.txid || tx.id;
+    if (id) {
+      if (seenTxIds.has(id)) continue;
+      seenTxIds.add(id);
+    }
+    txs.push(tx);
+  }
+
   for (const tx of txs) {
     for (const o of tx?.vout || []) {
       const addr = o?.scriptpubkey_address;
@@ -321,8 +381,25 @@ export function detectPeelingChain(transactions = []) {
     return { isPeelingChain: false, hopCount: 0, averagePeelPercent: 0, confidence: 0, details: {} };
   }
 
+  // Deduplicate by txid if present
+  const seenTxIds = new Set();
+  const deduped = [];
+  (Array.isArray(transactions) ? transactions : []).forEach(tx => {
+    if (!tx) return;
+    const id = tx.txid || tx.id;
+    if (id) {
+      if (seenTxIds.has(id)) return;
+      seenTxIds.add(id);
+    }
+    deduped.push(tx);
+  });
+
+  if (deduped.length < 1) {
+    return { isPeelingChain: false, hopCount: 0, averagePeelPercent: 0, confidence: 0, details: {} };
+  }
+
   // Sort by block_time/status if available
-  const sorted = [...transactions].sort((a, b) => {
+  const sorted = [...deduped].sort((a, b) => {
     const tA = a.status?.block_time ?? a.block_time ?? 0;
     const tB = b.status?.block_time ?? b.block_time ?? 0;
     return tA - tB;
@@ -416,6 +493,230 @@ export function detectPeelingChain(transactions = []) {
     hopCount: peelingHopCount,
     averagePeelPercent: avgPeel,
     confidence,
-    details: { hops: hopDetails, variance: peelStdDev }
+    details: { hops: hopDetails, variance: peelStdDev, stdDev: peelStdDev }
+  };
+}
+
+/**
+ * Normalizes input/output entries into objects with integer satoshi values.
+ */
+function normalizeSatsEntry(item, index, prefix) {
+  if (typeof item === 'number') {
+    return { id: `${prefix}_${index}`, valueSats: Math.round(item) };
+  }
+  if (!item) return { id: `${prefix}_${index}`, valueSats: 0 };
+  const sats = typeof item.valueSats === 'number'
+    ? Math.round(item.valueSats)
+    : Math.round((parseFloat(item.value || 0) || 0) * 1e8);
+  return {
+    id: item.id || item.address || `${prefix}_${index}`,
+    address: item.address || item.scriptpubkey_address || null,
+    valueSats: sats,
+    ...item
+  };
+}
+
+/**
+ * Knapsack / Subset-Sum CoinJoin Unmixing Solver
+ *
+ * In CoinJoin transactions (e.g. 2-party JoinMarket or Wasabi partial mixes),
+ * participants pool inputs and receive equal-denomination mix outputs plus change.
+ * 
+ * Formula: sum(Inputs_p) = MixOutput_p + ChangeOutput_p + Fee_p
+ *
+ * By evaluating subset sums across inputs and outputs within plausible fee bounds,
+ * this function reconstructs the constituent participants, breaking anonymity set sizes.
+ *
+ * @param {Object} params
+ * @param {Array} params.inputs - Array of transaction inputs (sats or objects)
+ * @param {Array} params.outputs - Array of transaction outputs (sats or objects)
+ * @param {number} [params.maxFeeSats=35000] - Maximum plausible miner fee per participant
+ * @param {number} [params.minFeeSats=100] - Minimum plausible miner fee per participant
+ * @returns {Object} Unmixing breakdown with participant partitions and confidence score
+ */
+export function solveCoinJoinSubsetSum({
+  inputs = [],
+  outputs = [],
+  maxFeeSats = 35000,
+  minFeeSats = 100
+}) {
+  const normInputs = inputs.map((inp, idx) => normalizeSatsEntry(inp, idx, 'in'));
+  const normOutputs = outputs.map((out, idx) => normalizeSatsEntry(out, idx, 'out'));
+
+  if (normInputs.length < 2 || normOutputs.length < 2) {
+    return {
+      isCoinJoin: false,
+      isSolvable: false,
+      partitions: [],
+      confidence: 0,
+      summary: 'Insufficient inputs/outputs to perform CoinJoin subset-sum analysis.'
+    };
+  }
+
+  // 1. Detect equal-denomination mix outputs
+  const valueCounts = new Map();
+  normOutputs.forEach(o => {
+    if (o.valueSats > 546) {
+      valueCounts.set(o.valueSats, (valueCounts.get(o.valueSats) || 0) + 1);
+    }
+  });
+
+  let mixDenom = 0;
+  let mixCount = 0;
+  for (const [val, count] of valueCounts.entries()) {
+    if (count >= 2 && count > mixCount) {
+      mixDenom = val;
+      mixCount = count;
+    }
+  }
+
+  // If no identical mix outputs, check for general 2-party decomposition
+  const mixOutputs = normOutputs.filter(o => o.valueSats === mixDenom);
+  const changeOutputs = normOutputs.filter(o => o.valueSats !== mixDenom);
+
+  // If no standard equal-value mix denomination found
+  if (mixCount < 2) {
+    return {
+      isCoinJoin: false,
+      isSolvable: false,
+      mixDenominationSats: 0,
+      mixOutputCount: 0,
+      partitions: [],
+      confidence: 0,
+      summary: 'No uniform CoinJoin mix denomination identified among outputs.'
+    };
+  }
+
+  // 2. Subset sum matching
+  // Generate input subsets (bounded up to 20 inputs to prevent 2^N explosion)
+  const boundedInputs = normInputs.slice(0, 16);
+  const n = boundedInputs.length;
+  const numSubsets = 1 << n;
+
+  // Precompute sums for all input subsets (excluding empty set)
+  const subsetSums = [];
+  for (let mask = 1; mask < numSubsets; mask++) {
+    let sum = 0;
+    const subsetItems = [];
+    for (let i = 0; i < n; i++) {
+      if ((mask & (1 << i)) !== 0) {
+        sum += boundedInputs[i].valueSats;
+        subsetItems.push(boundedInputs[i]);
+      }
+    }
+    subsetSums.push({ mask, sum, items: subsetItems });
+  }
+
+  // For each mix output, find candidate (change, input-subset) pairs
+  // Target: inputSubset.sum - (mixDenom + change.valueSats) in [minFeeSats, maxFeeSats]
+  // Or without change (exact mix payment): inputSubset.sum - mixDenom in [minFeeSats, maxFeeSats]
+  const candidateMatches = [];
+
+  // Include a null change candidate (0 sats)
+  const changeCandidates = [...changeOutputs, { id: 'no_change', valueSats: 0, isVirtual: true }];
+
+  for (const change of changeCandidates) {
+    const targetOut = mixDenom + change.valueSats;
+    for (const sub of subsetSums) {
+      const diff = sub.sum - targetOut;
+      if (diff >= minFeeSats && diff <= maxFeeSats) {
+        candidateMatches.push({
+          change,
+          mask: sub.mask,
+          inputs: sub.items,
+          inputSum: sub.sum,
+          fee: diff,
+          targetOut
+        });
+      }
+    }
+  }
+
+  // 3. Find disjoint combination of candidate matches covering the mix outputs
+  // Backtracking search for disjoint input masks
+  let bestPartition = null;
+  let partitionCount = 0;
+
+  function findDisjointPartitions(startIndex, currentPartitions, usedMask, usedChanges) {
+    if (currentPartitions.length === mixCount) {
+      partitionCount++;
+      if (!bestPartition) {
+        bestPartition = [...currentPartitions];
+      }
+      return;
+    }
+
+    for (let i = startIndex; i < candidateMatches.length; i++) {
+      const candidate = candidateMatches[i];
+      // Check if inputs overlap
+      if ((usedMask & candidate.mask) !== 0) continue;
+      // Check if real change output is reused
+      if (!candidate.change.isVirtual && usedChanges.has(candidate.change.id)) continue;
+
+      const nextChanges = new Set(usedChanges);
+      if (!candidate.change.isVirtual) nextChanges.add(candidate.change.id);
+
+      findDisjointPartitions(
+        i + 1,
+        [...currentPartitions, candidate],
+        usedMask | candidate.mask,
+        nextChanges
+      );
+
+      if (partitionCount > 10) break; // Bounded ambiguity check
+    }
+  }
+
+  findDisjointPartitions(0, [], 0, new Set());
+
+  if (!bestPartition || bestPartition.length === 0) {
+    return {
+      isCoinJoin: true,
+      isSolvable: false,
+      mixDenominationSats: mixDenom,
+      mixOutputCount: mixCount,
+      partitions: [],
+      confidence: 30,
+      summary: `Identified CoinJoin structure with ${mixCount} equal outputs of ${(mixDenom / 1e8).toFixed(4)} BTC, but input subsets could not be unambiguously decomposed.`
+    };
+  }
+
+  // Format final partitions
+  const formattedPartitions = bestPartition.map((part, pIdx) => {
+    const mixObj = mixOutputs[pIdx] || { id: `mix_out_${pIdx}`, valueSats: mixDenom };
+    const hasChange = !part.change.isVirtual;
+    return {
+      participantIndex: pIdx + 1,
+      inputIds: part.inputs.map(i => i.id),
+      inputs: part.inputs,
+      totalInputSats: part.inputSum,
+      totalInputBtc: (part.inputSum / 1e8).toFixed(6),
+      mixOutput: mixObj,
+      changeOutput: hasChange ? part.change : null,
+      estimatedFeeSats: part.fee,
+      confidence: partitionCount === 1 ? 92 : partitionCount <= 3 ? 74 : 58
+    };
+  });
+
+  const isUniqueSolution = partitionCount === 1;
+  const overallConfidence = isUniqueSolution ? 92 : partitionCount <= 3 ? 75 : 55;
+
+  return {
+    isCoinJoin: true,
+    isSolvable: true,
+    mixDenominationSats: mixDenom,
+    mixOutputCount: mixCount,
+    participantCount: formattedPartitions.length,
+    partitions: formattedPartitions,
+    isUniqueSolution,
+    solutionCount: partitionCount,
+    confidence: overallConfidence,
+    anonymitySetReduction: {
+      original: mixCount,
+      effective: isUniqueSolution ? 1 : Math.min(mixCount, partitionCount)
+    },
+    summary: isUniqueSolution
+      ? `De-anonymized ${formattedPartitions.length} participant sub-clusters with 92% confidence, collapsing anonymity set from ${mixCount} to 1.`
+      : `Partially de-anonymized ${formattedPartitions.length} participant sub-clusters (${partitionCount} possible combinations identified, ~${overallConfidence}% confidence).`
   };
 }

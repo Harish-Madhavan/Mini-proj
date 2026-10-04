@@ -21,6 +21,7 @@ import {
   AlertTriangle,
   Flame,
   Table,
+  Layers,
   X
 } from 'lucide-react';
 import NodeRenderer from './NodeRenderer';
@@ -28,12 +29,12 @@ import { useToast } from '../../hooks/useToast';
 import { findCriticalMoneyTrail, detectCircularFlows } from '../../utils/graphAlgorithms';
 import { calculateTaintMap, calculateEdgeTaintMap, generateTaintLedger } from '../../utils/taintAnalysis';
 
-function ToolBtn({ active, activeClass = 'btn-primary pulse-glow-border', variant = 'btn-outline', style, children, ...props }) {
+function ToolBtn({ active, activeClass = 'btn-primary', variant = 'btn-quiet', style, children, ...props }) {
   return (
     <button
       type="button"
       className={`btn ${active ? activeClass : variant}`}
-      style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem', ...style }}
+      style={{ fontSize: '0.78rem', padding: '0.3rem 0.55rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem', borderColor: 'transparent', ...style }}
       {...props}
     >
       {children}
@@ -72,7 +73,9 @@ export default function GraphCanvas({
   getNodeCoords,
   isLoadingLive,
   onSelectNode,
-  onSelectTab
+  onSelectTab,
+  isClusterCollapsed = false,
+  setIsClusterCollapsed
 }) {
   const svgRef = useRef(null);
   const containerRef = useRef(null);
@@ -108,8 +111,8 @@ export default function GraphCanvas({
 
   const edgeTaintMap = useMemo(() => {
     if (!activeCase?.nodes?.length || !activeCase?.links?.length) return new Map();
-    return calculateEdgeTaintMap(activeCase.nodes, activeCase.links, taintMap);
-  }, [activeCase, taintMap]);
+    return calculateEdgeTaintMap(activeCase.nodes, activeCase.links, taintMap, taintModel);
+  }, [activeCase, taintMap, taintModel]);
 
   const taintLedger = useMemo(() => {
     if (!activeCase?.nodes?.length) return [];
@@ -227,7 +230,7 @@ export default function GraphCanvas({
       const url = URL.createObjectURL(svgBlob);
 
       img.onload = () => {
-        ctx.fillStyle = '#030712';
+        ctx.fillStyle = '#0a0a0b';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         URL.revokeObjectURL(url);
@@ -251,28 +254,27 @@ export default function GraphCanvas({
       className={`glass-panel ${isFullscreen ? 'fullscreen-canvas' : ''}`} 
       style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', position: 'relative' }}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.5rem' }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Interactive Fund Flow Tracing</h3>
-            <span className="badge-pill badge-pill-info">
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
+            <h3 style={{ fontSize: '0.95rem', fontWeight: 600 }}>Fund flow</h3>
+            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
               {activeCase.nodes?.length || 0} nodes · {activeCase.links?.length || 0} links
             </span>
           </div>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Pan canvas, scroll to zoom, drag nodes to re-position.</p>
         </div>
         
         {/* Action & Filter Controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexWrap: 'wrap' }}>
           <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-            <Search size={14} style={{ position: 'absolute', left: '8px', color: 'var(--text-muted)' }} />
+            <Search size={13} style={{ position: 'absolute', left: '8px', color: 'var(--text-muted)' }} />
             <input
               type="text"
-              placeholder="Search address / node..."
+              placeholder="Filter…"
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               className="input-field"
-              style={{ paddingLeft: '1.8rem', width: '150px' }}
+              style={{ paddingLeft: '1.8rem', width: '130px', fontSize: '0.79rem', paddingTop: '0.4rem', paddingBottom: '0.4rem', background: 'transparent', borderColor: 'transparent' }}
             />
           </div>
 
@@ -280,47 +282,48 @@ export default function GraphCanvas({
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value)}
             className="select-field"
+            style={{ fontSize: '0.79rem', background: 'transparent', borderColor: 'transparent', color: 'var(--text-muted)' }}
           >
-            <option value="all">All Types</option>
-            <option value="suspect">Suspect / Input</option>
-            <option value="hop">Step / hub</option>
-            <option value="receiver">End Receiver</option>
-            <option value="mixer">Mixer</option>
-            <option value="bridge">Bridge / Swap</option>
+            <option value="all">All</option>
+            <option value="suspect">Suspect</option>
+            <option value="hop">Hops</option>
+            <option value="receiver">Receivers</option>
+            <option value="mixer">Mixers</option>
+            <option value="bridge">Bridges</option>
           </select>
 
           {/* Flow Playback Stepper Controls */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', backgroundColor: 'rgba(5, 8, 16, 0.8)', padding: '0.2rem 0.4rem', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.1rem' }}>
             <ToolBtn
               onClick={() => {
                 if (playbackStep === null) setPlaybackStep(0);
                 setIsPlaying(!isPlaying);
               }}
               active={isPlaying}
-              style={{ fontSize: '0.725rem', padding: '0.25rem 0.5rem' }}
+              style={{ fontSize: '0.79rem' }}
               title={isPlaying ? "Pause" : "Play step by step"}
             >
-              {isPlaying ? <Pause size={12} /> : <Play size={12} />}
-              {isPlaying ? "Pause" : playbackStep !== null ? `Step ${playbackStep + 1}/${activeCase.links?.length || 0}` : "Play"}
+              {isPlaying ? <Pause size={13} /> : <Play size={13} />}
+              {isPlaying ? "Pause" : playbackStep !== null ? `${playbackStep + 1}/${activeCase.links?.length || 0}` : "Play"}
             </ToolBtn>
 
             {playbackStep !== null && (
               <>
                 <ToolBtn
                   onClick={() => setPlaybackStep(prev => Math.min((prev || 0) + 1, (activeCase.links?.length || 1) - 1))}
-                  style={{ padding: '0.25rem 0.4rem' }}
+                  style={{ padding: '0.3rem 0.4rem' }}
                   title="Next step"
                   aria-label="Next step"
                 >
-                  <SkipForward size={12} />
+                  <SkipForward size={13} />
                 </ToolBtn>
                 <ToolBtn
                   onClick={() => { setPlaybackStep(null); setIsPlaying(false); }}
-                  style={{ padding: '0.25rem 0.4rem', color: 'var(--text-muted)' }}
+                  style={{ padding: '0.3rem 0.4rem' }}
                   title="Reset playback"
                   aria-label="Reset playback"
                 >
-                  <RotateCcw size={12} />
+                  <RotateCcw size={13} />
                 </ToolBtn>
               </>
             )}
@@ -331,11 +334,11 @@ export default function GraphCanvas({
             <ToolBtn
               onClick={() => setIsolatedNodeId(null)}
               active
-              style={{ fontSize: '0.725rem', padding: '0.25rem 0.6rem' }}
+              style={{ fontSize: '0.79rem' }}
               title="Clear path isolation"
               aria-label="Clear path isolation"
             >
-              <Eye size={12} /> Isolated view <EyeOff size={12} />
+              <Eye size={13} /> Isolated <EyeOff size={13} />
             </ToolBtn>
           )}
 
@@ -364,8 +367,26 @@ export default function GraphCanvas({
             title="Highlight the highest-value path from start to end"
           >
             <GitCommit size={13} aria-hidden="true" />
-            {showCriticalTrail ? "Main trail on" : "Main trail"}
+            {showCriticalTrail ? "Trail on" : "Trail"}
           </ToolBtn>
+
+          {setIsClusterCollapsed && (
+            <ToolBtn
+              onClick={() => {
+                const next = !isClusterCollapsed;
+                setIsClusterCollapsed(next);
+                showToast(next ? "Cluster collapsing enabled (10+ inputs grouped)." : "Cluster collapsing disabled (expanded view).", "info");
+              }}
+              active={isClusterCollapsed}
+              activeClass="btn-primary"
+              aria-pressed={isClusterCollapsed}
+              aria-label="Toggle input cluster collapsing"
+              title="Group co-spent inputs into a single consolidated cluster badge"
+            >
+              <Layers size={13} aria-hidden="true" />
+              {isClusterCollapsed ? "Clusters on" : "Clusters"}
+            </ToolBtn>
+          )}
 
           <ToolBtn
             onClick={() => {
@@ -374,17 +395,17 @@ export default function GraphCanvas({
               if (next) showToast(`Fund trace on (${TAINT_MODEL_LABELS[taintModel]}).`, "info");
             }}
             active={showTaintHeatmap}
-            activeClass="btn-danger pulse-glow-border"
+            activeClass="btn-primary"
             aria-pressed={showTaintHeatmap}
             aria-label="Toggle fund tracing"
             title="Show each wallet's share of traced funds"
           >
-            <Flame size={13} style={{ color: showTaintHeatmap ? '#ef4444' : 'inherit' }} />
+            <Flame size={13} style={{ color: showTaintHeatmap ? 'inherit' : 'var(--text-muted)' }} />
             {showTaintHeatmap ? "Trace on" : "Trace"}
           </ToolBtn>
 
           {showTaintHeatmap && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
               <select
                 value={taintModel}
                 onChange={(e) => {
@@ -392,7 +413,7 @@ export default function GraphCanvas({
                   showToast(`Tracing method: ${TAINT_MODEL_LABELS[e.target.value]}.`, "info");
                 }}
                 className="select-field"
-                style={{ fontSize: '0.725rem', padding: '0.2rem 0.4rem', height: '28px' }}
+                style={{ fontSize: '0.78rem', padding: '0.25rem 0.4rem', height: '28px', background: 'transparent', borderColor: 'transparent', color: 'var(--text-muted)' }}
                 title="How traced funds spread across outputs"
               >
                 <option value="proportionate">Shared</option>
@@ -401,10 +422,10 @@ export default function GraphCanvas({
               </select>
               <ToolBtn
                 onClick={() => setShowTaintLedger(true)}
-                style={{ fontSize: '0.725rem', padding: '0.2rem 0.45rem', height: '28px', gap: '0.25rem' }}
+                style={{ fontSize: '0.78rem', height: '28px' }}
                 title="Open fund tracing ledger"
               >
-                <Table size={12} /> Ledger
+                <Table size={13} /> Ledger
               </ToolBtn>
             </div>
           )}
@@ -412,12 +433,12 @@ export default function GraphCanvas({
           <ToolBtn
             onClick={() => setHighlightReceiver(!highlightReceiver)}
             active={highlightReceiver}
-            activeClass="btn-warning pulse-glow-border"
+            activeClass="btn-primary"
             aria-pressed={highlightReceiver}
             aria-label="Toggle end receiver highlight"
           >
             <Sparkles size={14} aria-hidden="true" />
-            {highlightReceiver ? "Receiver on" : "End receiver"}
+            {highlightReceiver ? "Receiver on" : "Receiver"}
           </ToolBtn>
         </div>
       </div>
@@ -425,34 +446,27 @@ export default function GraphCanvas({
       {/* Cycle warning */}
       {detectedCycles.length > 0 && (
         <div style={{
-          backgroundColor: 'rgba(239, 68, 68, 0.15)',
-          border: '1px solid #ef4444',
-          borderRadius: '6px',
-          padding: '0.5rem 0.8rem',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
-          fontSize: '0.8rem',
-          color: '#fca5a5'
+          gap: '0.4rem',
+          fontSize: '0.79rem',
+          color: 'var(--text-muted)',
+          padding: '0 0.1rem'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-            <AlertTriangle size={15} style={{ color: '#ef4444' }} />
-            <strong>Circular flow:</strong>
-            <span>{detectedCycles.length} cycle{detectedCycles.length === 1 ? '' : 's'} returning to earlier nodes.</span>
-          </div>
-          <span style={{ fontSize: '0.7rem', color: '#f87171', fontWeight: 600 }}>Review</span>
+          <AlertTriangle size={13} />
+          <span>{detectedCycles.length} circular flow{detectedCycles.length === 1 ? '' : 's'} — review churn.</span>
         </div>
       )}
 
       {/* SVG Drawing Canvas */}
       <div style={{ 
         flex: 1, 
-        backgroundColor: '#05070e', 
+        backgroundColor: 'var(--bg-inset)', 
         borderRadius: '10px', 
-        border: '1px solid var(--border-color)', 
+        border: '1px solid var(--border-soft)', 
         overflow: 'hidden',
         position: 'relative',
-        minHeight: isFullscreen ? 'calc(100vh - 140px)' : '420px',
+        minHeight: isFullscreen ? 'calc(100vh - 140px)' : '460px',
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center'
@@ -472,78 +486,66 @@ export default function GraphCanvas({
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
-              gap: '4px',
+              gap: '2px',
               zIndex: 10,
-              backgroundColor: 'rgba(15, 23, 42, 0.9)',
-              padding: '6px 4px',
+              backgroundColor: 'rgba(19,19,22,0.9)',
+              padding: '4px 2px',
               borderRadius: '8px',
-              border: '1px solid var(--border-color)',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+              border: '1px solid var(--border-soft)'
             }}>
-              <button onClick={handleZoomIn} type="button" style={{ padding: '6px', border: 'none', background: 'none', color: 'var(--text-primary)', cursor: 'pointer' }} title="Zoom In (+)" aria-label="Zoom In"><ZoomIn size={16} aria-hidden="true" /></button>
+              <button onClick={handleZoomIn} type="button" style={{ padding: '6px', border: 'none', background: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }} title="Zoom In (+)" aria-label="Zoom In"><ZoomIn size={15} aria-hidden="true" /></button>
               
-              <span aria-live="polite" style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--primary)', padding: '2px 0' }}>
+              <span aria-live="polite" style={{ fontSize: '0.65rem', color: 'var(--text-muted)', padding: '2px 0' }}>
                 {Math.round(zoom * 100)}%
               </span>
 
-              <button onClick={handleZoomOut} type="button" style={{ padding: '6px', border: 'none', background: 'none', color: 'var(--text-primary)', cursor: 'pointer' }} title="Zoom Out (-)" aria-label="Zoom Out"><ZoomOut size={16} aria-hidden="true" /></button>
-              <button onClick={handleCenterFit} type="button" style={{ padding: '6px', border: 'none', background: 'none', color: '#10b981', cursor: 'pointer' }} title="Center View" aria-label="Center View"><Focus size={15} aria-hidden="true" /></button>
-              <button onClick={resetView} type="button" style={{ padding: '6px', border: 'none', background: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }} title="Reset Layout (0)" aria-label="Reset Layout"><Activity size={14} aria-hidden="true" /></button>
+              <button onClick={handleZoomOut} type="button" style={{ padding: '6px', border: 'none', background: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }} title="Zoom Out (-)" aria-label="Zoom Out"><ZoomOut size={15} aria-hidden="true" /></button>
+              <button onClick={handleCenterFit} type="button" style={{ padding: '6px', border: 'none', background: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }} title="Center View" aria-label="Center View"><Focus size={14} aria-hidden="true" /></button>
+              <button onClick={resetView} type="button" style={{ padding: '6px', border: 'none', background: 'none', color: 'var(--text-muted)', cursor: 'pointer' }} title="Reset Layout (0)" aria-label="Reset Layout"><Activity size={13} aria-hidden="true" /></button>
             </div>
 
-            {/* End Receiver Forensic Highlight Banner Card */}
+            {/* End Receiver highlight — minimal card */}
             {highlightReceiver && (
-              <div className="pulse-glow-border" style={{
+              <div style={{
                 position: 'absolute',
                 top: '12px',
                 left: '12px',
                 zIndex: 10,
-                backgroundColor: 'rgba(5, 8, 22, 0.94)',
-                border: '1px solid #eab308',
-                borderRadius: '8px',
-                padding: '0.85rem 1.1rem',
-                maxWidth: '320px',
-                backdropFilter: 'blur(8px)',
-                boxShadow: '0 8px 24px rgba(234, 179, 8, 0.25)'
+                backgroundColor: 'rgba(19,19,22,0.94)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '10px',
+                padding: '0.8rem 0.9rem',
+                maxWidth: '280px'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#eab308', letterSpacing: '0.05em', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                    <Sparkles size={14} /> End receiver found
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                  <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                    End receiver
                   </span>
-                  <span style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem', backgroundColor: 'rgba(16, 185, 129, 0.15)', color: '#10b981', borderRadius: '4px', fontWeight: 700 }}>
-                    {activeCase.nodes.find(n => n.type === 'receiver')?.details.kycStatus || 'No end receiver yet'}
+                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                    {activeCase.nodes.find(n => n.type === 'receiver')?.details.kycStatus || '—'}
                   </span>
                 </div>
                 {activeCase.nodes.filter(n => n.type === 'receiver').map((rec, idx) => (
-                  <div key={idx} style={{ marginTop: '0.4rem', borderTop: idx > 0 ? '1px dashed rgba(255,255,255,0.1)' : 'none', paddingTop: idx > 0 ? '0.4rem' : '0' }}>
-                    <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff' }}>{rec.entityName}</div>
-                    <div className="mono-addr" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: '0.2rem 0' }}>{rec.details.address}</div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginTop: '0.25rem' }}>
-                      <span style={{ color: 'var(--text-muted)' }}>Amount:</span>
-                      <strong style={{ color: '#10b981' }}>{rec.balance}</strong>
+                  <div key={idx} style={{ marginTop: '0.35rem', borderTop: idx > 0 ? '1px solid var(--border-soft)' : 'none', paddingTop: idx > 0 ? '0.35rem' : '0' }}>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 600 }}>{rec.entityName}</div>
+                    <div className="mono-addr" style={{ fontSize: '0.74rem', color: 'var(--text-muted)', margin: '0.15rem 0' }}>{rec.details.address}</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.76rem', marginTop: '0.2rem' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Amount</span>
+                      <span style={{ color: 'var(--text-primary)' }}>{rec.balance}</span>
                     </div>
                   </div>
                 ))}
                 <button
                   onClick={() => onSelectTab('osint')}
+                  className="btn-quiet"
                   style={{
-                    marginTop: '0.75rem',
+                    marginTop: '0.6rem',
                     width: '100%',
-                    padding: '0.45rem',
-                    borderRadius: '5px',
-                    border: 'none',
-                    backgroundColor: '#eab308',
-                    color: '#020617',
-                    fontSize: '0.75rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
                     justifyContent: 'center',
-                    gap: '0.25rem'
+                    fontSize: '0.78rem'
                   }}
                 >
-                  Draft notice <ChevronRight size={14} />
+                  Draft notice <ChevronRight size={13} />
                 </button>
               </div>
             )}
@@ -560,23 +562,14 @@ export default function GraphCanvas({
               onMouseLeave={handleMouseUp}
               onWheel={handleWheel}
             >
-              {/* Background interceptor for dragging */}
-              <rect id="bg-panner" width="100%" height="100%" fill="transparent" />
-
+              {/* Subtle dot grid + markers */}
               <defs>
-                <marker id="arrow" viewBox="0 0 10 10" refX="18" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569" />
-                </marker>
-                <marker id="arrow-glow" viewBox="0 0 10 10" refX="18" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--primary)" />
-                </marker>
-                <marker id="arrow-taint-high" viewBox="0 0 10 10" refX="18" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#ef4444" />
-                </marker>
-                <marker id="arrow-taint-med" viewBox="0 0 10 10" refX="18" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b" />
-                </marker>
+                <pattern id="dot-grid" width="28" height="28" patternUnits="userSpaceOnUse">
+                  <circle cx="1" cy="1" r="1" fill="#1c1c21" />
+                </pattern>
               </defs>
+              <rect id="bg-panner" width="100%" height="100%" fill="url(#dot-grid)" />
+              <rect width="100%" height="100%" fill="transparent" />
 
               {/* Transform group for panning and zooming */}
               <g transform={`translate(${panOffset.x}, ${panOffset.y}) scale(${zoom})`} style={{ transformOrigin: 'center' }}>
@@ -603,54 +596,32 @@ export default function GraphCanvas({
           </>
         )}
         
-        {/* Key / Legend overlay */}
+        {/* Key / Legend overlay — minimal */}
         <div style={{ 
           position: 'absolute', 
           bottom: '10px', 
-          left: '10px', 
+          left: '12px', 
           display: 'flex', 
-          gap: '1rem', 
-          backgroundColor: 'rgba(5, 8, 16, 0.85)', 
-          padding: '0.5rem 1rem', 
-          borderRadius: '6px',
-          border: '1px solid var(--border-color)',
-          fontSize: '0.75rem',
-          backdropFilter: 'blur(4px)',
+          gap: '0.8rem', 
+          fontSize: '0.74rem',
+          color: 'var(--text-muted)',
           flexWrap: 'wrap'
         }}>
           {showTaintHeatmap ? (
             <>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444' }}></span>
-                <span style={{ color: '#ef4444', fontWeight: 600 }}>High (&gt;75%)</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#f59e0b' }}></span>
-                <span style={{ color: '#f59e0b', fontWeight: 600 }}>Medium (35-75%)</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }}></span>
-                <span style={{ color: '#10b981', fontWeight: 600 }}>Low (2-35%)</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#94a3b8' }}></span>
-                <span style={{ color: '#94a3b8' }}>Clean (&lt;5%)</span>
-              </div>
+              <span><span style={{ color: '#f87171' }}>●</span> High ≥75%</span>
+              <span><span style={{ color: '#fbbf24' }}>●</span> Med 35–75%</span>
+              <span><span style={{ color: '#34d399' }}>●</span> Low 2–35%</span>
+              <span><span style={{ color: '#71717a' }}>●</span> Clean</span>
             </>
           ) : (
             <>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444' }}></span>
-                <span>Start / input</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#3b82f6' }}></span>
-                <span>Output / step</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }}></span>
-                <span>Exchange</span>
-              </div>
+              <span><span style={{ color: '#f87171' }}>●</span> Suspect</span>
+              <span><span style={{ color: '#8b8b93' }}>●</span> Hop</span>
+              <span><span style={{ color: '#34d399' }}>●</span> Receiver</span>
+              <span><span style={{ color: '#52525b' }}>○</span> Tx</span>
+              {isClusterCollapsed && <span><span style={{ color: '#38bdf8' }}>☷</span> Cluster</span>}
+              <span><span style={{ color: '#facc15' }}>⚡</span> Lightning</span>
             </>
           )}
         </div>

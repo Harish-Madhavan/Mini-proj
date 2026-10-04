@@ -194,3 +194,143 @@ export async function checkAddressMempoolStatus(address, isLive = true) {
     message: 'No unconfirmed transactions. Nothing moved.'
   };
 }
+
+let activeWs = null;
+let wsStatus = 'DISCONNECTED';
+let reconnectTimer = null;
+const alertListeners = new Set();
+const statusListeners = new Set();
+
+export function getWebSocketStatus() {
+  return wsStatus;
+}
+
+export function onMempoolAlert(listener) {
+  if (typeof listener === 'function') {
+    alertListeners.add(listener);
+    return () => alertListeners.delete(listener);
+  }
+  return () => {};
+}
+
+export function onMempoolStatusChange(listener) {
+  if (typeof listener === 'function') {
+    statusListeners.add(listener);
+    listener(wsStatus);
+    return () => statusListeners.delete(listener);
+  }
+  return () => {};
+}
+
+function setWsStatus(status) {
+  wsStatus = status;
+  statusListeners.forEach(fn => {
+    try { fn(status); } catch {}
+  });
+}
+
+export function emitMempoolAlert(alert) {
+  const currentAlerts = getMempoolAlerts();
+  const updated = [alert, ...currentAlerts.filter(a => a.txid !== alert.txid)].slice(0, 50);
+  saveMempoolAlerts(updated);
+
+  alertListeners.forEach(fn => {
+    try { fn(alert); } catch {}
+  });
+}
+
+/**
+ * Initializes real-time WebSocket connection to mempool.space live stream.
+ */
+export function initMempoolWebSocket({ wsUrl = 'wss://mempool.space/api/v1/ws', autoReconnect = true } = {}) {
+  if (typeof window === 'undefined' || typeof window.WebSocket === 'undefined') {
+    setWsStatus('UNSUPPORTED');
+    return null;
+  }
+
+  if (activeWs && (activeWs.readyState === window.WebSocket.OPEN || activeWs.readyState === window.WebSocket.CONNECTING)) {
+    return activeWs;
+  }
+
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+
+  setWsStatus('CONNECTING');
+
+  try {
+    const ws = new window.WebSocket(wsUrl);
+    activeWs = ws;
+
+    ws.onopen = () => {
+      setWsStatus('CONNECTED');
+      try {
+        ws.send(JSON.stringify({ action: 'init' }));
+        ws.send(JSON.stringify({ action: 'want', data: ['blocks', 'mempool-blocks', 'live-2h-chart'] }));
+      } catch {}
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        const watched = getWatchlist();
+        if (!watched.length) return;
+
+        if (msg.tx) {
+          const tx = msg.tx;
+          const watchedAddrs = new Set(watched.map(w => (w.address || '').toLowerCase()));
+          const outAddrs = (tx.vout || []).map(o => (o.scriptpubkey_address || '').toLowerCase());
+          const inAddrs = (tx.vin || []).map(i => (i.prevout?.scriptpubkey_address || '').toLowerCase());
+
+          const matched = [...outAddrs, ...inAddrs].find(a => watchedAddrs.has(a));
+          if (matched) {
+            const valSats = (tx.vout || []).reduce((s, o) => s + (o.value || 0), 0);
+            const feeRate = tx.fee && tx.weight ? Math.round(tx.fee / (tx.weight / 4)) : 15;
+            emitMempoolAlert({
+              id: `alert_${tx.txid}_${Date.now()}`,
+              address: matched,
+              txid: tx.txid,
+              feeRate: `${feeRate} sat/vB`,
+              amount: `${(valSats / 1e8).toFixed(4)} BTC`,
+              type: '0-Conf WebSocket Broadcast',
+              timestamp: 'Just now (Live mempool feed)'
+            });
+          }
+        }
+      } catch {}
+    };
+
+    ws.onerror = () => {
+      setWsStatus('ERROR');
+    };
+
+    ws.onclose = () => {
+      setWsStatus('DISCONNECTED');
+      activeWs = null;
+      if (autoReconnect) {
+        reconnectTimer = setTimeout(() => {
+          initMempoolWebSocket({ wsUrl, autoReconnect });
+        }, 5000);
+      }
+    };
+
+    return ws;
+  } catch {
+    setWsStatus('ERROR');
+    return null;
+  }
+}
+
+export function closeMempoolWebSocket() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  if (activeWs) {
+    try { activeWs.close(); } catch {}
+    activeWs = null;
+  }
+  setWsStatus('DISCONNECTED');
+}
+

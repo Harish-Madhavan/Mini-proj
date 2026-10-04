@@ -1,4 +1,4 @@
-import { API_CONFIG } from '../constants/config';
+import { API_CONFIG, ADDRESS_TRACE_CONFIG } from '../constants/config';
 import { calculateCoinJoinEntropy } from './clusteringAlgorithms';
 import {
   scoreOutputHeuristics,
@@ -16,6 +16,7 @@ import {
 } from './traceHeuristics';
 import { buildTxHubNode, buildInputNode, buildOpReturnNode, buildOutputNode } from './graphBuilders';
 import { satsToBtc } from './forensicUtils';
+import { auditTraceCorrectness } from './traceVerification';
 
 export const apiCache = new Map();
 
@@ -255,6 +256,105 @@ export async function fetchAddressTxs(address) {
 }
 
 /**
+ * Next history page (older transactions) after `lastTxid`.
+ * Esplora paginates 25 per page; the last txid of the previous page cursors.
+ */
+export async function fetchAddressTxPage(address, lastTxid) {
+  if (!address || typeof address !== 'string' || address.length > 100) throw new Error('Invalid address');
+  if (!/^[0-9a-fA-F]{64}$/.test(lastTxid || '')) throw new Error('Invalid lastTxid cursor');
+  return fetchWithFallbackAndCache(`/address/${address}/txs/chain/${lastTxid}`);
+}
+
+/**
+ * Satoshis moved in `tx` where `address` is sender or receiver.
+ * Coinbase inputs have no prevout and contribute nothing.
+ */
+export function addressTxVolumeSats(tx, address) {
+  if (!tx || !address) return 0;
+  let sats = 0;
+  for (const v of (tx.vin || [])) {
+    if (v.prevout?.scriptpubkey_address === address) sats += v.prevout.value || 0;
+  }
+  for (const o of (tx.vout || [])) {
+    if (o.scriptpubkey_address === address) sats += o.value || 0;
+  }
+  return sats;
+}
+
+/**
+ * Pick the highest-volume transaction involving `address` from a list.
+ * Pure — the unit-testable core of address-trace selection.
+ * @returns {{ tx, volumeSats } | null}
+ */
+export function pickSignificantTx(txs = [], address) {
+  let best = null;
+  let bestVol = -1;
+  for (const tx of (txs || [])) {
+    if (!tx?.txid) continue;
+    const vol = addressTxVolumeSats(tx, address);
+    if (vol > bestVol) {
+      bestVol = vol;
+      best = tx;
+    }
+  }
+  return best ? { tx: best, volumeSats: bestVol } : null;
+}
+
+/**
+ * Address-trace picker tuning lives in constants/config.js
+ * (ADDRESS_TRACE_CONFIG, single source — never inline).
+ */
+
+/**
+ * Find the most forensically relevant transaction for an address search.
+ * The newest history page of a long-lived address (e.g. 1HQ3, 274 txs) is
+ * often dust — tracing `txs[0]` builds a graph of thousand-sat tribute
+ * outputs instead of the seizure. Walk back while the best candidate is
+ * still dust-sized; fall back to the newest tx when nothing significant
+ * turns up within MAX_PAGES.
+ *
+ * @returns {Promise<{ tx, volumeSats, firstPage, scanned, pages, significant }>}
+ */
+export async function findSignificantAddressTx(address, opts = {}) {
+  const maxPages = Number.isFinite(opts.maxPages) && opts.maxPages > 0 ? Math.min(20, Math.floor(opts.maxPages)) : ADDRESS_TRACE_CONFIG.MAX_PAGES;
+  const minSats = Number.isFinite(opts.minSats) && opts.minSats >= 0 ? opts.minSats : ADDRESS_TRACE_CONFIG.SIGNIFICANT_SATS;
+
+  const firstPage = await fetchAddressTxs(address);
+  if (!firstPage || firstPage.length === 0) {
+    return { tx: null, volumeSats: 0, firstPage: [], scanned: 0, pages: 0, significant: false };
+  }
+  let best = pickSignificantTx(firstPage, address);
+  let scanned = firstPage.length;
+  let pages = 1;
+  let lastTxid = firstPage[firstPage.length - 1].txid;
+
+  while (best && best.volumeSats < minSats && pages < maxPages) {
+    let page = null;
+    try {
+      page = await fetchAddressTxPage(address, lastTxid);
+    } catch {
+      break;
+    }
+    if (!page || page.length === 0) break;
+    pages += 1;
+    scanned += page.length;
+    const candidate = pickSignificantTx(page, address);
+    if (candidate && candidate.volumeSats > best.volumeSats) best = candidate;
+    lastTxid = page[page.length - 1].txid;
+    if (page.length < 25) break;
+  }
+
+  return {
+    tx: best?.tx || null,
+    volumeSats: best?.volumeSats || 0,
+    firstPage,
+    scanned,
+    pages,
+    significant: (best?.volumeSats || 0) >= minSats,
+  };
+}
+
+/**
  * Batch address summaries (chain stats) for chain-reuse scoring, with the
  * same bounded parallelism as transaction batches. Never throws: failures
  * degrade to missing entries, which the scorer treats as no-signal.
@@ -312,7 +412,7 @@ export async function fetchAddressSummary(address) {
  * consolidation points worth clustering regardless of profile.
  */
 export function classifyEndpointActivity(summary) {
-  const empty = { profile: 'UNPROFILED', txCount: 0, totalReceivedSats: 0, balanceSats: 0, isAggregator: false };
+  const empty = { profile: 'UNPROFILED', txCount: 0, totalReceivedSats: 0, balanceSats: 0, isAggregator: false, hasMempoolActivity: false };
   const chain = summary?.chain_stats;
   if (!chain) return empty;
   const fundedCount = chain.funded_txo_count || 0;
@@ -320,11 +420,14 @@ export function classifyEndpointActivity(summary) {
   const spentSum = chain.spent_txo_sum || 0;
   const txCount = chain.tx_count || 0;
   const balance = Math.max(0, fundedSum - spentSum);
+  const mempool = summary?.mempool_stats;
+  const hasMempoolActivity = ((mempool?.tx_count || 0) > 0) || ((mempool?.funded_txo_count || 0) > 0) || ((mempool?.spent_txo_count || 0) > 0);
   const base = {
     txCount,
     totalReceivedSats: fundedSum,
     balanceSats: balance,
     isAggregator: fundedCount >= 5,
+    hasMempoolActivity,
   };
   if (fundedCount === 0) return { ...base, profile: 'UNPROFILED' };
   if (balance === 0) return { ...base, profile: 'DRAINED_PASS_THROUGH' };
@@ -478,11 +581,19 @@ function classifyHistoricalOutput({ tx, output, outspend, isSpent, value, script
   const histIsSelf = !!histOutKey && histInputKeys.has(histOutKey);
   const histIsSoleFresh = !histIsSelf && value > 0 && histValueOutputs.length === 1 && histValueOutputs[0] === output;
   // Dwell behavior from spender heights: fast sweep vs dwelled payment.
+  // A sole fresh output is payment BY CONSTRUCTION (no change can exist
+  // alongside it) and outranks dwell: e.g. the May-2010 10,000 BTC pizza
+  // purchase (131 inputs, one fresh output, spent 1 block later) is a
+  // payment despite the 1-block dwell that would otherwise read as a
+  // change sweep. Self-transfer still outranks everything (change by
+  // construction).
   const histDwell = getSpendDwellBlocks(tx, outspend);
-  const histIsQuickSweep = !histIsSelf && histDwell != null && histDwell <= QUICK_SPEND_BLOCKS;
+  const histIsQuickSweep = !histIsSelf && !histIsSoleFresh && histDwell != null && histDwell <= QUICK_SPEND_BLOCKS;
   const histIsDwelled = !histIsSelf && !histIsSoleFresh && histDwell != null && histDwell >= LONG_DWELL_BLOCKS;
-  const histVerdict = histIsSelf || histIsQuickSweep ? 'change'
-    : histIsSoleFresh || histIsDwelled ? 'payment' : null;
+  const histVerdict = histIsSelf ? 'change'
+    : histIsSoleFresh ? 'payment'
+    : histIsQuickSweep ? 'change'
+    : histIsDwelled ? 'payment' : null;
   if (histVerdict) {
     const histIsChange = histVerdict === 'change';
     const histScore = histIsSelf ? -4.0 : histIsSoleFresh ? 4.0 : histIsChange ? -1.5 : 1.5;
@@ -834,7 +945,15 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
   }
 
   for (let depth = 0; depth <= maxDepth + TRACE_CONFIG.EXTRA_PEEL_DEPTH && frontier.length > 0; depth++) {
-    if (nodes.length > TRACE_CONFIG.MAX_NODES) {
+    // Budget counts structural nodes only (tx hubs + outputs). Input leaves
+    // (`in_*`) never expand, so letting a heavy fan-in root (e.g. a 592-in
+    // seizure sweep = ~400 leaves) spend the whole budget would truncate the
+    // trace before the spent branches are ever followed.
+    let budgetNodes = 0;
+    for (const id of nodeIds) {
+      if (!id.startsWith('in_')) budgetNodes++;
+    }
+    if (budgetNodes > TRACE_CONFIG.MAX_NODES) {
       warnings.push(`Node limit ${TRACE_CONFIG.MAX_NODES} reached — truncating trace`);
       haltReason = 'NODE_LIMIT';
       break;
@@ -1007,8 +1126,12 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
       }
     }
 
-    // Sort next frontier so change outputs are explored first (peel chain priority), keep branching limit
-    nextFrontier.sort((a, b) => (a._isChange === b._isChange ? 0 : a._isChange ? -1 : 1));
+    // Sort next frontier so change outputs are explored first (peel chain priority),
+    // and higher-value branches are prioritized so dominant money trails survive pruning
+    nextFrontier.sort((a, b) => {
+      if (a._isChange !== b._isChange) return a._isChange ? -1 : 1;
+      return (b.branchValueSats || 0) - (a.branchValueSats || 0);
+    });
     frontier = nextFrontier.slice(0, TRACE_CONFIG.MAX_BRANCHING * 3);
   }
 
@@ -1016,10 +1139,12 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
   // classified): report unknown rather than a default 50% that reads as
   // a measured result. All consumers null-check confidence first.
   const traceConf = pendingHeuristics.length > 0 ? computeTraceConfidence(pendingHeuristics) : null;
+  const verification = auditTraceCorrectness({ nodes, links });
   const meta = {
     confidence: traceConf ? traceConf.confidence : null,
     confidenceLevel: traceConf ? traceConf.level : 'Unknown',
     ambiguousHops: traceConf ? traceConf.ambiguousCount : 0,
+    verification,
     warnings,
     haltReason,
     stats: { fetchedTxCount: totalFetched, nodeCount: nodes.length, linkCount: links.length, depthReached },

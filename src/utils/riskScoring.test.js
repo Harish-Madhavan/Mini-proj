@@ -118,8 +118,7 @@ describe('riskScoring engine', () => {
     }
   });
 
-  it('identifies cross-chain bridge hops and elevates obfuscation risk score', () => {
-    const bridgeNodes = [
+  it('identifies cross-chain bridge hops and elevates obfuscation risk score', () => {    const bridgeNodes = [
       { id: 'suspect', type: 'suspect', balance: '3.0 BTC' },
       { id: 'hop1', type: 'hop', balance: '2.99 BTC' },
       { 
@@ -139,5 +138,69 @@ describe('riskScoring engine', () => {
     expect(result.dimensions.obfuscationScore).toBeGreaterThan(0);
     expect(result.threatSignatures.some(s => s.name === 'Cross-chain bridge exit')).toBe(true);
     expect(result.threatBadge.level).toBe('HIGH');
+  });
+
+  it('scores consolidation sweeps only when graph links show fan-in', () => {
+    const nodes = [
+      { id: 'hub', type: 'hop', details: { kycStatus: 'UNREGISTERED TRANSIT' } },
+      { id: 'gov-out', type: 'receiver', balance: '5.99 BTC', details: { kycStatus: 'HOLDING FUNDS (UNSPENT)' } },
+      { id: 'branch', type: 'hop', balance: '0.01 BTC', details: {} }
+    ];
+    const links = ['a', 'b', 'c', 'd', 'e', 'f'].map(s => ({ source: s, target: 'hub', value: '1.0 BTC' }));
+    links.push({ source: 'hub', target: 'gov-out', value: '5.99 BTC' });
+    links.push({ source: 'hub', target: 'branch', value: '0.01 BTC' });
+
+    const withLinks = calculateForensicRiskScore({ nodes, links });
+    expect(withLinks.hasSweep).toBe(true);
+    expect(withLinks.dimensions.consolidationScore).toBe(8);
+    expect(withLinks.threatSignatures.some(s => s.category === 'Sweep check')).toBe(true);
+
+    // Node-only callers degrade to no sweep signal instead of crashing.
+    const nodesOnly = calculateForensicRiskScore(nodes);
+    expect(nodesOnly.hasSweep).toBe(false);
+    expect(nodesOnly.dimensions.consolidationScore).toBe(0);
+  });
+
+  it('escalates custodial sweep hubs to imminent with freeze guidance', () => {
+    const nodes = [
+      { id: 'hub', type: 'hop', entityName: 'Exchange aggregator', details: { kycStatus: 'IDENTITY VERIFIED' } },
+      { id: 'out', type: 'receiver', balance: '5.99 BTC', details: { kycStatus: 'UNREGISTERED' } }
+    ];
+    const links = ['a', 'b', 'c', 'd', 'e', 'f'].map(s => ({ source: s, target: 'hub', value: '1.0 BTC' }));
+    links.push({ source: 'hub', target: 'out', value: '5.99 BTC' });
+
+    const result = calculateForensicRiskScore({ nodes, links });
+    expect(result.sweepImminent).toBe(true);
+    expect(result.dimensions.consolidationScore).toBe(15);
+    expect(result.statutoryAction.recommendations.some(r => r.includes('Consolidation in progress'))).toBe(true);
+  });
+
+  it('boosts sanctioned-entity contact but never the FBI seizure wallet', () => {
+    const sanctioned = calculateForensicRiskScore([
+      { id: 'in_1L26zGarantexDeposit', type: 'hop', details: { address: '1L26zGarantexDepositWalletAddress' } },
+      { id: 'out_x', type: 'receiver', details: { kycStatus: 'UNREGISTERED' } }
+    ]);
+    expect(sanctioned.dimensions.attributionScore).toBe(15);
+    expect(sanctioned.entityHits.length).toBe(1);
+    expect(sanctioned.threatSignatures.some(s => s.name === 'Sanctioned entity contact')).toBe(true);
+
+    const seizure = calculateForensicRiskScore([
+      { id: 'out_bc1qa5wksynth000001', type: 'receiver', details: { address: 'bc1qa5wksynthseizure000001', kycStatus: 'HOLDING FUNDS (UNSPENT)' } }
+    ]);
+    expect(seizure.dimensions.attributionScore).toBe(0);
+    expect(seizure.entityHits.length).toBe(0);
+  });
+
+  it('holds historical cases at the era cap despite sweep links and old tags', () => {
+    const nodes = [
+      { id: 'in_p2pk', type: 'suspect', details: { scriptStandard: 'P2PK', kycStatus: 'HISTORICAL UNSPENT UTXO' } },
+      { id: 'out_p2pk', type: 'receiver', details: { scriptStandard: 'P2PK', kycStatus: 'HISTORICAL UNSPENT UTXO' } }
+    ];
+    const links = ['a', 'b', 'c', 'd'].map(s => ({ source: s, target: 'in_p2pk', value: '1.0 BTC' }));
+    const result = calculateForensicRiskScore({ nodes, links });
+    expect(result.isHistoricalEra).toBe(true);
+    expect(result.dimensions.consolidationScore).toBe(0);
+    expect(result.dimensions.attributionScore).toBe(0);
+    expect(result.riskScore).toBeLessThanOrEqual(25);
   });
 });

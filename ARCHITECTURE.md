@@ -82,7 +82,7 @@ flowchart TD
 | **Bundler** | **Vite 8** | Sub-second HMR, optimized ES-module chunking, and strict tree-shaking for lean bundles. |
 | **Icons & UI** | **Lucide React** + Glassmorphic CSS | High-contrast law enforcement dark-mode UI; Outfit for typography, JetBrains Mono for addresses/hashes. |
 | **Blockchain Gateways** | **Blockstream.info + Mempool.space** | RESTful Esplora-compatible endpoints with automatic fallback, timeout handling, and no API key barriers. |
-| **Testing** | **Vitest 3.2** | 21 test suites, 125 unit tests verifying financial correctness, heuristic accuracy, and zero regression. |
+| **Testing** | **Vitest 3.2** | 33 test suites, 221 unit tests verifying financial correctness, heuristic accuracy, and zero regression. |
 | **Code Quality** | **OxLint** | High-performance Rust-based linter ensuring strict correctness and zero undefined symbols. |
 
 ---
@@ -140,7 +140,7 @@ Quantifies the exact proportion of "dirty" or suspect capital contaminating down
 
 #### 3. How It Works Mechanically
 The algorithm constructs a directed adjacency graph with satoshi values and computes taint convergence using a fixed-point iterative relaxation loop (up to $2 \times N$ passes until $\Delta < 10^{-9}$):
-1. **Three Judicial Taint Models**:
+1. **Three Judicial Taint Models** (plus model comparison and audit):
    - **Proportionate / Haircut Model (Default)**: Downstream outputs inherit taint percentage weighted by value contributed:
      $$\text{Taint}(v) = \frac{\sum_{u \in \text{Pred}(v)} \text{Taint}(u) \cdot \text{Val}(u \to v)}{\text{TotalInflow}(v)}$$
      *(Note: Fan-out does not dilute the taint percentage).*
@@ -155,6 +155,8 @@ The algorithm constructs a directed adjacency graph with satoshi values and comp
      - **High** ($\ge 75\%$): Crimson `#ef4444`
 3. **Forensic Taint Ledger**:
    - Emits a tabular accounting ledger: Total Balance, Tainted Sats, Clean Sats, and Risk Tier for every hop.
+   - `compareTaintModels` runs all three models over one graph and reports per-node spread plus terminal-receiver tainted sats per model, so the filing choice is explicit before a Section 65B exhibit is sealed.
+   - `auditTaintConservation` mechanically verifies bounds, seed pinning, and FIFO no-minting, catching post-hoc ledger edits and engine regressions.
 
 ---
 
@@ -229,11 +231,12 @@ Detects complex money laundering typologies: smurfing/structuring, consolidation
 3. **Bridge & Instant Swap Router Fingerprints**:
    - Matches known prefix patterns and address signatures for non-custodial instant exchanges: FixedFloat (`1Fixed`), ChangeNOW (`bc1qchg`), SideShift (`3Side`), ThorChain Asgard Vault (`bc1qthor`).
 4. **Endpoint Activity Profiling (`classifyEndpointActivity`)**:
-   Pure function of the on-chain address summary (total funded, spent, balance, tx count):
+   Pure function of the on-chain address summary (total funded, spent, balance, tx count, mempool stats):
    - `SINGLE_USE_DEPOSIT`: Funded 1–2 times, 0 spent, balance $>0$ (classic one-time drop or exchange deposit).
    - `DRAINED_PASS_THROUGH`: Balance $= 0$, funds immediately forwarded.
    - `ACTIVE_REUSED_WALLET`: High tx count ($\ge 10$), ongoing two-way traffic.
    - `DORMANT_HOLDER`: Unspent balance, older multi-tx funding.
+   - `hasMempoolActivity`: Flags pending unconfirmed transactions currently active in the mempool for real-time exfiltration alerts.
 
 ---
 
@@ -247,12 +250,14 @@ Synthesizes all structural, network, and entity signals into an objective Risk S
 - [`src/components/RiskAnalyzer.jsx`](file:///e:/Git%20Repo/Mini-proj/src/components/RiskAnalyzer.jsx)
 
 #### 3. How It Works Mechanically
-1. **Five Orthogonal Forensic Dimensions**:
+1. **Five Orthogonal Forensic Dimensions** (plus two graph-derived signals):
    - **Obfuscation Score (Default Weight: 35%)**: Presence of CoinJoin mixers, Wasabi pools, or instant swap routers.
    - **Layering Depth Score (Default Weight: 12% per hop, max 40%)**: Distance and hop count from the original suspect UTXO.
    - **Destination Attribution Score (Default Weight: 18%)**: High risk if funds terminate at unspent private wallets or non-KYC hubs; reduced if terminating at a KYC-verified regulated exchange.
    - **Velocity Score (Default: 3–6%)**: Rapid automated movement across blocks.
    - **Protocol Anomalies (Default: 6%)**: Replace-By-Fee (RBF) signaling, extreme sat/vB fee anomalies, or non-standard scripts.
+   - **Consolidation Sweep (Fixed: 15 imminent / 8 watch)**: Fan-in hubs from `scanCaseSweeps` (single-out and dominant-2-out seizure shapes); node-only callers score no signal rather than failing.
+   - **Sanctioned/Darknet Attribution (Fixed: 15 / 10)**: Curated `tagKnownEntity` hits on case addresses; historical-era cases score zero on both (designations postdate them), and the FBI seizure prefix (`bc1qa5wk`) is tagged `seizure`, never sanctioned.
 2. **Historical Era Modulation**:
    - Satoshi-era transactions (2009–2011, P2PK scripts, coinbase reward splits) are calibrated with an era discount (maximum risk capped at 25) so innocent early adoption isn't flagged as money laundering.
 3. **Statutory Action Mapping**:
@@ -431,7 +436,7 @@ When demonstrating AegisTrace to project mentors or evaluators, follow this stru
 | Step | Action | What to Show & Explain to Mentor |
 |---|---|---|
 | **1** | **Dashboard** | Show the clean dashboard. Point out the **Live Mainnet / Sandbox toggle** and the real-time session totals in BTC, USD, and INR. |
-| **2** | **Pick Sample Case** | Click **"2017 Wannacry Ransom Split"** or **"First Ever Bitcoin Tx (Hal Finney)"** from the verified forensic corpus. Show how it loads live mainnet data. |
+| **2** | **Paste a Target** | Paste any mainnet txid or address (keep a known id from `src/data/forensicCorpus.js` handy as your own reference). Show how it loads live mainnet data. |
 | **3** | **Tracing Explorer** | Show the vector graph. Point out: **Origin (Red/Suspect) $\to$ Transit Hops (Orange) $\to$ Terminal Receiver (Green)**. |
 | **4** | **Highlight Critical Trail** | Toggle **"Focus Trail"** (Dijkstra algorithm finds the dominant money path) and **"Taint Heatmap"** (shows the contamination dilution percentage). |
 | **5** | **Deep Node Metadata** | Click on any node. Show the sidebar with: **Node Centrality (in/out degree)**, **Endpoint Profile (single-use deposit vs pass-through)**, and **Script Disassembler** showing raw opcodes. |
@@ -488,32 +493,44 @@ When demonstrating AegisTrace to project mentors or evaluators, follow this stru
 
 ## 7. Verification & Test Suite Summary
 
-The AegisTrace codebase maintains 100% test pass status across **21 separate test suites** comprising **125 automated unit tests**:
+The AegisTrace codebase maintains 100% test pass status across **33 separate test suites** comprising **221 automated unit tests**:
 
 ```text
-✓ src/utils/taintAnalysis.test.js (6 tests)
-✓ src/utils/clusteringAlgorithms.test.js (9 tests)
-✓ src/utils/obfuscationForensics.test.js (5 tests)
-✓ src/utils/structuringAnalysis.test.js (6 tests)
-✓ src/utils/graphAlgorithms.test.js (5 tests)
-✓ src/utils/endReceiverAccuracy.test.js (18 tests)
-✓ src/utils/sweepAndFee.test.js (7 tests)
-✓ src/utils/chainOfCustody.test.js (5 tests)
+✓ src/utils/crossChainForensics.test.js (11 tests)
+✓ src/utils/graphAlgorithms.test.js (6 tests)
+✓ src/utils/taintAnalysis.test.js (14 tests)
+✓ src/utils/clusteringAlgorithms.test.js (14 tests)
+✓ src/utils/watchlistManager.test.js (7 tests)
+✓ src/utils/obfuscationForensics.test.js (6 tests)
+✓ src/utils/traceVerification.test.js (12 tests)
+✓ src/utils/endReceiverAccuracy.test.js (19 tests)
 ✓ src/utils/forensicUtils.test.js (7 tests)
-✓ src/utils/scriptDecoder.test.js (7 tests)
-✓ src/utils/riskScoring.test.js (5 tests)
-✓ src/utils/syndicateAnalysis.test.js (5 tests)
-✓ src/utils/endpointProfile.test.js (5 tests)
+✓ src/utils/reuseGating.test.js (1 test)
+✓ src/utils/riskScoring.test.js (11 tests)
+✓ src/utils/bitcoinApi.test.js (10 tests)
+✓ src/utils/gatewayCircuitBreaker.test.js (6 tests)
+✓ src/utils/peelDepth.test.js (1 test)
+✓ src/utils/traceBranches.test.js (6 tests)
 ✓ src/utils/mixerPrecision.test.js (6 tests)
-✓ src/utils/bitcoinApi.test.js (5 tests)
-✓ src/utils/watchlistManager.test.js (4 tests)
-✓ src/utils/narrativeGenerator.test.js (4 tests)
-✓ src/utils/unknownTxHandling.test.js (4 tests)
-✓ src/utils/caseHelpers.test.js (4 tests)
-✓ src/utils/knownEntities.test.js (2 tests)
 ✓ src/utils/forensicCorpus.test.js (6 tests)
+✓ src/utils/unknownTxHandling.test.js (4 tests)
+✓ src/utils/narrativeGenerator.test.js (4 tests)
+✓ src/utils/knownEntities.test.js (5 tests)
+✓ src/utils/traceHeuristics.test.js (5 tests)
+✓ src/utils/chainOfCustody.test.js (6 tests)
+✓ src/utils/accuracy.test.js (1 test)
+✓ src/utils/sweepAndFee.test.js (10 tests)
+✓ src/utils/structuringAnalysis.test.js (6 tests)
+✓ src/utils/syndicateAnalysis.test.js (5 tests)
+✓ src/utils/caseHelpers.test.js (5 tests)
+✓ src/utils/judicialAccuracy.test.js (5 tests)
+✓ src/utils/scriptDecoder.test.js (7 tests)
+✓ src/utils/endpointProfile.test.js (6 tests)
+✓ src/components/EmptyState.test.jsx (1 test)
+✓ src/components/RiskAnalyzer.test.jsx (4 tests)
+✓ src/components/HeuristicClustering.test.jsx (4 tests)
 
-Total: 21 test files passed, 125 tests passed (100% passing)
+Total: 33 test files passed, 221 tests passed (100% passing)
 ```
 
 ---
@@ -524,7 +541,8 @@ Total: 21 test files passed, 125 tests passed (100% passing)
 src/
 ├── components/
 │   ├── CommandPalette.jsx         # Global Ctrl+K command bar
-│   ├── Dashboard.jsx              # Main dashboard, portfolio metrics, sample corpus
+│   ├── Dashboard.jsx              # Main dashboard, portfolio metrics, paste-to-trace search
+│   ├── EmptyState.jsx             # Clean placeholder UI for empty states
 │   ├── ErrorBoundary.jsx          # Top-level React error boundary
 │   ├── GraphExplorer.jsx          # Tracing tab layout container
 │   ├── HeuristicClustering.jsx    # CIOH, Shannon entropy, and peeling chains
@@ -550,29 +568,91 @@ src/
 │   └── useWatchlist.js            # Watchlist state & toggle hook
 ├── constants/
 │   ├── config.js                  # Gateway URLs, cache TTLs, trace limits
-│   └── legalConstants.js          # Exchange SLAs, Section 67 & 65B templates
+│   ├── legalConstants.js          # Exchange SLAs, Section 67 & 65B templates
+│   └── navigation.js              # Tab routes and shortcuts
 ├── data/
-│   ├── forensicCorpus.js          # Verified historical mainnet test corpus
+│   ├── forensicCorpus.js          # Reference list of known mainnet IDs
+│   ├── judicialCorpus.js          # Certified ground truth from unsealed court dockets (FBI/IRS-CI/BKA)
 │   └── scenarios.js               # Seed baseline forensic cases
 └── utils/
+    ├── accuracy.js                # Labeled ground-truth decision boundary validator
     ├── bitcoinApi.js              # Esplora gateway, BFS recursive tracer
-    ├── traceHeuristics.js         # 8-factor weighted change classifier
-    ├── taintAnalysis.js           # Haircut, FIFO, and Poison taint engines
-    ├── clusteringAlgorithms.js    # DSU, CIOH, Shannon entropy, peel detector
-    ├── syndicateAnalysis.js       # Cross-case entity resolution
-    ├── riskScoring.js             # 5-dimensional forensic risk scoring
+    ├── caseHelpers.js             # Case builders and algorithmic mock generation
     ├── chainOfCustody.js          # Cryptographic hash-chained custody ledger
-    ├── scriptDecoder.js           # Opcode disassembler & OP_RETURN parser
-    ├── obfuscationForensics.js    # Mixers, instant swaps, sweep detector
-    ├── structuringAnalysis.js     # Smurfing & sub-threshold payment clustering
+    ├── clusteringAlgorithms.js    # DSU, CIOH, Shannon entropy, peel detector
+    ├── crossChainForensics.js     # Bridge memo disassembler & EVM/Tron target extractor
+    ├── download.js                # File export utilities (JSON, text, CSV)
+    ├── forensicUtils.js           # Address validation, fiat conversions, CSV export
     ├── graphAlgorithms.js         # Dijkstra pathfinder, cycle detector, centrality
+    ├── graphBuilders.js           # Normalized node & link construction helpers
     ├── knownEntities.js           # Attribution tags & block explorer links
     ├── narrativeGenerator.js      # Automated plain-text investigative narrative
-    ├── watchlistManager.js        # Mempool polling & local watchlist storage
-    ├── forensicUtils.js           # Address validation, fiat conversions, CSV export
+    ├── obfuscationForensics.js    # Mixers, instant swaps, sweep detector
+    ├── riskScoring.js             # 5-dimensional forensic risk scoring
+    ├── scriptDecoder.js           # Opcode disassembler & OP_RETURN parser
     ├── storage.js                 # Defensive localStorage wrappers
-    └── download.js                # File export utilities (JSON, text, CSV)
+    ├── structuringAnalysis.js     # Smurfing & sub-threshold payment clustering
+    ├── syndicateAnalysis.js       # Cross-case entity resolution
+    ├── taintAnalysis.js           # Haircut, FIFO, and Poison taint engines
+    ├── traceHeuristics.js         # 8-factor weighted change classifier
+    ├── traceVerification.js       # Mathematical invariant & multi-model assurance engine
+    └── watchlistManager.js        # Mempool polling & local watchlist storage
 ```
+
+---
+
+## 9. System Evaluation, Future Scope & Engineering Roadmap
+
+A comprehensive architectural evaluation has identified five key engineering pillars to expand AegisTrace's capabilities:
+
+### Pillar 1: Data Persistence & Cryptographic Local Storage
+1. **Migration to IndexedDB (Dexie.js / Native IDB)**:
+   - **Rationale**: `localStorage` enforces a strict 5MB quota limit that risks data eviction when storing large graphs (>50 cases or deep multi-hop branches).
+   - **Implementation**: Adopt an asynchronous IndexedDB store supporting 500MB+ of persistent local cases, offline graph geometries, and raw transaction byte caches.
+2. **At-Rest Zero-Knowledge Vault Encryption (AES-GCM-256)**:
+   - **Rationale**: Investigative case notes, target names, and suspect addresses must be protected against forensic extraction from seized analyst workstations.
+   - **Implementation**: Introduce PBKDF2/WebCrypto key derivation from an investigator master passphrase to encrypt local database entries before persistence.
+3. **Private Node / Air-Gapped RPC Gateway Support**:
+   - **Rationale**: High-security intelligence units cannot ping public web APIs due to operational security (OPSEC).
+   - **Implementation**: Enable customizable local RPC/Esplora endpoints (`http://localhost:3002` or private `bitcoind` RPC) configurable in user settings.
+
+### Pillar 2: Forensic Depth & Advanced De-anonymization
+1. **CoinJoin Sub-Cluster Unmixing (Subset-Sum / Knapsack Solver)**:
+   - **Rationale**: While CoinJoin transactions halt CIOH clustering to prevent false positives, 2-party Wasabi churns and JoinMarket mixes often leak input-output linkages via exact subset sums ($\sum \text{Inputs} \approx \text{Output}_{\text{mix}} + \text{Output}_{\text{change}} + \text{Fee}$).
+   - **Implementation**: Integrate a lightweight subset-sum solver to link probable change and peel outputs across partial CoinJoins.
+2. **Lightning Network & Submarine Swap Script Recognition**:
+   - **Rationale**: Illicit syndicates increasingly off-ramp to Lightning Network Layer 2 to break UTXO chains.
+   - **Implementation**: Detect 2-of-2 multisig funding templates and HTLC (Hashed Time-Locked Contract) scripts in `scriptDecoder.js` to flag `LIGHTNING_OFF_RAMP` transitions.
+3. **Live Multi-Chain Token Tracing (Tron TRC-20 & Ethereum ERC-20)**:
+   - **Rationale**: `crossChainForensics.js` currently extracts bridge destination addresses from Bitcoin memos.
+   - **Implementation**: Implement direct read-only RPC connectors to TronGrid / Blockscout to trace Tether (USDT) token transfers once funds hop chains.
+
+### Pillar 3: Court Evidence Standards & Interoperability
+1. **Asymmetric Hardware & Digital Signatures (ECDSA P-256 / Ed25519)**:
+   - **Rationale**: Handwritten canvas signatures are persuasive in court, but cryptographic digital signatures under Section 65B Evidence Act / Section 63 BSA 2023 provide ironclad non-repudiation.
+   - **Implementation**: Integrate WebCrypto `SubtleCrypto.sign()` allowing investigators to digitally sign Section 65B integrity digests with their officer keypair or USB cryptographic tokens (e-Mudhra / FIPS-140).
+2. **Threat Intelligence & Graph Database Export Formats**:
+   - **STIX 2.1 JSON**: Standardized cyber threat intelligence indicators for CERT-In / Interpol data exchanges.
+   - **Neo4j Cypher Script (`.cyp`)**: Direct graph ingestion into enterprise link-analysis tools (Neo4j, Maltego, i2 Analyst's Notebook).
+3. **OpenTimestamps (OTS) Proof Anchoring**:
+   - **Rationale**: Mathematically prove that evidence was collected prior to a specific block time without relying on subjective officer testimony.
+   - **Implementation**: Generate OTS Bitcoin block commitments for sealed case hashes.
+
+### Pillar 4: Visualization Scalability & Ergonomics
+1. **Cluster Node Collapsing / Input Aggregation**:
+   - **Rationale**: High-fan-in transactions (e.g. 50 inputs) clutter the canvas and degrade visual comprehension.
+   - **Implementation**: Allow analysts to collapse co-spent input nodes into a unified `[Cluster: 50 Inputs, 15.2 BTC]` node with single-click expansion.
+2. **Canvas / WebGL Rendering Layer for Deep Graphs**:
+   - **Rationale**: Vector SVG rendering degrades past 100+ nodes on modest client hardware.
+   - **Implementation**: Provide an adaptive WebGL/Canvas rendering pipeline for deep multi-hop exploration.
+3. **High-Resolution Vector Export**:
+   - Export court-ready vector SVGs and 300 DPI PNG graph evidence diagrams with embedded case timestamps and cryptographic watermarks.
+
+### Pillar 5: Analyst Operational Workflow
+1. **Real-Time Mempool WebSocket Integration**:
+   - Integrate `wss://mempool.space/api/v1/ws` for instant, sub-second push notifications of unconfirmed transactions touching watched addresses.
+2. **Batch Address Seizure Importer**:
+   - Allow officers to paste or upload CSV lists of 50+ addresses seized from suspect devices to immediately produce co-spending and taint correlation matrices.
 
 ---
 *Document sealed and verified against AegisTrace v0.0.0 codebase.*

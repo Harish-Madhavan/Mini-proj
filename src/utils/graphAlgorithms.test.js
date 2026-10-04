@@ -3,7 +3,9 @@ import {
   computeLayeredGraphLayout, 
   findCriticalMoneyTrail, 
   detectCircularFlows, 
-  computeNodeCentralityMetrics 
+  computeNodeCentralityMetrics,
+  getCollapsibleInputClusters,
+  collapseGraphClusters
 } from './graphAlgorithms';
 
 describe('graphAlgorithms', () => {
@@ -40,6 +42,19 @@ describe('graphAlgorithms', () => {
       expect(result.path).toEqual(['suspect_1', 'tx_hub_1', 'hop_1', 'receiver_1']);
       expect(result.totalValue).toBeGreaterThan(20);
       expect(result.linkIndices.length).toBe(3);
+    });
+
+    it('selects reachable receiver even if an unreachable node has higher inflow', () => {
+      const disconnectedNodes = [
+        ...sampleNodes,
+        { id: 'unreachable_big', type: 'receiver', label: 'Unreachable' }
+      ];
+      const disconnectedLinks = [
+        ...sampleLinks,
+        { source: 'external_source', target: 'unreachable_big', value: '100.0 BTC' }
+      ];
+      const result = findCriticalMoneyTrail(disconnectedNodes, disconnectedLinks, 'suspect_1');
+      expect(result.path).toEqual(['suspect_1', 'tx_hub_1', 'hop_1', 'receiver_1']);
     });
   });
 
@@ -79,6 +94,50 @@ describe('graphAlgorithms', () => {
       expect(metrics['suspect_1'].inDegree).toBe(0);
       expect(metrics['tx_hub_1'].totalDegree).toBe(2);
       expect(metrics['receiver_1'].inDegree).toBe(1);
+    });
+  });
+
+  describe('Cluster Node Collapsing', () => {
+    it('identifies and collapses multi-input fan-in clusters into a single entity badge', () => {
+      const nodes = [
+        { id: 'in_1', type: 'hop', balance: '1.0 BTC' },
+        { id: 'in_2', type: 'hop', balance: '2.0 BTC' },
+        { id: 'in_3', type: 'hop', balance: '3.0 BTC' },
+        { id: 'in_4', type: 'hop', balance: '4.0 BTC' },
+        { id: 'tx_consolidation', type: 'tx', label: 'Sweep Tx' },
+        { id: 'out_receiver', type: 'receiver', balance: '9.99 BTC' }
+      ];
+      const links = [
+        { source: 'in_1', target: 'tx_consolidation', value: '1.0 BTC' },
+        { source: 'in_2', target: 'tx_consolidation', value: '2.0 BTC' },
+        { source: 'in_3', target: 'tx_consolidation', value: '3.0 BTC' },
+        { source: 'in_4', target: 'tx_consolidation', value: '4.0 BTC' },
+        { source: 'tx_consolidation', target: 'out_receiver', value: '9.99 BTC' }
+      ];
+
+      const clusters = getCollapsibleInputClusters(nodes, links, 3);
+      expect(clusters.has('tx_consolidation')).toBe(true);
+      expect(clusters.get('tx_consolidation').inputCount).toBe(4);
+      expect(clusters.get('tx_consolidation').totalBtc).toBe(10);
+
+      const collapsed = collapseGraphClusters(nodes, links, { minClusterSize: 3 });
+      expect(collapsed.isCollapsed).toBe(true);
+
+      // The 4 input nodes are replaced by 1 cluster node
+      const clusterNode = collapsed.nodes.find(n => n.id === 'cluster_tx_consolidation');
+      expect(clusterNode).toBeDefined();
+      expect(clusterNode.type).toBe('cluster');
+      expect(clusterNode.subNodeIds.length).toBe(4);
+      expect(clusterNode.balance).toBe('10 BTC');
+
+      // The 4 links into the tx are replaced by 1 link from the cluster node
+      const clusterLink = collapsed.links.find(l => l.source === 'cluster_tx_consolidation');
+      expect(clusterLink).toBeDefined();
+      expect(clusterLink.target).toBe('tx_consolidation');
+      expect(clusterLink.value).toBe('10 BTC');
+
+      // Total nodes reduced from 6 to 3 (cluster, tx, receiver)
+      expect(collapsed.nodes.length).toBe(3);
     });
   });
 });

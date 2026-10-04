@@ -2,10 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { 
   parseCrossChainMemo, 
   identifyBridgeEntity, 
-  analyzeCaseCrossChainActivity 
+  analyzeCaseCrossChainActivity,
+  validateMultiChainAddress,
+  fetchMultiChainAssetDetails
 } from './crossChainForensics';
 
 describe('crossChainForensics Engine', () => {
+
   it('correctly decodes standard THORChain cross-chain swap memos', () => {
     const memo = 'SWAP:ETH.USDT:0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045:100000';
     const result = parseCrossChainMemo(memo);
@@ -114,4 +117,52 @@ describe('crossChainForensics Engine', () => {
     expect(identifyBridgeEntity(mayaNode)?.id).toBe('mayaprotocol');
     expect(identifyBridgeEntity(sisNode)?.id).toBe('symbiosis');
   });
+
+  it('correctly decodes SideShift AI cross-chain swap memos', () => {
+    const memo = 'SIDESHIFT:0x71C8389370415be37b78901D92E43f656821d374:USDT';
+    const res = parseCrossChainMemo(memo);
+
+    expect(res).not.toBeNull();
+    expect(res.protocol).toBe('SideShift AI');
+    expect(res.destinationChain).toBe('Ethereum');
+    expect(res.destinationAddress).toBe('0x71C8389370415be37b78901D92E43f656821d374');
+    expect(res.targetAsset).toBe('USDT');
+    expect(res.explorerUrl).toBe('https://etherscan.io/address/0x71C8389370415be37b78901D92E43f656821d374');
+  });
+
+  it('correctly extracts Solana target addresses from notes', () => {
+    const note = 'Solana payout target: 5U3bKWKubDU4i4GzY3fP4Z1w27iY7F2yJ5M2D5G8x7kZ';
+    const res = parseCrossChainMemo(note);
+
+    expect(res).not.toBeNull();
+    expect(res.destinationChain).toBe('Solana');
+    expect(res.destinationAddress).toBe('5U3bKWKubDU4i4GzY3fP4Z1w27iY7F2yJ5M2D5G8x7kZ');
+    expect(res.explorerUrl).toBe('https://solscan.io/account/5U3bKWKubDU4i4GzY3fP4Z1w27iY7F2yJ5M2D5G8x7kZ');
+  });
+
+  it('validates multi-chain addresses for Ethereum, Tron, and Solana', () => {
+    expect(validateMultiChainAddress('0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045').isValid).toBe(true);
+    expect(validateMultiChainAddress('0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045').network).toBe('Ethereum');
+
+    expect(validateMultiChainAddress('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t').isValid).toBe(true);
+    expect(validateMultiChainAddress('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t').network).toBe('Tron');
+
+    expect(validateMultiChainAddress('invalid_address').isValid).toBe(false);
+  });
+
+  it('retrieves multi-chain USDT token contract and asset tracking details', async () => {
+    const ethRes = await fetchMultiChainAssetDetails('0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045', 'Ethereum', false);
+    expect(ethRes.success).toBe(true);
+    expect(ethRes.network).toBe('Ethereum');
+    expect(ethRes.tokenSymbol).toBe('USDT');
+    expect(ethRes.contractVerified).toBe(true);
+
+    const tronRes = await fetchMultiChainAssetDetails('TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7', 'Tron', false);
+    expect(tronRes.success).toBe(true);
+    expect(tronRes.network).toBe('Tron');
+    expect(tronRes.tokenSymbol).toBe('USDT');
+    expect(tronRes.contractAddress).toBe('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t');
+  });
 });
+
+

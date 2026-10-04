@@ -12,10 +12,16 @@ describe('knownEntities', () => {
     expect(garantex).not.toBeNull();
     expect(garantex.category).toBe('sanctioned');
     expect(garantex.risk).toBe('critical');
+  });
 
-    const lazarus = tagKnownEntity('bc1qa5wkDPRKAttributedCluster');
-    expect(lazarus).not.toBeNull();
-    expect(lazarus.label).toContain('Lazarus');
+  it('tags the FBI seizure wallet as secured government funds, never sanctioned', () => {
+    // The bc1qa5wk prefix is the FBI Individual-X forfeiture wallet
+    // (69,370 BTC, 0 spends). Scoring it as a sanctioned contact would be
+    // a false attribution in the risk engine.
+    const seizure = tagKnownEntity('bc1qa5wksynthseizurewallet000001');
+    expect(seizure).not.toBeNull();
+    expect(seizure.category).toBe('seizure');
+    expect(seizure.category).not.toBe('sanctioned');
   });
 
   it('returns explorer urls for tx and bitcoin address', () => {
@@ -33,5 +39,10 @@ describe('knownEntities', () => {
     const trxUrl = getExplorerUrls('TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7');
     expect(trxUrl).not.toBeNull();
     expect(trxUrl.mempool).toContain('tronscan.org');
+
+    const solUrl = getExplorerUrls('5U3bKWKubDU4i4GzY3fP4Z1w27iY7F2yJ5M2D5G8x7kZ');
+    expect(solUrl).not.toBeNull();
+    expect(solUrl.mempool).toContain('solscan.io');
+    expect(solUrl.label).toContain('SOL');
   });
 });

@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { SCENARIOS } from '../data/scenarios';
-import { 
-  traceEndReceiver, 
-  fetchAddressTxs, 
-  formatBlockstreamTx, 
+import {
+  traceEndReceiver,
+  fetchAddressTxs,
+  findSignificantAddressTx,
+  fetchAddressSummary,
+  formatBlockstreamTx,
   fetchAddressSummaries,
   onGatewayEvent,
   getGatewayStatus,
@@ -224,15 +226,32 @@ export function CaseProvider({ children }) {
       } 
       else if (trimmed.startsWith('bc1') || trimmed.startsWith('1') || trimmed.startsWith('3')) {
         showToast("Looking up address history...", "info", 2500);
-        const txs = await fetchAddressTxs(trimmed);
-        if (txs && txs.length > 0) {
-          const latestTx = txs[0];
-          const formatted = await traceEndReceiver(latestTx.txid, traceDepth);
+        const found = await findSignificantAddressTx(trimmed);
+        if (found.tx) {
+          if (found.significant && found.pages > 1) {
+            showToast(
+              `Newest activity is dust — tracing the ${satsToBtc(found.volumeSats, 2)} BTC movement ${found.pages - 1} page(s) back instead.`,
+              "info",
+              4000
+            );
+          } else if (!found.significant) {
+            showToast("Only dust-size activity found — tracing the largest available movement.", "warning", 3500);
+          }
+          // Accurate lifetime tx count for the dossier; degrades to the
+          // scanned count when the summary endpoint is unreachable.
+          let totalCount = found.scanned;
+          try {
+            const summary = await fetchAddressSummary(trimmed);
+            if (Number.isFinite(summary?.chain_stats?.tx_count)) totalCount = summary.chain_stats.tx_count;
+          } catch {
+            // keep scanned count
+          }
+          const formatted = await traceEndReceiver(found.tx.txid, traceDepth);
           if (!formatted.nodes?.length) {
             throw new Error(`No trace data for ${trimmed.slice(0, 12)}...`);
           }
           setScenarios(prev => {
-            const res = createAddressTraceCase(trimmed, txs.length, latestTx.txid, formatted, prev);
+            const res = createAddressTraceCase(trimmed, totalCount, found.tx.txid, formatted, prev);
             queueMicrotask(() => setActiveCaseId(res.newCaseId));
             return res.scenarios.slice(0, MAX_SCENARIOS);
           });
