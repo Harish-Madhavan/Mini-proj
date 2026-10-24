@@ -243,7 +243,10 @@ ${custody.gaps.length > 0 ? custody.gaps.map(g => `- Gap after seq ${g.afterSeq}
 - Multi-Model Concordance: ${Math.round((traceAudit?.concordance?.score || 0) * 100)}% agreement across FIFO, Proportional, and Poison judicial models
 - Summary: ${traceAudit?.summary || 'N/A'}
 
-## 8. Officer remarks
+## 8. Cross-Chain Protocol Activity
+${crossChainReport && crossChainReport.crossChainHops?.length > 0 ? crossChainReport.crossChainHops.map((h, i) => `${i + 1}. **${h.bridgeName}**: Destination Chain: ${h.destinationChain} (${h.targetAsset}) | Memo Target: \`${h.destinationAddress}\``).join('\n') : '- No cross-chain bridge memo operations identified.'}
+
+## 9. Officer remarks
 ${investigatorNotes}
 
 ---
@@ -674,6 +677,8 @@ ${investigatorNotes}
                       ref={canvasRef}
                       width="180"
                       height="70"
+                      role="img"
+                      aria-label="Investigating officer signature pad"
                       onMouseDown={startDrawing}
                       onMouseMove={draw}
                       onMouseUp={stopDrawing}

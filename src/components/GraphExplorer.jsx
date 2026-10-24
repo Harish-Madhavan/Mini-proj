@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import GraphCanvas from './graph/GraphCanvas';
-import MetadataSidebar from './graph/MetadataSidebar';
-import TransactionTimeline from './graph/TransactionTimeline';
+import { GraphCanvas, MetadataSidebar, TransactionTimeline } from './graph';
 import { useCase } from '../hooks/useCase';
 
 import { computeLayeredGraphLayout, collapseGraphClusters } from '../utils/graphAlgorithms';

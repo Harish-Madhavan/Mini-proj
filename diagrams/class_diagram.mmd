@@ -1,0 +1,69 @@
+classDiagram
+    class CaseContext {
+        -Array cases
+        -Object activeCase
+        -Set watchlist
+        -Boolean isTracing
+        +createCase(title)
+        +setTarget(txid)
+        +dispatch(action)
+        +exportAuditReport()
+    }
+    class BitcoinApiGateway {
+        -String primaryEndpoint
+        -String fallbackEndpoint
+        -Map lruCache
+        -String circuitBreakerState
+        +fetchTx(txid)
+        +fetchOutspends(txid)
+        +fetchAddressMeta(addr)
+        +tripFailover()
+    }
+    class TraceHeuristicsEngine {
+        -Object weights
+        -Float threshold
+        -Float depthDecay
+        -Integer dustLimit
+        +scoreOutput(params)
+        +isRoundValue(sats)
+        +evaluateBIP69(vout)
+        +computeConfidence()
+    }
+    class TaintAnalysisEngine {
+        -String activeModel
+        -Map taintLedger
+        -Float seedVolume
+        -Float conservationTolerance
+        +computeHaircut(tx)
+        +computeFIFO(tx)
+        +computePoison(tx)
+        +auditValueConservation()
+    }
+    class ClusteringEngine {
+        -Object dsu
+        -Map clusterMap
+        -Set mixPools
+        -Float entropyThreshold
+        +clusterAddresses(vins)
+        +calculateShannonEntropy()
+        +detectPeelSequence()
+        +findRoot(addr)
+    }
+    class ChainOfCustodyLedger {
+        -Array eventChain
+        -String genesisHash
+        -String currentDigest
+        -String officerSignature
+        +appendBlock(event)
+        +verifyLedgerIntegrity()
+        +exportSection67Notice()
+        +signSection65BCertificate()
+    }
+
+    CaseContext --> BitcoinApiGateway : queries
+    CaseContext --> TaintAnalysisEngine : updates
+    CaseContext --> ChainOfCustodyLedger : records
+    BitcoinApiGateway --> TraceHeuristicsEngine : provides data
+    BitcoinApiGateway --> ClusteringEngine : provides vins
+    TraceHeuristicsEngine ..> TaintAnalysisEngine : informs
+    TaintAnalysisEngine ..> ChainOfCustodyLedger : signs

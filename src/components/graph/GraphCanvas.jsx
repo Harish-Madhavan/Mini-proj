@@ -271,6 +271,7 @@ export default function GraphCanvas({
             <input
               type="text"
               placeholder="Filter…"
+              aria-label="Filter nodes by address or label"
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               className="input-field"
@@ -281,6 +282,7 @@ export default function GraphCanvas({
           <select
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value)}
+            aria-label="Filter nodes by type"
             className="select-field"
             style={{ fontSize: '0.79rem', background: 'transparent', borderColor: 'transparent', color: 'var(--text-muted)' }}
           >

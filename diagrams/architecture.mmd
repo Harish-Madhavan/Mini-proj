@@ -1,0 +1,20 @@
+flowchart TD
+    USER["INVESTIGATING OFFICER\n(NCB / Cyber Police)"]
+    APP["APPLICATION LAYER\n(REACT 19 + SVG CANVAS)\n----------------------------------\n* Forensic Case Portfolio\n* Interactive Graph Canvas\n* 5D Risk Radar"]
+    
+    CACHE[("LOCAL FORENSIC CACHE\nAND STATE (CASE CONTEXT)\n----------------------------------\n* Active Case Wallets and TxIDs\n* 5-Minute LRU Cache\n* Multi-Hop Graph Data\n* Immutable Audit Event Log")]
+    
+    STORAGE["SECURE LOCAL STORAGE\n(INDEXEDDB / LOCAL VAULT)\n----------------------------------\n* Persistent Case Archives\n* SHA-256 Verification\n* Zero Cloud Telemetry"]
+
+    AUTH["EVIDENTIARY AND LEGAL ENGINE\n----------------------------------\n* Section 67 NDPS Notices\n* Section 65B BSA Certificates\n* SHA-256 Hash-Chained Ledger\n* Court Dossier Export"]
+
+    NLP["FORENSIC ANALYTICS ENGINE\n----------------------------------\n* 8-Factor Heuristic Classifier\n* Triple Taint Engine\n* DSU Entity Clustering\n* Shannon Entropy Mixer Check\n* Cross-Chain Bridge Parser"]
+
+    GATEWAY["BITCOIN REST GATEWAYS\n----------------------------------\n* Blockstream Esplora API\n* Mempool.space Failover API\n* Circuit Breaker Controller\n* Live Bitcoin Mainnet Data"]
+
+    USER --> APP
+    APP --> CACHE
+    AUTH --> CACHE
+    CACHE <--> STORAGE
+    CACHE <--> NLP
+    NLP <--> GATEWAY

@@ -1,0 +1,26 @@
+flowchart TD
+    Start((Start)) --> Ingest["Ingest Target Bitcoin TxID or Address"]
+    Ingest --> CheckCache{"In Local LRU Cache?"}
+
+    CheckCache -->|Yes| LoadCache["Load Cached Blockchain Metadata"]
+    CheckCache -->|No| QueryPrimary["Query Primary Gateway (Blockstream Esplora)"]
+
+    QueryPrimary --> CheckGateway{"Gateway Success?"}
+    CheckGateway -->|Timeout or 429| Failover["Failover to Mempool.space via Circuit Breaker"]
+    CheckGateway -->|200 OK| ParseData["Parse Outputs and Script Bytecode"]
+
+    Failover --> ParseData
+    LoadCache --> ParseData
+
+    ParseData --> Classify["Execute 8-Factor Heuristic Classifier"]
+    Classify --> CheckMixer{"High Entropy CoinJoin Mixer?"}
+
+    CheckMixer -->|Yes| Halt["Flag Anonymizing Pool and Terminate Branch"]
+    CheckMixer -->|No| Peel["Follow Dominant Peel Remainder and Trace Outspends"]
+
+    Peel --> Taint["Compute Multi-Model Taint and Verify Value Conservation"]
+    Halt --> Taint
+
+    Taint --> Ledger["Append Event Block to SHA-256 Hash Chain"]
+    Ledger --> Render["Render Interactive Graph and Generate Section 67 / 65B Exhibits"]
+    Render --> EndNode(((End)))

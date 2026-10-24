@@ -1,0 +1,29 @@
+flowchart LR
+    Investigator["Investigating Officer\n(NCB / Police)"]
+    Exchange["Registered VDA\nCrypto Exchange"]
+    Court["Judicial Magistrate\n/ Court"]
+
+    subgraph AegisTrace ["AegisTrace Workstation Boundary"]
+        UC1(["Ingest Target TxID / Address"])
+        UC2(["Trace Outspends and Expand Graph"])
+        UC3(["Classify Change vs Payment Outputs"])
+        UC4(["Evaluate Multi-Model Taint"])
+        UC5(["Detect CoinJoin Mixers and Peels"])
+        UC6(["Cluster Co-Spending Wallets via DSU"])
+        UC7(["Decode Cross-Chain Bridge Memos"])
+        UC8(["Generate Section 67 NDPS Freeze Notice"])
+        UC9(["Export Section 65B BSA Evidence Certificate"])
+    end
+
+    Investigator --> UC1
+    Investigator --> UC2
+    Investigator --> UC3
+    Investigator --> UC4
+    Investigator --> UC5
+    Investigator --> UC6
+    Investigator --> UC7
+    Investigator --> UC8
+    Investigator --> UC9
+
+    UC8 --> Exchange
+    UC9 --> Court

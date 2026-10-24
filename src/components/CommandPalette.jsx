@@ -15,7 +15,7 @@ export default function CommandPalette({ isOpen, onClose }) {
 
   const navigationItems = NAV_ITEMS.map((item, index) => ({
     label: `Go to ${item.label}`,
-    path: item.id,
+    path: item.path,
     icon: item.icon,
     category: 'Navigation',
     shortcut: String(index + 1),
@@ -39,9 +39,17 @@ export default function CommandPalette({ isOpen, onClose }) {
     (item.category && item.category.toLowerCase().includes(query.toLowerCase()))
   );
 
+  const itemRefs = React.useRef([]);
+
   useEffect(() => {
     setSelectedIndex(0);
   }, [query]);
+
+  useEffect(() => {
+    if (itemRefs.current[selectedIndex]) {
+      itemRefs.current[selectedIndex].scrollIntoView({ block: 'nearest' });
+    }
+  }, [selectedIndex]);
 
   const handleExecute = React.useCallback((item) => {
     if (item.path) {
@@ -139,6 +147,7 @@ export default function CommandPalette({ isOpen, onClose }) {
               return (
                 <div
                   key={idx}
+                  ref={el => { itemRefs.current[idx] = el; }}
                   onClick={() => handleExecute(item)}
                   onMouseEnter={() => setSelectedIndex(idx)}
                   style={{

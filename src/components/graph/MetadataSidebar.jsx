@@ -707,13 +707,14 @@ export default function MetadataSidebar({
                   <input
                     type="text"
                     placeholder={`Note on ${selectedNode.label}...`}
+                    aria-label={`Note on ${selectedNode.label}`}
                     value={newNoteText}
                     onChange={(e) => setNewNoteText(e.target.value)}
                     className="input-field"
                     style={{ fontSize: '0.75rem', padding: '0.35rem 0.5rem' }}
                   />
-                  <button type="submit" className="btn btn-primary" style={{ padding: '0.35rem 0.6rem' }} title="Add Field Note">
-                    <Plus size={13} />
+                  <button type="submit" className="btn btn-primary" style={{ padding: '0.35rem 0.6rem' }} title="Add Field Note" aria-label="Add Field Note">
+                    <Plus size={13} aria-hidden="true" />
                   </button>
                 </form>
 
