@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { fetchAddressSummary, classifyEndpointActivity } from '../utils/bitcoinApi';
+import { fetchAddressSummary, classifyEndpointActivity } from '../services/blockchain/gateway';
 import { isJoinableAddress } from '../utils/syndicateAnalysis';
 
 /**

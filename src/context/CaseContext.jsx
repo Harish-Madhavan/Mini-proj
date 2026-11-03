@@ -1,17 +1,17 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { SCENARIOS } from '../data/scenarios';
+import { traceEndReceiver } from '../services/blockchain/tracing';
 import {
-  traceEndReceiver,
   fetchAddressTxs,
   findSignificantAddressTx,
   fetchAddressSummary,
-  formatBlockstreamTx,
   fetchAddressSummaries,
   onGatewayEvent,
   getGatewayStatus,
   getCacheStats
-} from '../utils/bitcoinApi';
+} from '../services/blockchain/gateway';
+import { formatBlockstreamTx } from '../services/blockchain/transactionFormatting';
 import { DUST_THRESHOLD_SATS } from '../utils/traceHeuristics';
 import { 
   createLiveTxCase, 

@@ -10,7 +10,7 @@ import {
   Upload,
   Fingerprint
 } from 'lucide-react';
-import { fetchAddressTxs, fetchTx } from '../utils/bitcoinApi';
+import { fetchAddressTxs, fetchTx } from '../services/blockchain/gateway';
 import { useCase } from '../hooks/useCase';
 import { useToast } from '../hooks/useToast';
 import { validateBtcAddress, exportToCsv } from '../utils/forensicUtils';

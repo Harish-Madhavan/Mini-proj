@@ -17,7 +17,7 @@ import { calculateTaintMap, formatTaintPct } from '../utils/taintAnalysis';
 import { generateForensicNarrative } from '../utils/narrativeGenerator';
 import { buildChainOfCustody, verifyChainOfCustody } from '../utils/chainOfCustody';
 import { useEndpointProfile } from '../hooks/useEndpointProfile';
-import { ENDPOINT_PROFILE_LABELS } from '../utils/bitcoinApi';
+import { ENDPOINT_PROFILE_LABELS } from '../services/blockchain/gateway';
 import { analyzeCaseCrossChainActivity } from '../utils/crossChainForensics';
 import { auditTraceCorrectness } from '../utils/traceVerification';
 

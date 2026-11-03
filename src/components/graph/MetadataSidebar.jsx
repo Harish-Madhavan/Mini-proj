@@ -41,7 +41,7 @@ import {
 import { useWatchlist } from '../../hooks/useWatchlist';
 import { useEndpointProfile } from '../../hooks/useEndpointProfile';
 import { getFeeTier } from '../../utils/traceHeuristics';
-import { ENDPOINT_PROFILE_LABELS } from '../../utils/bitcoinApi';
+import { ENDPOINT_PROFILE_LABELS } from '../../services/blockchain/gateway';
 
 const RISK_BADGES = {
   critical: { bg: 'rgba(239, 68, 68, 0.2)', color: '#ef4444' },
