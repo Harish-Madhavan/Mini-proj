@@ -40,7 +40,9 @@ export function tagKnownEntity(address) {
   if (!address || typeof address !== 'string') return null;
   const trimmed = address.trim();
   for (const ent of KNOWN_ENTITIES) {
-    if (trimmed.startsWith(ent.pattern) || trimmed.includes(ent.pattern)) return ent;
+    // Entity attribution requires an exact full identifier. Short prefixes
+    // are useful heuristics, but cannot establish ownership or sanctions status.
+    if (ent.pattern.length >= 30 && trimmed.toLowerCase() === ent.pattern.toLowerCase()) return ent;
   }
   // Heuristic exchange tag for custodial-looking addresses
   if (trimmed.startsWith('3') || trimmed.startsWith('bc1p')) {

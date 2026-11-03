@@ -44,6 +44,9 @@ describe('caseHelpers utilities', () => {
     expect(result1.scenarios[0].nodes.length).toBe(3);
     expect(result1.scenarios[0].links.length).toBe(2);
     expect(result1.scenarios[0].currency).toBe('BTC');
+    expect(result1.scenarios[0].description).toContain('not derived from on-chain transactions');
+    expect(result1.scenarios[0].nodes[2].details.email).toBeUndefined();
+    expect(result1.scenarios[0].nodes[2].details.kycStatus).toContain('UNVERIFIED');
   });
 
   it('should create a valid custom investigation case', () => {
@@ -58,6 +61,8 @@ describe('caseHelpers utilities', () => {
     expect(custom.nodes.length).toBe(3);
     expect(custom.links.length).toBe(2);
     expect(custom.nodes[0].balance).toBe('3.2000 BTC');
+    expect(custom.nodes[0].details.ipLog).toBe('Not supplied');
+    expect(custom.nodes[2].details.kycStatus).toContain('UNVERIFIED');
   });
 
   it('contains and validates the cross-chain swap scenario case-crosschain-01', () => {

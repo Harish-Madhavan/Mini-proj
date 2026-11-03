@@ -1,4 +1,4 @@
-import { calculateEdgeTaintMap, calculateTaintMap, parseSats } from './taintAnalysis';
+import { calculateEdgeTaintMap, calculateTaintMap, parseSats } from '../../utils/taintAnalysis';
 
 const DAY_MS = 86400000;
 

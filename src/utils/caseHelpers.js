@@ -100,7 +100,7 @@ export function createAlgorithmicTraceCase(searchVal, scenarios) {
     initialTxHash: isAddress ? `Tx-${positiveHash.toString(16)}` : searchVal,
     status: "ACTIVE_TRACE",
     riskScore: Math.min(90, Math.max(50, (positiveHash % 35) + 55)),
-    description: `Estimated payment graph for ${searchVal}. Shows middle steps ending at an exchange deposit.`,
+    description: `Synthetic estimate for ${searchVal}; this graph is not derived from on-chain transactions and does not establish destination ownership.`,
     nodes: [
       {
         id: "addr_suspect",
@@ -138,17 +138,14 @@ export function createAlgorithmicTraceCase(searchVal, scenarios) {
         type: "receiver",
         balance: `${receiverVal} ${currency}`,
         risk: "low",
-        entityName: "Exchange account",
+        entityName: "Estimated endpoint (unverified)",
         details: {
           address: `3E8t${positiveHash.toString(16)}DepositPoint`,
           lastActive: "Deposit done",
-          ipLog: "Exchange",
-          kycStatus: "EXCHANGE DEPOSIT ADDRESS",
-          ownerName: `Exchange account`,
-          email: `compliance@gateway.io`,
-          phone: "Exchange",
-          kycDocumentId: `SUBPOENA ELIGIBLE`,
-          riskReason: "Exchange account where the traced payments end."
+          ipLog: "Synthetic estimate",
+          kycStatus: "UNVERIFIED (SYNTHETIC ESTIMATE)",
+          evidenceStatus: "SIMULATED",
+          riskReason: "Estimated endpoint only; no transaction or entity evidence was queried."
         }
       }
     ],
@@ -188,9 +185,9 @@ export function createCustomInvestigationCase(newCaseData) {
         risk: "critical",
         details: {
           address: suspectAddr,
-          ipLog: "103.241.12.89",
+          ipLog: "Not supplied",
           lastActive: "Recent activity",
-          kycStatus: "NO IDENTITY RECORD",
+          kycStatus: "UNVERIFIED (USER-SUPPLIED CASE)",
           scriptStandard: "Native SegWit",
           riskReason: "Starting wallet from the initial notes."
         }
@@ -215,16 +212,15 @@ export function createCustomInvestigationCase(newCaseData) {
         id: "custom_receiver",
         label: "End receiver",
         type: "receiver",
-        entityName: newCaseData.targetExchange || "Exchange deposit",
+        entityName: newCaseData.targetExchange ? "User-reported destination (unverified)" : "Unverified destination",
         balance: amount,
         risk: "low",
         details: {
           address: receiverAddr,
-          ipLog: "122.161.49.5",
+          ipLog: "Not supplied",
           lastActive: "Active deposit",
-          kycStatus: "SUBPOENA READY (IDENTITY ON FILE)",
-          ownerName: "Account holder on file",
-          kycDocumentId: "NCB-SUBPOENA-REF",
+          kycStatus: "UNVERIFIED (USER-SUPPLIED CASE)",
+          reportedLabel: newCaseData.targetExchange || null,
           scriptStandard: "Script address (P2SH)",
           riskReason: "End deposit at a government-registered exchange with identity records."
         }

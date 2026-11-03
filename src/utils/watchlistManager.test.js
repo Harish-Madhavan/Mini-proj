@@ -70,6 +70,11 @@ describe('watchlistManager', () => {
     expect(updated.some(w => w.address === newTarget.address)).toBe(false);
   });
 
+  it('preserves an explicitly empty saved watchlist', () => {
+    mockStore.aegistrace_watchlist = '[]';
+    expect(getWatchlist()).toEqual([]);
+  });
+
   it('prevents duplicate address additions', () => {
     const target = { address: 'bc1qduplicatecheckaddress' };
     addToWatchlist(target);
@@ -81,6 +86,37 @@ describe('watchlistManager', () => {
   it('checks address mempool status in sandbox mode', async () => {
     const status = await checkAddressMempoolStatus('bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', false);
     expect(status).toHaveProperty('hasMempoolTx');
+  });
+
+  it('keeps live empty responses distinct from simulated activity', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = async () => ({ ok: true, json: async () => [] });
+    try {
+      const status = await checkAddressMempoolStatus('bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', true);
+      expect(status.hasMempoolTx).toBe(false);
+      expect(status.txid).toBeUndefined();
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('counts only the watched address flow in a live transaction', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = async () => ({ ok: true, json: async () => [{
+      txid: 'live-tx',
+      vin: [],
+      vout: [
+        { scriptpubkey_address: 'bc1qotheraddress', value: 90000000 },
+        { scriptpubkey_address: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', value: 25000000 }
+      ]
+    }] });
+    try {
+      const status = await checkAddressMempoolStatus('bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', true);
+      expect(status.hasMempoolTx).toBe(true);
+      expect(status.amount).toContain('0.2500 BTC');
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 
   it('manages real-time mempool WebSocket alerts and status listeners', () => {

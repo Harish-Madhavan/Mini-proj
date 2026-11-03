@@ -24,13 +24,10 @@ import { CaseContext } from './CaseContextObject';
 import { safeGetItem, safeSetItem, safeRemoveItem } from '../utils/storage';
 import { downloadJson } from '../utils/download';
 import { satsToBtc } from '../utils/forensicUtils';
-import { transitionRecoveryAction } from '../utils/recoveryLeads';
+import { transitionRecoveryAction } from '../features/recovery/recoveryLeads';
+import { isValidCaseShape } from '../utils/caseValidation';
 
 const MAX_SCENARIOS = 50;
-
-function isValidCaseShape(obj) {
-  return obj && typeof obj.id === 'string' && Array.isArray(obj.nodes) && Array.isArray(obj.links) && obj.nodes.length > 0;
-}
 
 export function CaseProvider({ children }) {
   const { showToast } = useToast();
@@ -292,6 +289,12 @@ export function CaseProvider({ children }) {
       }
 
       const firstTx = txs[0];
+      const spentValueSats = (firstTx.vin || []).reduce((sum, input) =>
+        input.prevout?.scriptpubkey_address === address ? sum + (input.prevout.value || 0) : sum, 0);
+      if (spentValueSats <= 0) {
+        showToast("The fetched transaction does not expose a matching input value for this address.", "warning");
+        return;
+      }
       // Same chain-reuse context the tracer uses; a single explicit expansion
       // can afford the extra round. Ungated here (unlike tracing) because an
       // expansion re-examines one transaction with fresh live data by design.
@@ -308,9 +311,9 @@ export function CaseProvider({ children }) {
         const existingNodes = [...s.nodes];
         const existingLinks = [...s.links];
         const newTxNodeId = `tx_${firstTx.txid}`;
-        const txValue = `${satsToBtc(firstTx.vout[0]?.value || 0, 4)} BTC`;
+        const txValue = `${satsToBtc(spentValueSats, 4)} BTC`;
         if (!existingLinks.some(l => l.source === `out_${address}` && l.target === newTxNodeId)) {
-          existingLinks.push({ source: `out_${address}`, target: newTxNodeId, value: txValue, timestamp: 'On-chain' });
+          existingLinks.push({ source: `out_${address}`, target: newTxNodeId, value: txValue, timestamp: firstTx.status?.block_time ? new Date(firstTx.status.block_time * 1000).toLocaleDateString() : 'On-chain', txid: firstTx.txid, blockTime: firstTx.status?.block_time || null });
         }
         formatted.nodes.forEach(node => {
           if (!existingNodes.some(n => n.id === node.id)) existingNodes.push(node);

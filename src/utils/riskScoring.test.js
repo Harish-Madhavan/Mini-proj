@@ -175,14 +175,14 @@ describe('riskScoring engine', () => {
     expect(result.statutoryAction.recommendations.some(r => r.includes('Consolidation in progress'))).toBe(true);
   });
 
-  it('boosts sanctioned-entity contact but never the FBI seizure wallet', () => {
+  it('does not boost attribution based on short entity prefixes', () => {
     const sanctioned = calculateForensicRiskScore([
       { id: 'in_1L26zGarantexDeposit', type: 'hop', details: { address: '1L26zGarantexDepositWalletAddress' } },
       { id: 'out_x', type: 'receiver', details: { kycStatus: 'UNREGISTERED' } }
     ]);
-    expect(sanctioned.dimensions.attributionScore).toBe(15);
-    expect(sanctioned.entityHits.length).toBe(1);
-    expect(sanctioned.threatSignatures.some(s => s.name === 'Sanctioned entity contact')).toBe(true);
+    expect(sanctioned.dimensions.attributionScore).toBe(0);
+    expect(sanctioned.entityHits.length).toBe(0);
+    expect(sanctioned.threatSignatures.some(s => s.name === 'Sanctioned entity contact')).toBe(false);
 
     const seizure = calculateForensicRiskScore([
       { id: 'out_bc1qa5wksynth000001', type: 'receiver', details: { address: 'bc1qa5wksynthseizure000001', kycStatus: 'HOLDING FUNDS (UNSPENT)' } }

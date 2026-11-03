@@ -313,10 +313,10 @@ export function identifyBridgeEntity(node) {
 /**
  * Analyzes case graph for cross-chain hops, bridge vaults, and swap memos
  */
-export function analyzeCaseCrossChainActivity(nodes = [], _links = []) {
+export function analyzeCaseCrossChainActivity(nodes = [], links = []) {
   const bridgeHops = [];
   const targetChains = new Set();
-  let totalBridgeValueBtc = 0;
+  const bridgeAddresses = new Set();
 
   nodes.forEach(node => {
     const bridgeEntity = identifyBridgeEntity(node);
@@ -324,12 +324,18 @@ export function analyzeCaseCrossChainActivity(nodes = [], _links = []) {
     const parsedMemo = memo ? parseCrossChainMemo(memo) : null;
 
     if (bridgeEntity || parsedMemo || node.details?.crossChain) {
+      const bridgeKey = (node.details?.address || node.id || '').toLowerCase();
+      if (bridgeAddresses.has(bridgeKey)) return;
+      bridgeAddresses.add(bridgeKey);
       const destChain = parsedMemo?.destinationChain || node.details?.crossChain?.destinationChain || 'Ethereum';
       const destAddr = parsedMemo?.destinationAddress || node.details?.crossChain?.destinationAddress || 'N/A';
       const asset = parsedMemo?.targetAsset || node.details?.crossChain?.targetAsset || 'USDT';
-      const val = parseBtcAmount(node.balance);
-
-      totalBridgeValueBtc += val;
+      const nodeLinks = (links || []).filter(link => {
+        const source = typeof link.source === 'object' ? link.source.id : link.source;
+        const target = typeof link.target === 'object' ? link.target.id : link.target;
+        return source === node.id || target === node.id;
+      });
+      const val = Math.max(0, ...nodeLinks.map(link => parseBtcAmount(link.value)), parseBtcAmount(node.balance));
       targetChains.add(destChain);
 
       bridgeHops.push({
@@ -343,7 +349,8 @@ export function analyzeCaseCrossChainActivity(nodes = [], _links = []) {
         targetAsset: asset,
         explorerUrl: parsedMemo?.explorerUrl || (destAddr.startsWith('0x') ? `https://etherscan.io/address/${destAddr}` : destAddr.startsWith('T') ? `https://tronscan.org/#/address/${destAddr}` : null),
         memo: parsedMemo?.rawMemo || null,
-        valueBtc: val
+        valueBtc: val,
+        valueBasis: nodeLinks.length ? 'largest adjacent edge; cross-hop total not inferred' : 'node balance; cross-hop total not inferred'
       });
     }
   });
@@ -355,7 +362,8 @@ export function analyzeCaseCrossChainActivity(nodes = [], _links = []) {
     bridgeCount: bridgeHops.length,
     hops: bridgeHops,
     targetChains: Array.from(targetChains),
-    totalBridgeValueBtc: totalBridgeValueBtc.toFixed(4),
+    totalBridgeValueBtc: bridgeHops.length === 1 ? bridgeHops[0].valueBtc.toFixed(4) : null,
+    totalBridgeValueStatus: bridgeHops.length > 1 ? 'UNKNOWN_ACROSS_OVERLAPPING_HOPS' : bridgeHops.length === 1 ? 'SINGLE_HOP_OBSERVED' : 'NO_BRIDGE_VALUE',
     riskPenalty: detected ? Math.min(30, bridgeHops.length * 15) : 0,
     summary: detected
       ? `Detected ${bridgeHops.length} cross-chain bridge hop(s) exiting into ${Array.from(targetChains).join(', ')}.`
@@ -469,7 +477,7 @@ export async function fetchMultiChainAssetDetails(address, network = 'AUTO', isL
             nativeBalance: `${((data.balance || 0) / 1e6).toFixed(2)} TRX`,
             activityStatus: parseFloat(usdtBal) > 0 ? 'ACTIVE_FUNDS_PRESENT' : 'ZERO_OR_SWEPT',
             explorerUrl,
-            contractVerified: true,
+            contractVerified: usdtItem?.tokenId === contractInfo.contractAddress,
             isLive: true,
             notes: 'Fetched live via TronScan public API gateway.'
           };
@@ -480,6 +488,19 @@ export async function fetchMultiChainAssetDetails(address, network = 'AUTO', isL
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  if (isLive) {
+    return {
+      success: false,
+      address: cleanAddr,
+      network: detectedNet,
+      standard: validation.standard,
+      explorerUrl,
+      isLive: true,
+      contractVerified: false,
+      error: 'Live asset data is unavailable for this lookup; no estimated balance was substituted.'
+    };
   }
 
   // Deterministic simulation fallback
@@ -496,11 +517,11 @@ export async function fetchMultiChainAssetDetails(address, network = 'AUTO', isL
     contractAddress: contractInfo.contractAddress,
     estimatedBalanceUsdt: simBal,
     nativeBalance: detectedNet === 'Ethereum' ? '0.045 ETH' : detectedNet === 'Tron' ? '35.2 TRX' : '1.2 SOL',
-    activityStatus: 'ACTIVE_TARGET_IDENTIFIED',
+    activityStatus: 'SIMULATED_ESTIMATE',
     explorerUrl,
-    contractVerified: true,
+    contractVerified: false,
     isLive: false,
-    notes: 'Secondary chain target verified; funds routed into cross-chain bridge.'
+    notes: 'Synthetic demo estimate only. No on-chain balance, token contract association, or fund routing was verified.'
   };
 }
 

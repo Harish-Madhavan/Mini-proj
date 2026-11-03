@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ArrowDownLeft, ArrowUpRight, BriefcaseBusiness, Plus, ShieldCheck } from 'lucide-react';
-import { useCase } from '../hooks/useCase';
-import { buildRecoveryLeads, formatLeadAmount, getRecoveryActionTransitions, RECOVERY_ACTION_STATES } from '../utils/recoveryLeads';
+import { useCase } from '../../hooks/useCase';
+import { buildRecoveryLeads, formatLeadAmount, getRecoveryActionTransitions, RECOVERY_ACTION_STATES } from './recoveryLeads';
 
 const ACTION_TYPES = ['Prepare preservation request', 'Submit lawful information request', 'Awaiting response'];
 function panelStyle() {

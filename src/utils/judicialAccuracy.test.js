@@ -18,42 +18,31 @@ describe('judicialAccuracy & open ground-truth benchmarks', () => {
     expect(silkRoad.caseEntry.docketNumber).toBe('N.D. Cal. 3:20-cv-07811');
   });
 
-  it('correctly distinguishes government seizure vaults from sanctioned counterparties', () => {
-    // US Marshals Individual X wallet
+  it('does not infer judicial or sanctions attribution from address prefixes', () => {
+    // These fixtures share only a short prefix with the local reference entries.
     const usms = tagKnownEntity('bc1qa5wkhsye2vftene9965ngxtxtjaentrpucexdw');
-    expect(usms).not.toBeNull();
-    expect(usms.category).toBe('seizure');
-    expect(usms.risk).toBe('info');
-    expect(usms.provenance).toContain('3:20-cv-07811');
+    expect(usms).toBeNull();
 
     // FBI Colonial Pipeline seizure wallet
     const fbi = tagKnownEntity('bc1qq468y0e854u0m68g0e2u389j5e09u2k468y0e8');
-    expect(fbi).not.toBeNull();
-    expect(fbi.category).toBe('seizure');
-    expect(fbi.risk).toBe('info');
-    expect(fbi.provenance).toContain('1:21-mj-00473');
+    expect(fbi).toBeNull();
 
     // DOJ Bitfinex Recovery Vault
     const doj = tagKnownEntity('bc1qmxay474w657h78r8574w657h78r8574w657h78');
-    expect(doj).not.toBeNull();
-    expect(doj.category).toBe('seizure');
-    expect(doj.risk).toBe('info');
+    expect(doj).toBeNull();
   });
 
-  it('accurately identifies OFAC SDN designated cryptocurrency addresses', () => {
-    // Garantex
+  it('does not identify OFAC entities from short address prefixes', () => {
     const garantex = tagKnownEntity('1L26z9842109876543210987654321098765');
-    expect(garantex.category).toBe('sanctioned');
-    expect(garantex.risk).toBe('critical');
+    expect(garantex).toBeNull();
 
     // Sinbad.io Mixer
     const sinbad = tagKnownEntity('bc1qz9842109876543210987654321098765');
-    expect(sinbad.category).toBe('sanctioned');
-    expect(sinbad.provenance).toContain('OFAC');
+    expect(sinbad).toBeNull();
 
     // Blender.io
     const blender = tagKnownEntity('1BtcB9842109876543210987654321098765');
-    expect(blender.category).toBe('sanctioned');
+    expect(blender).toBeNull();
   });
 
   it('identifies verified exchange cold/hot vaults with proof-of-reserves provenance', () => {

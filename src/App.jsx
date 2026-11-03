@@ -15,7 +15,19 @@ const SyndicateMap = lazy(() => import('./components/SyndicateMap'));
 const RiskAnalyzer = lazy(() => import('./components/RiskAnalyzer'));
 const ReportGenerator = lazy(() => import('./components/ReportGenerator'));
 const WatchlistMonitor = lazy(() => import('./components/WatchlistMonitor'));
-const AssetRecovery = lazy(() => import('./components/AssetRecovery'));
+const AssetRecovery = lazy(() => import('./features/recovery/AssetRecovery'));
+
+const ROUTE_COMPONENTS = {
+  dashboard: Dashboard,
+  trace: GraphExplorer,
+  osint: OSINTIntegrator,
+  clustering: HeuristicClustering,
+  syndicate: SyndicateMap,
+  risk: RiskAnalyzer,
+  watchlist: WatchlistMonitor,
+  report: ReportGenerator,
+  recovery: AssetRecovery
+};
 
 function RouteFallback() {
   return (
@@ -158,15 +170,10 @@ function AppContent() {
           <Suspense fallback={<RouteFallback />}>
             <Routes>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/trace" element={<GraphExplorer />} />
-              <Route path="/osint" element={<OSINTIntegrator />} />
-              <Route path="/clustering" element={<HeuristicClustering />} />
-              <Route path="/syndicate" element={<SyndicateMap />} />
-              <Route path="/risk" element={<RiskAnalyzer />} />
-              <Route path="/watchlist" element={<WatchlistMonitor />} />
-              <Route path="/report" element={<ReportGenerator />} />
-              <Route path="/recovery" element={<AssetRecovery />} />
+              {NAV_ITEMS.map(({ id, path }) => {
+                const Page = ROUTE_COMPONENTS[id];
+                return Page ? <Route key={id} path={path} element={<Page />} /> : null;
+              })}
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
           </Suspense>

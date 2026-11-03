@@ -113,6 +113,14 @@ describe('taintAnalysis', () => {
     expect(map.get('b')).toBe(1);
   });
 
+  it('does not invent a taint source when a graph has no suspect or explicit seed', () => {
+    const unseeded = calculateTaintMap(
+      [{ id: 'x', type: 'hop', balance: '1 BTC' }, { id: 'y', type: 'receiver', balance: '1 BTC' }],
+      [{ source: 'x', target: 'y', value: '1 BTC' }]
+    );
+    expect([...unseeded.values()].every(value => value === 0)).toBe(true);
+  });
+
   it('produces tier labels', () => {
     expect(taintTier(0.9).label).toBe('High');
     expect(taintTier(0.5).label).toBe('Medium');

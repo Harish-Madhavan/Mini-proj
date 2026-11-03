@@ -17,10 +17,8 @@ export function calculateTaintMap(nodes = [], links = [], taintedNodeIds = [], m
   if (seedSet.size === 0) {
     nodes.filter(n => n.type === 'suspect').forEach(n => seedSet.add(n.id));
   }
-  // Fallback: if no suspects found, use first node
-  if (seedSet.size === 0 && nodes.length > 0) {
-    seedSet.add(nodes[0].id);
-  }
+  // Without an explicit source, leave the graph untainted rather than
+  // assigning suspicion to whichever node happens to appear first.
 
   // Build adjacency with values. Zero-value edges (OP_RETURN data carriers,
   // "0 BTC Data" links) are unspendable and carry no taint.

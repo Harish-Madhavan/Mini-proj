@@ -155,13 +155,39 @@ describe('crossChainForensics Engine', () => {
     expect(ethRes.success).toBe(true);
     expect(ethRes.network).toBe('Ethereum');
     expect(ethRes.tokenSymbol).toBe('USDT');
-    expect(ethRes.contractVerified).toBe(true);
+    expect(ethRes.contractVerified).toBe(false);
+    expect(ethRes.activityStatus).toBe('SIMULATED_ESTIMATE');
 
     const tronRes = await fetchMultiChainAssetDetails('TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7', 'Tron', false);
     expect(tronRes.success).toBe(true);
     expect(tronRes.network).toBe('Tron');
     expect(tronRes.tokenSymbol).toBe('USDT');
     expect(tronRes.contractAddress).toBe('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t');
+  });
+
+  it('does not substitute simulated balances when live data is unavailable', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = async () => { throw new Error('offline'); };
+    try {
+      const result = await fetchMultiChainAssetDetails('TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7', 'Tron', true);
+      expect(result.success).toBe(false);
+      expect(result.estimatedBalanceUsdt).toBeUndefined();
+      expect(result.contractVerified).toBe(false);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('does not add bridge hop balances when the graph has multiple hops', () => {
+    const nodes = [
+      { id: 'b1', label: 'THORChain Vault', balance: '2 BTC', details: { address: 'bc1qthorvault9981247asgard001' } },
+      { id: 'b2', label: 'THORChain Vault', balance: '2 BTC', details: { address: 'bc1qthorvault9981247asgard002' } }
+    ];
+    const links = [{ source: 'b1', target: 'b2', value: '1 BTC' }];
+    const analysis = analyzeCaseCrossChainActivity(nodes, links);
+    expect(analysis.bridgeCount).toBe(2);
+    expect(analysis.totalBridgeValueBtc).toBeNull();
+    expect(analysis.totalBridgeValueStatus).toBe('UNKNOWN_ACROSS_OVERLAPPING_HOPS');
   });
 });
 

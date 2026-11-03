@@ -18,20 +18,6 @@ export function safeSetItem(key, value) {
     return true;
   } catch (e) {
     console.warn(`[storage] Failed to write ${key}:`, e);
-    // Quota exceeded - try to clear oldest cache
-    if (e.name === 'QuotaExceededError' || e.code === 22) {
-      try {
-        // Remove largest keys matching aegistrace
-        const keysToCheck = ['aegistrace_scenarios', 'aegistrace_activeCaseId'];
-        for (const k of keysToCheck) {
-          if (k !== key) localStorage.removeItem(k);
-        }
-        localStorage.setItem(key, JSON.stringify(value));
-        return true;
-      } catch {
-        return false;
-      }
-    }
     return false;
   }
 }
