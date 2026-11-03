@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { useCase } from '../hooks/useCase';
 import { useToast } from '../hooks/useToast';
-import { ZONAL_UNITS, WATERMARK_OPTIONS, generateSection65BCertificateText } from '../constants/legalConstants';
+import { ZONAL_UNITS, WATERMARK_OPTIONS, generateEvidenceWorksheetText } from '../constants/legalConstants';
 import { convertBtcToFiat } from '../utils/forensicUtils';
 import { downloadText } from '../utils/download';
 import { calculateTaintMap, formatTaintPct } from '../utils/taintAnalysis';
@@ -20,6 +20,8 @@ import { useEndpointProfile } from '../hooks/useEndpointProfile';
 import { ENDPOINT_PROFILE_LABELS } from '../services/blockchain/gateway';
 import { analyzeCaseCrossChainActivity } from '../utils/crossChainForensics';
 import { auditTraceCorrectness } from '../utils/traceVerification';
+import { hashEvidencePayload } from '../utils/evidenceIntegrity';
+import { hasAttributionEvidenceRecord } from '../utils/attributionEvidence';
 
 function HopRow({ index, label, address, balance }) {
   return (
@@ -61,47 +63,13 @@ export default function ReportGenerator() {
   const [reportType, setReportType] = useState('ndps_section67');
   const [isDrawing, setIsDrawing] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
-  const [integrityHash, setIntegrityHash] = useState('');
-  const [officerName, setOfficerName] = useState('Inspector R. Sharma');
-  const [officerBadge, setOfficerBadge] = useState('NCB-84920-LE');
+  const [integrityHash, setIntegrityHash] = useState('Computing SHA-256...');
+  const [signatureRevision, setSignatureRevision] = useState(0);
+  const [officerName, setOfficerName] = useState('');
+  const [officerBadge, setOfficerBadge] = useState('');
   const [bureauZone, setBureauZone] = useState('NCB Head Office, New Delhi');
   const [watermark, setWatermark] = useState(WATERMARK_OPTIONS[0].value);
-  const [investigatorNotes, setInvestigatorNotes] = useState(
-    'The trail runs through several middle wallets to a domestic exchange. Section 67 notice approved.'
-  );
-
-  useEffect(() => {
-    if (!activeCase) return;
-    const dataStr = `${activeCase.id}-${activeCase.initialTxHash}-${activeCase.riskScore}-${bureauZone}-${officerBadge}-${activeCase.nodes?.length || 0}`;
-    let cancelled = false;
-
-    async function computeHash() {
-      try {
-        if (window.crypto?.subtle) {
-          const enc = new TextEncoder().encode(dataStr);
-          const digest = await window.crypto.subtle.digest('SHA-256', enc);
-          const hex = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
-          if (!cancelled) setIntegrityHash(`SHA256:${hex}`);
-          return;
-        }
-      } catch {
-        // Fallback below
-      }
-      let hash = 0;
-      for (let i = 0; i < dataStr.length; i++) {
-        hash = (hash << 5) - hash + dataStr.charCodeAt(i);
-        hash |= 0;
-      }
-      const hexHash = Math.abs(hash).toString(16).padStart(8, '0') +
-                      Math.abs(hash * 3).toString(16).padStart(8, '0') +
-                      Math.abs(hash * 7).toString(16).padStart(8, '0') +
-                      Math.abs(hash * 13).toString(16).padStart(8, '0');
-      if (!cancelled) setIntegrityHash(`SHA256:${hexHash.toUpperCase()} (pseudo)`);
-    }
-
-    computeHash();
-    return () => { cancelled = true; };
-  }, [activeCase, bureauZone, officerBadge]);
+  const [investigatorNotes, setInvestigatorNotes] = useState('');
 
   const narrative = useMemo(() => generateForensicNarrative(activeCase), [activeCase]);
   const custody = useMemo(() => buildChainOfCustody(activeCase), [activeCase]);
@@ -110,6 +78,44 @@ export default function ReportGenerator() {
   const crossChainReport = useMemo(() => activeCase ? analyzeCaseCrossChainActivity(activeCase.nodes || [], activeCase.links || []) : null, [activeCase]);
   const reportReceiverAddress = activeCase?.nodes?.find(n => n.type === 'receiver')?.details?.address;
   const endpointProfile = useEndpointProfile(reportReceiverAddress, true);
+
+  useEffect(() => {
+    if (!activeCase) return undefined;
+    let cancelled = false;
+    setIntegrityHash('Computing SHA-256...');
+
+    let signatureDataUrl = null;
+    try {
+      signatureDataUrl = canvasRef.current?.toDataURL('image/png') || null;
+    } catch {
+      signatureDataUrl = null;
+    }
+
+    const payload = {
+      schema: 'aegistrace-report-evidence-v1',
+      caseData: activeCase,
+      reportMetadata: {
+        reportType,
+        officerName,
+        officerBadge,
+        bureauZone,
+        watermark,
+        investigatorNotes,
+        signatureDataUrl,
+        endpointProfile: {
+          status: endpointProfile.status,
+          profile: endpointProfile.profile || null,
+          error: endpointProfile.error || null
+        }
+      }
+    };
+
+    hashEvidencePayload(payload)
+      .then(digest => { if (!cancelled) setIntegrityHash(digest); })
+      .catch(() => { if (!cancelled) setIntegrityHash('Unavailable - Web Crypto SHA-256 required'); });
+
+    return () => { cancelled = true; };
+  }, [activeCase, reportType, officerName, officerBadge, bureauZone, watermark, investigatorNotes, signatureRevision, endpointProfile.status, endpointProfile.profile, endpointProfile.error]);
 
   if (!activeCase) return <div style={{ color: 'var(--text-secondary)' }}>Select a case first.</div>;
 
@@ -153,11 +159,15 @@ export default function ReportGenerator() {
     ctx.stroke();
   };
 
-  const stopDrawing = () => setIsDrawing(false);
+  const stopDrawing = () => {
+    if (isDrawing) setSignatureRevision(revision => revision + 1);
+    setIsDrawing(false);
+  };
 
   const clearSignature = () => {
     const canvas = canvasRef.current;
     if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+    setSignatureRevision(revision => revision + 1);
     showToast("Signature cleared.", "info");
   };
 
@@ -173,6 +183,7 @@ export default function ReportGenerator() {
           const ctx = canvas.getContext('2d');
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          setSignatureRevision(revision => revision + 1);
           showToast("Image loaded.", "success");
         }
       };
@@ -196,29 +207,30 @@ export default function ReportGenerator() {
 
   const getReportMarkdown = () => {
     const notesList = activeCase.notesList || [];
-    return `# NARCOTICS CONTROL BUREAU (NCB) — FORENSIC REPORT
+    return `# NARCOTICS CONTROL BUREAU (NCB) â€” FORENSIC REPORT
 **Issuing Zonal Unit:** ${bureauZone}  
 **Classification:** ${watermark}  
 **Case Title:** ${activeCase.title}  
 **Case Ref:** ${getRefCode()}-${activeCase.id.toUpperCase()}  
 **Date:** ${new Date().toISOString().split('T')[0]}  
-**Cryptographic Seal:** \`${integrityHash}\`  
+**Evidence payload SHA-256 digest:** \`${integrityHash}\`
+*This digest covers the complete canonical stored case and report metadata snapshot. It detects changes to that payload; it does not verify source authenticity, attribution, or legal admissibility.*
 
 ---
 
 ## 1. Summary
 - **Starting wallet:** ${activeCase.suspectName}
 - **Currency:** ${activeCase.currency}
-- **Amount traced:** ${suspectNode?.balance || 'N/A'} (≈ ${fiatVal.formattedUsd} / ${fiatVal.formattedInr})
+- **Amount traced:** ${suspectNode?.balance || 'N/A'} (â‰ˆ ${fiatVal.formattedUsd} / ${fiatVal.formattedInr})
 - **Risk score:** ${activeCase.riskScore}%
 
 ## 2. Transaction steps
-${(activeCase.links || []).map((link, i) => `${i + 1}. \`${link.source}\` ➔ \`${link.target}\` | **${link.value}** (${link.timestamp || 'On-chain'})`).join('\n')}
+${(activeCase.links || []).map((link, i) => `${i + 1}. \`${link.source}\` âž” \`${link.target}\` | **${link.value}** (${link.timestamp || 'On-chain'})`).join('\n')}
 
 ## 3. End receiver
 - **Endpoint:** ${receiverNode?.entityName || 'Unresolved'}
 - **Address:** \`${receiverNode?.details?.address || 'N/A'}\`
-- **Identity check:** ${receiverNode?.details?.kycStatus || 'N/A'}
+- **Entity attribution:** ${hasAttributionEvidenceRecord(receiverNode) ? `Evidence record attached (${receiverNode.details.identityEvidence.source}); review source and scope` : 'Owner or service not established by available evidence'}
 - **Amount:** ${receiverNode?.balance || 'N/A'}
 
 ## 4. Field notes (${notesList.length} entries)
@@ -232,15 +244,15 @@ ${(narrative?.findings || []).map(f => `- ${f}`).join('\n')}
 **Limits:**
 ${(narrative?.limitations || []).map(l => `- ${l}`).join('\n')}
 
-## 6. Chain of Custody (Hash-Sealed)
-- Transfers sealed: ${custody.eventCount} · Verification: ${custodyVerification.valid ? `INTACT (${custodyVerification.checkedEvents} events)` : `BROKEN at seq ${custodyVerification.brokenAtSeq} — ${custodyVerification.reason}`}
-- Terminal seal: \`${custody.terminalHash || 'N/A'}\`
+## 6. Transfer event sequence (prototype tamper-evident hash chain)
+- Transfers sealed: ${custody.eventCount} Â· Verification: ${custodyVerification.valid ? `INTACT (${custodyVerification.checkedEvents} events)` : `BROKEN at seq ${custodyVerification.brokenAtSeq} â€” ${custodyVerification.reason}`}
+- Terminal event digest (non-cryptographic prototype hash): \`${custody.terminalHash || 'N/A'}\`
 ${custody.gaps.length > 0 ? custody.gaps.map(g => `- Gap after seq ${g.afterSeq} [${g.kind}]: ${g.note}`).join('\n') : '- No custody gaps flagged.'}
 
-## 7. Mathematical Invariant & Trace Verification
-- Verification Status: **${traceAudit?.rating || 'UNPROVEN'}** (${traceAudit?.assuranceScore ?? 0}% Assurance)
-- Invariants: Value Conservation [${traceAudit?.invariants?.valueConservation?.passed ? 'PASSED' : 'FAILED'}], Causality [${traceAudit?.invariants?.temporalCausality?.passed ? 'PASSED' : 'FAILED'}], Taint Non-Inflation [${traceAudit?.invariants?.taintConservation?.passed ? 'PASSED' : 'FAILED'}]
-- Multi-Model Concordance: ${Math.round((traceAudit?.concordance?.score || 0) * 100)}% agreement across FIFO, Proportional, and Poison judicial models
+## 7. Internal consistency checks (not proof of path accuracy or ownership)
+- Check status: **${traceAudit?.rating || 'INCOMPLETE'}** (${traceAudit?.isComplete ? `${traceAudit.consistencyScore}/100 internal consistency score` : 'score withheld because required checks were unavailable'})
+- Invariants: Value Conservation [${traceAudit?.invariants?.valueConservation?.status || 'unknown'}], Causality [${traceAudit?.invariants?.temporalCausality?.status || 'unknown'}], Heuristic Consistency [${traceAudit?.invariants?.heuristicConsistency?.status || 'unknown'}], Taint Conservation [${traceAudit?.invariants?.taintConservation?.status || 'unknown'}]
+- Multi-Model Concordance: ${traceAudit?.concordance?.status === 'checked' ? `${Math.round(traceAudit.concordance.score * 100)}% agreement across selected taint models` : 'unknown (not applicable or no seeded value flow)'}
 - Summary: ${traceAudit?.summary || 'N/A'}
 
 ## 8. Cross-Chain Protocol Activity
@@ -255,9 +267,8 @@ ${investigatorNotes}
 `;
   };
 
-  const getSection65BText = () => generateSection65BCertificateText({
-    zonalUnit: bureauZone,
-    firNumber: `NCB/NDPS/CR-${activeCase.id.slice(-4).toUpperCase()}/2026`,
+  const getEvidenceWorksheetText = () => generateEvidenceWorksheetText({
+    caseId: activeCase.id,
     caseTitle: activeCase.title,
     officerName,
     officerBadge,
@@ -265,26 +276,26 @@ ${investigatorNotes}
     nodesCount: activeCase.nodes?.length || 0,
     hopsCount: activeCase.links?.length || 0,
     initialTxHash: activeCase.initialTxHash,
-    targetExchange: receiverNode?.entityName || 'Domestic exchange',
-    depositAddress: receiverNode?.details?.address || 'N/A',
-    totalSeizedBtc: suspectNode?.balance || '0.0000 BTC'
+    depositAddress: receiverNode?.details?.address || 'Not established',
+    attributedAmount: receiverNode?.balance || 'Not established',
+    identityEvidenceSource: hasAttributionEvidenceRecord(receiverNode) ? receiverNode.details.identityEvidence.source : null
   });
 
   const isEvidence = reportType === 'evidence_section65b';
 
   const handleCopy = () => {
-    const text = isEvidence ? getSection65BText() : getReportMarkdown();
+    const text = isEvidence ? getEvidenceWorksheetText() : getReportMarkdown();
     navigator.clipboard.writeText(text);
-    showToast(isEvidence ? "Certificate copied." : "Report copied.", "success");
+    showToast(isEvidence ? "Evidence worksheet copied." : "Report copied.", "success");
   };
 
   const handleExport = () => {
-    const text = isEvidence ? getSection65BText() : getReportMarkdown();
+    const text = isEvidence ? getEvidenceWorksheetText() : getReportMarkdown();
     const filename = isEvidence
-      ? `NCB-Section65B-Certificate-${activeCase.id.toUpperCase()}.txt`
+      ? `AegisTrace-Evidence-Worksheet-${activeCase.id.toUpperCase()}.txt`
       : `NCB-Forensic-Report-${activeCase.id.toUpperCase()}.md`;
     downloadText(text, filename);
-    showToast(isEvidence ? "Certificate downloaded." : "Report downloaded.", "success");
+    showToast(isEvidence ? "Evidence worksheet downloaded." : "Report downloaded.", "success");
   };
 
   const toggleLock = () => {
@@ -316,7 +327,7 @@ ${investigatorNotes}
             aria-selected={isEvidence}
             style={{ fontSize: '0.82rem' }}
           >
-            Certificate
+            Evidence worksheet
           </button>
         </div>
 
@@ -332,63 +343,54 @@ ${investigatorNotes}
           <div className="report-watermark">{watermark}</div>
 
           {isEvidence ? (
-            /* SECTION 65B EVIDENCE ACT AFFIDAVIT VIEW */
+            /* Non-certifying evidence worksheet */
             <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: '1.25rem', lineHeight: '1.65' }}>
               <div style={{ textAlign: 'center', borderBottom: '1px solid #e5e5e5', paddingBottom: '1.25rem' }}>
                 <h2 style={{ fontSize: '1rem', fontWeight: 700, letterSpacing: '0.01em', color: '#1a1a1a' }}>
-                  Narcotics Control Bureau — Certificate u/s 65B IEA / Sec. 63 BSA
+                  Draft evidence metadata worksheet
                 </h2>
-                <span style={{ fontSize: '0.78rem', color: '#888' }}>
-                  {bureauZone}
-                </span>
+                <span style={{ fontSize: '0.78rem', color: '#b45309' }}>Not a certificate, affidavit, or verified report</span>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: '#888', paddingBottom: '0.25rem' }}>
-                <span>Ref: NCB/NDPS/CR-{activeCase.id.slice(-4).toUpperCase()}/2026</span>
-                <span>{new Date().toISOString().split('T')[0]}</span>
+              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '0.75rem', fontSize: '0.8rem', color: '#78350f' }}>
+                Values below are application-stored records. This software does not verify their source, legal sufficiency, ownership, or admissibility. Review independently before relying on or filing them.
               </div>
 
-              <div style={{ fontSize: '0.85rem', color: '#333', textAlign: 'justify' }}>
-                <p style={{ marginBottom: '0.75rem' }}>
-                  I, <strong>{officerName}</strong> ({officerBadge}), {bureauZone}, affirm on oath:
-                </p>
-                <p style={{ marginBottom: '0.75rem' }}>
-                  <strong>1. Authority.</strong> I am the Investigating Officer in <em>"{activeCase.title}"</em>, authorised to extract and certify electronic records of on-chain fund flows.
-                </p>
-                <p style={{ marginBottom: '0.75rem' }}>
-                  <strong>2. System integrity.</strong> The trace was generated on an isolated NCB workstation operating properly throughout the material period.
-                </p>
-                <p style={{ marginBottom: '0.5rem' }}>
-                  <strong>3. Manifest & hash.</strong> {activeCase.nodes?.length || 0} nodes and {activeCase.links?.length || 0} steps, sealed under:
-                </p>
-                <div style={{ backgroundColor: '#f7f7f7', padding: '0.6rem 0.8rem', borderRadius: '6px', fontFamily: 'monospace', fontSize: '0.72rem', color: '#333', margin: '0.5rem 0', wordBreak: 'break-all' }}>
-                  {integrityHash}
-                </div>
-                <p style={{ marginTop: '0.75rem' }}>
-                  <strong>4. End receiver.</strong> Funds terminate at <code style={{ fontFamily: 'monospace', backgroundColor: '#f0f0f0', padding: '0.1rem 0.3rem', borderRadius: '3px' }}>{receiverNode?.details?.address || 'N/A'}</code> ({receiverNode?.entityName || 'Domestic exchange'}, {receiverNode?.balance || '0 BTC'}).
-                </p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.7rem', fontSize: '0.82rem' }}>
+                <div><span>Case title (stored)</span><br /><strong>{activeCase.title || 'Not provided'}</strong></div>
+                <div><span>Case ID (stored)</span><br /><strong>{activeCase.id || 'Not provided'}</strong></div>
+                <div><span>Officer name (user-entered)</span><br /><strong>{officerName || 'Not provided'}</strong></div>
+                <div><span>Officer reference (user-entered)</span><br /><strong>{officerBadge || 'Not provided'}</strong></div>
+                <div><span>Graph records (not validated transaction count)</span><br /><strong>{activeCase.nodes?.length || 0} nodes Â· {activeCase.links?.length || 0} links</strong></div>
+                <div><span>Initial transaction reference (stored)</span><br /><strong>{activeCase.initialTxHash || 'Not provided'}</strong></div>
+                <div style={{ gridColumn: '1 / -1' }}><span>Recorded endpoint address</span><br /><code style={{ wordBreak: 'break-all' }}>{receiverNode?.details?.address || 'Not established'}</code></div>
+                <div><span>Endpoint owner or service</span><br /><strong>{hasAttributionEvidenceRecord(receiverNode) ? `Attribution evidence recorded (${receiverNode.details.identityEvidence.source}); not independently verified` : 'Not established'}</strong></div>
+                <div><span>Recorded endpoint amount</span><br /><strong>{receiverNode?.balance || 'Not established'} (not confirmed seized or recoverable)</strong></div>
               </div>
 
-              {/* Manifest Table */}
               <div>
-                <h4 style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.5rem', color: '#1a1a1a' }}>
-                  Exhibit schedule
-                </h4>
+                <h4 style={{ fontSize: '0.8rem', fontWeight: 600 }}>Evidence payload SHA-256 digest</h4>
+                <div style={{ backgroundColor: '#f7f7f7', padding: '0.6rem 0.8rem', borderRadius: '6px', fontFamily: 'monospace', fontSize: '0.72rem', color: '#333', wordBreak: 'break-all' }}>{integrityHash}</div>
+                <p style={{ fontSize: '0.74rem', color: '#666' }}>Covers the complete stored case and report metadata snapshot. Detects changes to that snapshot; it does not verify source authenticity, attribution, or legal admissibility.</p>
+              </div>
+
+              <div>
+                <h4 style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.5rem', color: '#1a1a1a' }}>Stored graph records (labels are not identity findings)</h4>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
                   <thead>
                     <tr>
                       <TableCell isHeader>#</TableCell>
-                      <TableCell isHeader>Entity</TableCell>
-                      <TableCell isHeader>Address</TableCell>
-                      <TableCell isHeader>Value</TableCell>
-                      <TableCell isHeader>Role</TableCell>
+                      <TableCell isHeader>Stored label</TableCell>
+                      <TableCell isHeader>Address or reference</TableCell>
+                      <TableCell isHeader>Recorded amount</TableCell>
+                      <TableCell isHeader>Graph type</TableCell>
                     </tr>
                   </thead>
                   <tbody>
                     {activeCase.nodes.map((n, i) => (
                       <tr key={n.id}>
                         <TableCell>{i + 1}</TableCell>
-                        <TableCell>{n.entityName || n.label}</TableCell>
+                        <TableCell>{n.label || n.entityName || 'Unlabeled'}</TableCell>
                         <TableCell mono>{n.details?.address ? `${n.details.address.slice(0, 10)}...${n.details.address.slice(-8)}` : n.id}</TableCell>
                         <TableCell bold>{n.balance}</TableCell>
                         <TableCell>{n.type}</TableCell>
@@ -398,15 +400,8 @@ ${investigatorNotes}
                 </table>
               </div>
 
-              <div style={{ marginTop: '0.5rem', borderTop: '1px solid #e5e5e5', paddingTop: '1rem', fontSize: '0.8rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-                <div>
-                  <p>{bureauZone.split(',')[0]} · {new Date().toISOString().split('T')[0]}</p>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ borderBottom: '1px solid #1a1a1a', width: '170px', marginBottom: '0.25rem' }}></div>
-                  <strong style={{ display: 'block' }}>{officerName}</strong>
-                  <span style={{ fontSize: '0.74rem', color: '#888' }}>Investigating Officer</span>
-                </div>
+              <div style={{ borderTop: '1px solid #e5e5e5', paddingTop: '1rem', fontSize: '0.78rem', color: '#555' }}>
+                Independent reviewer, source records, collection method/time, system details, and applicable legal requirements must be documented outside this template.
               </div>
             </div>
           ) : (
@@ -435,7 +430,7 @@ ${investigatorNotes}
                 </div>
                 <div>
                   <span style={{ color: '#999', display: 'block', fontSize: '0.74rem' }}>Amount</span>
-                  <strong style={{ color: '#1a1a1a' }}>{suspectNode?.balance || 'N/A'} (≈ {fiatVal.formattedUsd})</strong>
+                  <strong style={{ color: '#1a1a1a' }}>{suspectNode?.balance || 'N/A'} (â‰ˆ {fiatVal.formattedUsd})</strong>
                 </div>
                 <div>
                   <span style={{ color: '#999', display: 'block', fontSize: '0.74rem' }}>Risk</span>
@@ -469,7 +464,7 @@ ${investigatorNotes}
                   />
                   {mixer && (
                     <HopRow
-                      index="··" label="Mixer"
+                      index="Â·Â·" label="Mixer"
                       address={mixer.details?.address || mixer.id}
                       balance={mixer.balance}
                     />
@@ -484,7 +479,7 @@ ${investigatorNotes}
                   ))}
                   {receiverNode && (
                     <HopRow
-                      index="→" label="Receiver"
+                      index="â†’" label="Receiver"
                       address={receiverNode.details?.address || receiverNode.id}
                       balance={receiverNode.balance}
                     />
@@ -503,8 +498,8 @@ ${investigatorNotes}
                       <strong style={{ color: '#1a1a1a' }}>{receiverNode.entityName}</strong>
                     </div>
                     <div>
-                      <span style={{ color: '#999', display: 'block', fontSize: '0.74rem' }}>Identity</span>
-                      <strong style={{ color: '#1a1a1a' }}>{receiverNode.details.kycStatus}</strong>
+                      <span style={{ color: '#999', display: 'block', fontSize: '0.74rem' }}>Entity attribution</span>
+                      <strong style={{ color: '#1a1a1a' }}>{hasAttributionEvidenceRecord(receiverNode) ? `Evidence recorded: ${receiverNode.details.identityEvidence.source}` : 'Owner or service not established'}</strong>
                     </div>
                     <div style={{ gridColumn: '1 / -1' }}>
                       <span style={{ color: '#999', display: 'block', fontSize: '0.74rem' }}>Address</span>
@@ -519,7 +514,7 @@ ${investigatorNotes}
                         <span style={{ color: '#999', display: 'block', fontSize: '0.74rem' }}>History</span>
                         <strong style={{ color: '#1a1a1a' }}>
                           {ENDPOINT_PROFILE_LABELS[endpointProfile.profile.profile] || endpointProfile.profile.profile}
-                          {' '}({(endpointProfile.profile.totalReceivedSats / 1e8).toFixed(4)} BTC · {endpointProfile.profile.txCount} txs)
+                          {' '}({(endpointProfile.profile.totalReceivedSats / 1e8).toFixed(4)} BTC Â· {endpointProfile.profile.txCount} txs)
                         </strong>
                       </div>
                     )}
@@ -537,7 +532,7 @@ ${investigatorNotes}
               {crossChainReport?.detected && (
                 <div style={{ position: 'relative', zIndex: 1 }}>
                   <h4 style={{ fontSize: '0.82rem', fontWeight: 600, color: '#1a1a1a', marginBottom: '0.4rem' }}>
-                    Cross-chain exits ({crossChainReport.bridgeCount} → {crossChainReport.targetChains.join(', ')})
+                    Cross-chain exits ({crossChainReport.bridgeCount} â†’ {crossChainReport.targetChains.join(', ')})
                   </h4>
                   <table style={{ width: '100%', fontSize: '0.76rem', borderCollapse: 'collapse' }}>
                     <thead>
@@ -564,7 +559,7 @@ ${investigatorNotes}
               {custody.eventCount > 0 && (
                 <div style={{ position: 'relative', zIndex: 1 }}>
                   <h4 style={{ fontSize: '0.82rem', fontWeight: 600, color: '#1a1a1a', marginBottom: '0.4rem' }}>
-                    Chain of custody · {custodyVerification.valid ? `intact (${custodyVerification.checkedEvents})` : `broken at ${custodyVerification.brokenAtSeq}`}
+                    Chain of custody Â· {custodyVerification.valid ? `intact (${custodyVerification.checkedEvents})` : `broken at ${custodyVerification.brokenAtSeq}`}
                   </h4>
                   <table style={{ width: '100%', fontSize: '0.76rem', borderCollapse: 'collapse' }}>
                     <thead>
@@ -579,16 +574,16 @@ ${investigatorNotes}
                       {custody.events.map(e => (
                         <tr key={e.seq}>
                           <TableCell>{e.seq}</TableCell>
-                          <TableCell mono>{shortRef(e.from)} → {shortRef(e.to)}{e.approximateOrder ? ' *' : ''}</TableCell>
+                          <TableCell mono>{shortRef(e.from)} â†’ {shortRef(e.to)}{e.approximateOrder ? ' *' : ''}</TableCell>
                           <TableCell bold>{e.amountBtc.toFixed(4)}</TableCell>
-                          <TableCell mono>{e.eventHash.slice(0, 8)}…</TableCell>
+                          <TableCell mono>{e.eventHash.slice(0, 8)}â€¦</TableCell>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                   <p className="mono-addr" style={{ fontSize: '0.7rem', color: '#999', marginTop: '0.35rem', wordBreak: 'break-all' }}>
                     {custody.terminalHash}
-                    {custody.gaps.length > 0 && ` · ${custody.gaps.map(g => g.note).join(' ')}`}
+                    {custody.gaps.length > 0 && ` Â· ${custody.gaps.map(g => g.note).join(' ')}`}
                   </p>
                 </div>
               )}
@@ -597,24 +592,25 @@ ${investigatorNotes}
               {traceAudit && traceAudit.isAudited && (
                 <div style={{ position: 'relative', zIndex: 1 }}>
                   <h4 style={{ fontSize: '0.82rem', fontWeight: 600, color: '#1a1a1a', marginBottom: '0.4rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span>Trace Verification & Mathematical Assurance</span>
+                    <span>Trace consistency checks</span>
                     <span style={{
                       fontSize: '0.7rem',
                       fontWeight: 700,
                       padding: '0.15rem 0.45rem',
                       borderRadius: '4px',
-                      backgroundColor: traceAudit.rating === 'VERIFIED' ? 'rgba(16, 185, 129, 0.12)' : traceAudit.rating === 'SUBSTANTIATED' ? 'rgba(59, 130, 246, 0.12)' : 'rgba(239, 68, 68, 0.12)',
-                      color: traceAudit.rating === 'VERIFIED' ? '#059669' : traceAudit.rating === 'SUBSTANTIATED' ? '#2563eb' : '#dc2626'
+                      backgroundColor: traceAudit.rating === 'CONSISTENT' ? 'rgba(16, 185, 129, 0.12)' : traceAudit.rating === 'INCOMPLETE' ? 'rgba(245, 158, 11, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                      color: traceAudit.rating === 'CONSISTENT' ? '#059669' : traceAudit.rating === 'INCOMPLETE' ? '#b45309' : '#dc2626'
                     }}>
-                      {traceAudit.rating} · {traceAudit.assuranceScore}% ASSURANCE
+                      {traceAudit.rating}{traceAudit.consistencyScore != null ? ` Â· ${traceAudit.consistencyScore}% consistency` : ' Â· score unavailable'}
                     </span>
                   </h4>
                   <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '4px', padding: '0.6rem', fontSize: '0.76rem', color: '#334155' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.35rem', marginBottom: '0.4rem' }}>
-                      <div>• Value Conservation: <strong>{traceAudit.invariants?.valueConservation?.passed ? 'PASSED (0 leaks)' : 'FAILED'}</strong></div>
-                      <div>• Temporal Monotonicity: <strong>{traceAudit.invariants?.temporalCausality?.passed ? 'PASSED (Causal)' : 'FAILED'}</strong></div>
-                      <div>• Taint Non-Inflation: <strong>{traceAudit.invariants?.taintConservation?.passed ? 'PASSED (Zero-mint)' : 'FAILED'}</strong></div>
-                      <div>• Multi-Model Agreement: <strong>{Math.round((traceAudit.concordance?.score || 0) * 100)}% Concordance</strong></div>
+                      <div>â€¢ Value conservation: <strong>{traceAudit.invariants?.valueConservation?.status || 'unknown'}</strong></div>
+                      <div>â€¢ Temporal causality: <strong>{traceAudit.invariants?.temporalCausality?.status || 'unknown'}</strong></div>
+                      <div>â€¢ Heuristic consistency: <strong>{traceAudit.invariants?.heuristicConsistency?.status || 'unknown'}</strong></div>
+                      <div>â€¢ Taint conservation: <strong>{traceAudit.invariants?.taintConservation?.status || 'unknown'}</strong></div>
+                      <div>â€¢ Multi-model agreement: <strong>{traceAudit.concordance?.score == null ? 'unknown' : `${Math.round(traceAudit.concordance.score * 100)}%`}</strong></div>
                     </div>
                     <p style={{ margin: 0, fontSize: '0.7rem', color: '#64748b' }}>
                       {traceAudit.summary}
@@ -661,8 +657,8 @@ ${investigatorNotes}
                 />
               </div>
 
-              {/* Dynamic Signature */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '0.5rem', fontSize: '0.82rem', borderTop: '1px solid #e5e5e5', paddingTop: '1rem', position: 'relative', zIndex: 1 }}>
+              {/* Dynamic signature is never included on the evidence worksheet. */}
+              {!isEvidence && <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '0.5rem', fontSize: '0.82rem', borderTop: '1px solid #e5e5e5', paddingTop: '1rem', position: 'relative', zIndex: 1 }}>
                 <div style={{ maxWidth: '55%' }}>
                   <span style={{ color: '#999', display: 'block', fontSize: '0.74rem' }}>Integrity hash</span>
                   <span className="mono-addr" style={{ fontSize: '0.7rem', color: '#333', wordBreak: 'break-all' }}>
@@ -716,10 +712,10 @@ ${investigatorNotes}
                         padding: '2px'
                       }}
                     />
-                    <p style={{ color: '#999', fontSize: '0.7rem' }}>{officerBadge} · {bureauZone}</p>
+                    <p style={{ color: '#999', fontSize: '0.7rem' }}>{officerBadge} Â· {bureauZone}</p>
                   </div>
                 </div>
-              </div>
+              </div>}
             </>
           )}
         </div>

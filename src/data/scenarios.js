@@ -8,7 +8,7 @@ export const SCENARIOS = [
     initialTxHash: "4b9a8f2e71d3c05c8a9f0e1d2c3b4a5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b",
     status: "ACTIVE_TRACE",
     riskScore: 85,
-    description: "Traces BTC from the starting wallet through middle steps to an exchange deposit.",
+    description: "Synthetic trace ending at an address with a possible custodial-service pattern; owner is not established.",
     nodes: [
       {
         id: "addr_suspect",
@@ -61,17 +61,13 @@ export const SCENARIOS = [
         type: "receiver",
         balance: "9.05 BTC",
         risk: "low",
-        entityName: "Exchange account",
+        entityName: "Possible custodial endpoint (hypothesis)",
         details: {
           address: "3E8tMa9Jkdf923kd8mzklaq02947aWazirX",
           lastActive: "Deposit settled",
-          ipLog: "Exchange",
-          kycStatus: "EXCHANGE DEPOSIT ADDRESS",
-          ownerName: "Exchange Deposit Account",
-          email: "compliance-notice@exchange-gateway.io",
-          phone: "Exchange",
-          kycDocumentId: "SUBPOENA ELIGIBLE",
-          riskReason: "Final deposit for the traced payments."
+          ipLog: "Service type unverified",
+          kycStatus: "POSSIBLE CUSTODIAL SERVICE (HYPOTHESIS)",
+          riskReason: "Terminal address in the synthetic traced flow; owner and service are not established."
         }
       }
     ],
@@ -151,15 +147,13 @@ export const SCENARIOS = [
         type: "receiver",
         balance: "8.40 BTC eq (≈ 546,000 USDT)",
         risk: "medium",
-        entityName: "Ethereum Deposit Account",
+        entityName: "Cross-chain endpoint (hypothesis)",
         details: {
           address: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
           lastActive: "Settled on Ethereum",
           ipLog: "Ethereum Node",
           kycStatus: "EVM ERC-20 RECIPIENT",
-          ownerName: "Cross-Chain Tether Recipient",
-          kycDocumentId: "MLAT SUBPOENA READY",
-          riskReason: "Final cross-chain exit destination on Ethereum."
+          riskReason: "Modeled cross-chain exit destination; owner and service are not established."
         }
       }
     ],

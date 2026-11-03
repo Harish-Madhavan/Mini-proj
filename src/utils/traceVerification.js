@@ -135,9 +135,11 @@ export function verifyValueConservation(nodes = [], links = []) {
 export function verifyTemporalCausality(nodes = [], links = []) {
   const nodeMap = new Map((nodes || []).map(n => [n.id, n]));
   const violations = [];
-  let checkedLinks = 0;
+  const checkedLinkIndexes = new Set();
+  let checkedTimestampLinks = 0;
+  let checkedBlockHeightLinks = 0;
 
-  (links || []).forEach(l => {
+  (links || []).forEach((l, linkIndex) => {
     const srcId = typeof l.source === 'object' ? l.source.id : l.source;
     const tgtId = typeof l.target === 'object' ? l.target.id : l.target;
     const src = nodeMap.get(srcId);
@@ -159,7 +161,8 @@ export function verifyTemporalCausality(nodes = [], links = []) {
 
     // If both source and target have timestamps, assert causality (with 120s buffer for reorgs/clock skew)
     if (srcTime != null && tgtTime != null) {
-      checkedLinks++;
+      checkedTimestampLinks++;
+      checkedLinkIndexes.add(linkIndex);
       if (tgtTime < srcTime - 120) {
         violations.push({
           sourceId: srcId,
@@ -180,6 +183,8 @@ export function verifyTemporalCausality(nodes = [], links = []) {
     const tgtHeight = getHeight(tgt);
 
     if (srcHeight != null && tgtHeight != null) {
+      checkedBlockHeightLinks++;
+      checkedLinkIndexes.add(linkIndex);
       if (tgtHeight < srcHeight) {
         violations.push({
           sourceId: srcId,
@@ -193,7 +198,9 @@ export function verifyTemporalCausality(nodes = [], links = []) {
 
   return {
     passed: violations.length === 0,
-    checkedLinks,
+    checkedLinks: checkedLinkIndexes.size,
+    checkedTimestampLinks,
+    checkedBlockHeightLinks,
     violations
   };
 }
@@ -375,8 +382,9 @@ export function computeMultiModelConcordance(nodes = [], links = [], taintedNode
 }
 
 /**
- * Master Verification & Assurance Engine.
- * Runs all structural invariants and model concordance audits, producing a court-admissible certificate.
+ * Master trace consistency audit.
+ * Reports only checks supported by graph evidence; this does not validate
+ * source authenticity, path attribution, or legal admissibility.
  *
  * @param {Object} caseOrGraph Case object or { nodes, links }
  * @param {Object} [options]
@@ -389,13 +397,23 @@ export function auditTraceCorrectness(caseOrGraph, options = {}) {
 
   if (nodes.length === 0) {
     return {
-      isAudited: false,
+      isAudited: true,
       isValid: false,
-      assuranceScore: 0,
-      rating: 'UNPROVEN',
-      summary: 'Empty graph — no trace to verify.',
-      invariants: {},
-      concordance: {},
+      isConsistent: null,
+      hasViolations: false,
+      assuranceScore: null,
+      consistencyScore: null,
+      rating: 'INCOMPLETE',
+      isComplete: false,
+      summary: 'Empty graph; no checks were applicable, so the audit is incomplete.',
+      invariants: {
+        valueConservation: { status: 'unknown', passed: null },
+        temporalCausality: { status: 'unknown', passed: null },
+        heuristicConsistency: { status: 'unknown', passed: null },
+        taintConservation: { status: 'unknown', passed: null },
+        multiModelConcordance: { status: 'unknown', score: null }
+      },
+      concordance: { status: 'unknown', score: null },
       violations: [],
       anomalies: []
     };
@@ -405,11 +423,21 @@ export function auditTraceCorrectness(caseOrGraph, options = {}) {
   const valAudit = verifyValueConservation(nodes, links);
   const timeAudit = verifyTemporalCausality(nodes, links);
   const heuristicAudit = verifyHeuristicConsistency(nodes);
+  const hasTaintSeed = taintedNodeIds.some(id => nodes.some(node => node.id === id)) || nodes.some(node => node.type === 'suspect');
+  const hasValueLinks = links.some(link => parseSats(link.value) > 0);
+  const taintApplicable = hasTaintSeed && hasValueLinks;
   const fifoMap = calculateTaintMap(nodes, links, taintedNodeIds, 'fifo');
   const propMap = calculateTaintMap(nodes, links, taintedNodeIds, 'proportionate');
-  const fifoTaintAudit = auditTaintConservation(nodes, links, fifoMap, 'fifo', null, taintedNodeIds);
-  const propTaintAudit = auditTaintConservation(nodes, links, propMap, 'proportionate', null, taintedNodeIds);
-  const concordance = computeMultiModelConcordance(nodes, links, taintedNodeIds);
+  const fifoTaintAudit = taintApplicable
+    ? auditTaintConservation(nodes, links, fifoMap, 'fifo', null, taintedNodeIds)
+    : { passed: null, violations: [] };
+  const propTaintAudit = taintApplicable
+    ? auditTaintConservation(nodes, links, propMap, 'proportionate', null, taintedNodeIds)
+    : { passed: null, violations: [] };
+  const computedConcordance = taintApplicable ? computeMultiModelConcordance(nodes, links, taintedNodeIds) : null;
+  const concordance = computedConcordance
+    ? { ...computedConcordance, status: 'checked' }
+    : { status: 'unknown', score: null, consensusSinks: [], modelSinks: { fifo: [], proportionate: [], poison: [] }, maxSpread: null };
 
   const allViolations = [
     ...valAudit.violations,
@@ -424,7 +452,43 @@ export function auditTraceCorrectness(caseOrGraph, options = {}) {
     ...heuristicAudit.anomalies
   ];
 
-  // 2. Score Calculation (starts at 100)
+  const invariantResults = {
+    valueConservation: {
+      status: valAudit.checkedHubs > 0 ? (valAudit.passed ? 'passed' : 'failed') : 'unknown',
+      passed: valAudit.checkedHubs > 0 ? valAudit.passed : null,
+      checkedHubs: valAudit.checkedHubs,
+      count: valAudit.violations.length
+    },
+    temporalCausality: {
+      status: timeAudit.checkedLinks > 0 ? (timeAudit.passed ? 'passed' : 'failed') : 'unknown',
+      passed: timeAudit.checkedLinks > 0 ? timeAudit.passed : null,
+      checkedLinks: timeAudit.checkedLinks,
+      checkedTimestampLinks: timeAudit.checkedTimestampLinks,
+      checkedBlockHeightLinks: timeAudit.checkedBlockHeightLinks,
+      count: timeAudit.violations.length
+    },
+    heuristicConsistency: {
+      status: heuristicAudit.checkedNodes > 0 ? (heuristicAudit.passed ? 'passed' : 'failed') : 'unknown',
+      passed: heuristicAudit.checkedNodes > 0 ? heuristicAudit.passed : null,
+      checkedNodes: heuristicAudit.checkedNodes,
+      count: heuristicAudit.violations.length
+    },
+    taintConservation: {
+      status: taintApplicable ? (fifoTaintAudit.passed && propTaintAudit.passed ? 'passed' : 'failed') : 'unknown',
+      passed: taintApplicable ? fifoTaintAudit.passed && propTaintAudit.passed : null,
+      fifoViolations: fifoTaintAudit.violations.length,
+      propViolations: propTaintAudit.violations.length
+    },
+    multiModelConcordance: {
+      status: concordance.status,
+      score: concordance.score
+    }
+  };
+  const isComplete = Object.values(invariantResults).every(result => result.status !== 'unknown');
+
+  // 2. Score is an internal consistency measure, not a probability or a
+  // validation of the inferred transaction path. It is withheld if checks
+  // could not be applied.
   let score = 100;
   score -= valAudit.violations.length * 35; // Critical: value creation
   score -= timeAudit.violations.length * 25; // Critical: time paradox
@@ -442,45 +506,35 @@ export function auditTraceCorrectness(caseOrGraph, options = {}) {
   score = Math.max(0, Math.min(100, Math.round(score)));
 
   // 3. Judicial Rating Designation
-  let rating = 'VERIFIED';
-  if (score < 50 || valAudit.violations.length > 0 || timeAudit.violations.length > 0) {
-    rating = 'SUSPECT';
-  } else if (score < 75 || allViolations.length > 0) {
-    rating = 'QUALIFIED';
-  } else if (score < 90) {
-    rating = 'SUBSTANTIATED';
-  }
+  const rating = allViolations.length > 0 ? 'INCONSISTENT' : isComplete ? 'CONSISTENT' : 'INCOMPLETE';
 
   // 4. Concise Forensic Summary
   const summaryParts = [];
   if (allViolations.length === 0) {
-    summaryParts.push('All 4 core forensic invariants mathematically verified.');
+    summaryParts.push(isComplete
+      ? 'Applicable internal consistency checks passed; this does not verify path attribution or ownership.'
+      : 'No violations were found in applicable checks, but the audit is incomplete because one or more checks were not applicable or required evidence was unavailable.');
   } else {
     summaryParts.push(`Flagged ${allViolations.length} invariant violation${allViolations.length === 1 ? '' : 's'}.`);
   }
 
-  if (concordance.score >= 0.95) {
-    summaryParts.push('100% concordance across FIFO, Proportional, and Poison judicial taint models.');
+  if (concordance.status === 'checked') {
+    summaryParts.push(`${Math.round(concordance.score * 100)}% agreement across the selected taint models.`);
   } else {
-    summaryParts.push(`${Math.round(concordance.score * 100)}% concordance across judicial taint models.`);
+    summaryParts.push('Taint model agreement is unknown because no applicable seeded value flow was available.');
   }
 
   return {
     isAudited: true,
-    isValid: allViolations.length === 0,
-    assuranceScore: score,
+    isValid: isComplete && allViolations.length === 0,
+    isConsistent: isComplete && allViolations.length === 0,
+    hasViolations: allViolations.length > 0,
+    isComplete,
+    consistencyScore: isComplete ? score : null,
+    assuranceScore: isComplete ? score : null,
     rating,
     summary: summaryParts.join(' '),
-    invariants: {
-      valueConservation: { passed: valAudit.passed, checkedHubs: valAudit.checkedHubs, count: valAudit.violations.length },
-      temporalCausality: { passed: timeAudit.passed, checkedLinks: timeAudit.checkedLinks, count: timeAudit.violations.length },
-      heuristicConsistency: { passed: heuristicAudit.passed, checkedNodes: heuristicAudit.checkedNodes, count: heuristicAudit.violations.length },
-      taintConservation: {
-        passed: fifoTaintAudit.passed && propTaintAudit.passed,
-        fifoViolations: fifoTaintAudit.violations.length,
-        propViolations: propTaintAudit.violations.length
-      }
-    },
+    invariants: invariantResults,
     concordance,
     violations: allViolations,
     anomalies: allAnomalies

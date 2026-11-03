@@ -4,7 +4,7 @@
  * Computes risk across 5 forensic dimensions:
  * 1. Obfuscation & Privacy Mixer Intermediation (Wasabi / Whirlpool / Tornado / Equal-value CoinJoin)
  * 2. Layering Hop Depth & Peeling Index (Intermediate change transit hubs)
- * 3. Settlement & Counterparty Attribution (KYC Exchange Gateway vs Non-KYC Darknet / Unspent UTXO)
+ * 3. Settlement & Counterparty Attribution (explicit identity evidence vs unknown owner)
  * 4. Protocol & Transaction Anomalies (RBF signaling, zero/extreme fee rates, non-standard scripts)
  * 5. Blockchain Era & Provenance Modulation (Genesis / Early Satoshi era discount for clean P2P)
  */
@@ -51,11 +51,6 @@ function sanitizeWeights(customWeights = {}) {
   return { ...DEFAULT_RISK_WEIGHTS, ...clean };
 }
 
-function isIdentityVerified(node) {
-  const status = node?.details?.kycStatus || '';
-  return status.includes('IDENTITY') || status.includes('VERIFIED');
-}
-
 export function calculateForensicRiskScore(caseOrNodes, customWeights = {}) {
   const nodes = Array.isArray(caseOrNodes) ? caseOrNodes : (caseOrNodes?.nodes || []);
   // Sweep detection needs graph links; node-only callers (unit fixtures)
@@ -71,10 +66,9 @@ export function calculateForensicRiskScore(caseOrNodes, customWeights = {}) {
     Boolean(n.details?.opReturnDecoded && parseCrossChainMemo(n.details.opReturnDecoded))
   );
   const hopCount = nodes.filter(n => n.type === 'hop').length;
-  const receiverNodes = nodes.filter(n => n.type === 'receiver');
-  // A case is only as clean as its dirtiest endpoint: KYC applies only when
-  // every terminal receiver is attributed, not just the first one found.
-  const isKycVerified = receiverNodes.length > 0 && receiverNodes.every(isIdentityVerified);
+  // No trusted identity-verification source is configured. A caller-provided
+  // attribution record is a lead, not a verified fact or a risk discount.
+  const isKycVerified = false;
 
   const isHistoricalEra = nodes.some(n =>
     n.details?.kycStatus?.includes('HISTORICAL') ||
@@ -312,8 +306,8 @@ export function evaluateThreatSignatures(nodes = [], context = {}) {
       score: isKycVerified ? `-${kycDiscountWeight}%` : `+${destinationScore}%`,
       category: "Destination check",
       description: isKycVerified
-        ? "End point is an identity-checked exchange."
-        : "End point is an output with no identity records.",
+        ? "An identity-attribution evidence record is attached to the endpoint."
+        : "Endpoint ownership is not established by the on-chain trace.",
       status: isKycVerified ? "mitigated" : "detected"
     }
   ];
@@ -392,7 +386,7 @@ export function getStatutoryLegalAction(riskScore, isKycVerified = false, isHist
   if (riskScore >= 35) {
     const recommendations = [
       "Deploy on-chain address monitoring for subsequent outgoing sweeps.",
-      "Request identity records from the destination exchange."
+      "If a service attribution is independently established, request identity records through applicable lawful process."
     ];
     if (sweepImminent) {
       recommendations.push("Consolidation in progress: prioritize the sweep destination in the watchlist.");

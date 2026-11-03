@@ -304,15 +304,15 @@ function classifyOutputShared({
 
   // Unspent terminal output overrides many heuristics
   if (!isSpent) {
-    // If exchange confidence high, mark as identity-checked receiver, else generic holder
+    // Address/script signals can suggest custody, but do not establish identity.
     if (exchangeConf > 0.4) {
       return classifiedNode({
         nodeType: 'receiver',
-        label: 'End receiver (exchange)',
-        entityName: 'Unspent exchange deposit',
-        kycStatus: 'IDENTITY VERIFIED (UNSPENT)',
-        ipLog: 'Exchange',
-        riskReason: `Unspent exchange-held output (${scriptStd}, exchange likelihood ${(exchangeConf*100).toFixed(0)}%, heuristic ${heuristics.score}) â€” holds ${valBtc} BTC.`,
+        label: 'Possible custodial endpoint (unspent)',
+        entityName: 'Possible custodial endpoint (heuristic)',
+        kycStatus: 'POSSIBLE CUSTODIAL SERVICE (HEURISTIC)',
+        ipLog: 'Unverified service hypothesis',
+        riskReason: `Unspent output with custodial-service signals (${scriptStd}, heuristic likelihood ${(exchangeConf*100).toFixed(0)}%, score ${heuristics.score}); service and owner are not established.`,
         confidence: Math.max(0.78, heuristics.confidence),
         extra: { exchangeConf, heuristics },
       });
@@ -351,12 +351,12 @@ function classifyOutputShared({
     return classifiedNode({
       nodeType: isLikelyExchange ? 'receiver' : 'hop',
       label: isLikelyExchange ? 'End receiver (exchange, spent)' : 'Payment',
-      entityName: isLikelyExchange ? 'Exchange account (spent)' : 'Payment recipient',
+      entityName: isLikelyExchange ? 'Possible custodial endpoint (heuristic)' : 'Payment recipient',
       risk: isLikelyExchange ? 'low' : 'medium',
-      kycStatus: isLikelyExchange ? 'IDENTITY VERIFIED' : 'PAYMENT RECIPIENT',
-      ipLog: isLikelyExchange ? 'Exchange' : 'Payment endpoint',
+      kycStatus: isLikelyExchange ? 'POSSIBLE CUSTODIAL SERVICE (HEURISTIC)' : 'PAYMENT RECIPIENT',
+      ipLog: isLikelyExchange ? 'Unverified service hypothesis' : 'Payment endpoint',
       riskReason: isLikelyExchange
-        ? `Exchange deposit (script ${scriptStd}, likelihood ${(exchangeConf*100).toFixed(0)}%, heuristic ${heuristics.score}).`
+        ? `Possible custodial-service pattern (script ${scriptStd}, heuristic likelihood ${(exchangeConf*100).toFixed(0)}%, score ${heuristics.score}); attribution is unverified.`
         : `Payment to recipient (${scriptStd}, heuristic ${heuristics.score}) â€” spent forward.`,
       confidence: Math.max(heuristics.confidence, isLikelyExchange ? 0.6 : 0.5),
       extra: { heuristics, exchangeConf, isPayment: true },

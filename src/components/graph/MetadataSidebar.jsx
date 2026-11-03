@@ -42,6 +42,7 @@ import { useWatchlist } from '../../hooks/useWatchlist';
 import { useEndpointProfile } from '../../hooks/useEndpointProfile';
 import { getFeeTier } from '../../utils/traceHeuristics';
 import { ENDPOINT_PROFILE_LABELS } from '../../services/blockchain/gateway';
+import { hasAttributionEvidenceRecord } from '../../utils/attributionEvidence';
 
 const RISK_BADGES = {
   critical: { bg: 'rgba(239, 68, 68, 0.2)', color: '#ef4444' },
@@ -115,6 +116,7 @@ export default function MetadataSidebar({
   };
 
   const details = selectedNode?.details || {};
+  const hasIdentityEvidence = hasAttributionEvidenceRecord(selectedNode);
   const isIsolated = isolatedNodeId === selectedNode?.id;
   const notesList = activeCase?.notesList || [];
   const watched = isWatched(details.address);
@@ -368,7 +370,7 @@ export default function MetadataSidebar({
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
                   <span style={{ color: 'var(--text-muted)' }}>Sweep</span>
                   <span style={{ fontWeight: 600, color: typologyFlags.sweep.cashoutUrgency === 'IMMINENT' ? '#ef4444' : '#f59e0b' }}>
-                    {typologyFlags.sweep.cashoutUrgency === 'IMMINENT' ? 'Likely cash-out' : 'Aggregation'} · {typologyFlags.sweep.inputCount}→1 · {typologyFlags.sweep.consolidatedBtc} BTC
+                    {typologyFlags.sweep.cashoutUrgency === 'IMMINENT' ? 'Recent aggregation' : 'Aggregation'} · {typologyFlags.sweep.inputCount}→1 · {typologyFlags.sweep.consolidatedBtc} BTC
                   </span>
                 </div>
               )}
@@ -419,9 +421,9 @@ export default function MetadataSidebar({
             )}
             <KVRow label="Last seen:">{details.lastActive}</KVRow>
             <KVRow icon={<MapPin size={12} style={{ color: '#ef4444' }} />} label="Network">{details.ipLog}</KVRow>
-            <KVRow label="Identity check">
-              <span style={{ color: selectedNode.type === 'receiver' ? '#10b981' : 'var(--text-muted)' }}>
-                {details.kycStatus}
+            <KVRow label="Entity attribution">
+              <span style={{ color: hasIdentityEvidence ? '#10b981' : 'var(--text-muted)' }}>
+                {hasIdentityEvidence ? `Evidence recorded (${details.identityEvidence.source}); review independently` : 'Owner or service not established'}
               </span>
             </KVRow>
 
@@ -746,24 +748,28 @@ export default function MetadataSidebar({
           {/* Action options */}
           {selectedNode.type === 'receiver' ? (
             <div className="pulse-glow-border" style={{ 
-              backgroundColor: 'rgba(16, 185, 129, 0.05)', 
-              border: '1px solid #10b981', 
+              backgroundColor: hasIdentityEvidence ? 'rgba(16, 185, 129, 0.05)' : 'rgba(245, 158, 11, 0.05)',
+              border: `1px solid ${hasIdentityEvidence ? '#10b981' : '#f59e0b'}`,
               borderRadius: '8px', 
               padding: '0.75rem' 
             }}>
-              <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                <User size={12} /> Identity record available
+              <span style={{ fontSize: '0.75rem', color: hasIdentityEvidence ? '#10b981' : '#f59e0b', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                <User size={12} /> {hasIdentityEvidence ? 'Attribution evidence recorded' : 'Owner not established'}
               </span>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.25rem', marginTop: '0.5rem', fontSize: '0.8rem' }}>
-                <div>Name: <strong style={{ color: '#fff' }}>{details.ownerName || 'Identified Gateway'}</strong></div>
-                <div>ID Document: <strong style={{ color: '#fff' }}>{details.kycDocumentId || 'SUBPOENA READY'}</strong></div>
+                {hasIdentityEvidence ? (
+                  <>
+                    <div>Recorded subject: <strong style={{ color: '#fff' }}>{details.identityEvidence.subject}</strong></div>
+                    <div>Evidence source: <strong style={{ color: '#fff' }}>{details.identityEvidence.source}</strong></div>
+                  </>
+                ) : <div style={{ color: 'var(--text-secondary)' }}>Transaction patterns and address type do not identify an owner or service.</div>}
               </div>
               <button
                 onClick={() => onSelectTab('osint')}
-                className="btn btn-primary"
+                className="btn btn-outline"
                 style={{ width: '100%', marginTop: '0.75rem', padding: '0.4rem', justifyContent: 'center', fontSize: '0.8rem' }}
               >
-                Prepare notice
+                Review attribution
               </button>
             </div>
           ) : !selectedNode.id.startsWith('tx_') && !selectedNode.isCollapsedCluster && details.address && onExpandAddress ? (

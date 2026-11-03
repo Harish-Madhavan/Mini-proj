@@ -422,7 +422,7 @@ export function generateObfuscationDossier(activeCase) {
   if (sweeps.detected) {
     const imminent = sweeps.sweeps.some(s => s.cashoutUrgency === 'IMMINENT');
     recommendations.push(imminent
-      ? 'Likely cash-out: gathered funds reached an exchange-held account — send the Section 67 notice before the money leaves.'
+      ? 'Recent aggregation pattern detected; destination identity and purpose are not established. Review current activity through verified sources.'
       : 'Funds were gathered into one wallet — watch the destination address for the next move.');
   }
   if (recommendations.length === 0) recommendations.push('Send the standard Section 67 identity notice to the end exchange.');

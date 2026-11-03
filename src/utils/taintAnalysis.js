@@ -371,8 +371,6 @@ export function auditTaintConservation(nodes = [], links = [], taintMap = new Ma
       if (n.type === 'suspect') seeds.add(n.id);
     });
   }
-  if (seeds.size === 0 && nodes.length > 0) seeds.add(nodes[0].id);
-
   const inflowSats = new Map();
   nodes.forEach(n => inflowSats.set(n.id, 0));
   (links || []).forEach(l => {
