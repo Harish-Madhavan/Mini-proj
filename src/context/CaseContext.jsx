@@ -383,6 +383,28 @@ export function CaseProvider({ children }) {
     }));
   }, [showToast, updateRecoveryLead]);
 
+  const updateRecoveryLeadMetadata = useCallback((leadId, patch) => {
+    updateRecoveryLead(leadId, lead => ({ ...lead, ...patch, updatedAt: new Date().toISOString() }));
+  }, [updateRecoveryLead]);
+
+  const addEvidenceClaim = useCallback((claim) => {
+    setScenarios(prev => prev.map(item => item.id === activeCaseId
+      ? { ...item, evidenceClaims: [claim, ...(item.evidenceClaims || [])] }
+      : item));
+  }, [activeCaseId]);
+
+  const updateEvidenceClaimReview = useCallback((claimId, review) => {
+    setScenarios(prev => prev.map(item => item.id === activeCaseId
+      ? { ...item, evidenceClaimReviews: { ...(item.evidenceClaimReviews || {}), [claimId]: review } }
+      : item));
+  }, [activeCaseId]);
+
+  const updatePathReview = useCallback((signature, review) => {
+    setScenarios(prev => prev.map(item => item.id === activeCaseId
+      ? { ...item, pathReviews: { ...(item.pathReviews || {}), [signature]: review } }
+      : item));
+  }, [activeCaseId]);
+
   const value = {
     scenarios,
     activeCaseId,
@@ -407,6 +429,10 @@ export function CaseProvider({ children }) {
     handleDeleteCaseNote,
     addRecoveryAction,
     updateRecoveryAction,
+    updateRecoveryLeadMetadata,
+    addEvidenceClaim,
+    updateEvidenceClaimReview,
+    updatePathReview,
     getGatewayStatus,
     getCacheStats
   };

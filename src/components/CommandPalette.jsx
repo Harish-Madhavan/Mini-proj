@@ -18,7 +18,7 @@ export default function CommandPalette({ isOpen, onClose }) {
     path: item.path,
     icon: item.icon,
     category: 'Navigation',
-    shortcut: String(index + 1),
+    shortcut: index < 9 ? String(index + 1) : '0',
   }));
 
   const caseItems = scenarios.map(c => ({

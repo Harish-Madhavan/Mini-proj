@@ -16,6 +16,7 @@ const RiskAnalyzer = lazy(() => import('./components/RiskAnalyzer'));
 const ReportGenerator = lazy(() => import('./components/ReportGenerator'));
 const WatchlistMonitor = lazy(() => import('./components/WatchlistMonitor'));
 const AssetRecovery = lazy(() => import('./features/recovery/AssetRecovery'));
+const EvidenceReview = lazy(() => import('./features/evidence/EvidenceReview'));
 
 const ROUTE_COMPONENTS = {
   dashboard: Dashboard,
@@ -26,7 +27,8 @@ const ROUTE_COMPONENTS = {
   risk: RiskAnalyzer,
   watchlist: WatchlistMonitor,
   report: ReportGenerator,
-  recovery: AssetRecovery
+  recovery: AssetRecovery,
+  evidence: EvidenceReview
 };
 
 function RouteFallback() {
@@ -57,15 +59,15 @@ function AppContent() {
 
   const currentTab = location.pathname.substring(1) || 'dashboard';
 
-  // Global Ctrl+K / Cmd+K and Alt+1..6 shortcut handler
+  // Global Ctrl+K / Cmd+K and Alt+1..9 / Alt+0 shortcut handler
   useEffect(() => {
     const handleGlobalKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setIsCommandOpen(prev => !prev);
-      } else if (e.altKey && ['1', '2', '3', '4', '5', '6', '7', '8', '9'].includes(e.key)) {
+      } else if (e.altKey && ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'].includes(e.key)) {
         e.preventDefault();
-        const index = parseInt(e.key, 10) - 1;
+        const index = e.key === '0' ? 9 : parseInt(e.key, 10) - 1;
         if (NAV_ITEMS[index]) {
           navigate(NAV_ITEMS[index].path);
         }

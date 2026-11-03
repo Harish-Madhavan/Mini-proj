@@ -7,12 +7,13 @@ import {
   ShieldAlert,
   Radio,
   FileText,
-  BriefcaseBusiness
+  BriefcaseBusiness,
+  ClipboardCheck
 } from 'lucide-react';
 
 /**
  * Single navigation source for the header tabs, keyboard shortcuts, and the
- * command palette. Order defines Alt+1..8 shortcuts — keep both consumers on
+ * command palette. Order defines Alt+1..9 and Alt+0 shortcuts — keep both consumers on
  * this list instead of duplicating routes.
  */
 export const NAV_ITEMS = [
@@ -24,5 +25,6 @@ export const NAV_ITEMS = [
   { id: 'risk', path: '/risk', label: 'Risk', icon: ShieldAlert },
   { id: 'watchlist', path: '/watchlist', label: 'Watchlist', icon: Radio },
   { id: 'report', path: '/report', label: 'Report', icon: FileText },
-  { id: 'recovery', path: '/recovery', label: 'Recovery', icon: BriefcaseBusiness }
+  { id: 'recovery', path: '/recovery', label: 'Recovery', icon: BriefcaseBusiness },
+  { id: 'evidence', path: '/evidence', label: 'Evidence review', icon: ClipboardCheck }
 ];

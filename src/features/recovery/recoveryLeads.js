@@ -56,7 +56,10 @@ function deduplicateLinks(links = []) {
 
 function observedTime(link) {
   const raw = link?.blockTime ?? link?.block_time ?? link?.timestamp;
-  if (typeof raw === 'number' && Number.isFinite(raw)) return raw < 1e12 ? raw * 1000 : raw;
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    const time = raw < 1e12 ? raw * 1000 : raw;
+    return Number.isFinite(new Date(time).getTime()) ? time : null;
+  }
   if (typeof raw !== 'string' || ['On-chain', 'Settled', 'Embedded'].includes(raw)) return null;
   const parsed = Date.parse(raw);
   return Number.isFinite(parsed) ? parsed : null;
@@ -70,20 +73,36 @@ function verifiedDestination(node) {
   return { type: evidence.type, evidence };
 }
 
-function scoreEvidence(node, flows = [], deduplicationAmbiguous = false) {
+function hasTransactionReferenceContext(link) {
+  const hasReference = Boolean(link?.txid || link?.transactionId || link?.details?.txid);
+  if (!hasReference) return false;
+  const height = Number(link.blockHeight ?? link.block_height);
+  if (Number.isFinite(height) && height > 0) return true;
+  const rawTime = link.blockTime ?? link.block_time ?? link.timestamp;
+  if (typeof rawTime === 'number') return Number.isFinite(rawTime) && Number.isFinite(new Date(rawTime < 1e12 ? rawTime * 1000 : rawTime).getTime());
+  return typeof rawTime === 'string' && !['on-chain', 'settled', 'embedded', 'unknown'].includes(rawTime.trim().toLowerCase()) && Number.isFinite(Date.parse(rawTime));
+}
+
+function scoreEvidence(node, flows = [], deduplicationAmbiguous = false, now = Date.now()) {
   const nodeEvidence = node.details?.attributionEvidence;
   const evidence = nodeEvidence || null;
-  const hasVerifiedTxReference = flows.some(flow => Boolean(flow.link.txid || flow.link.transactionId) && (flow.link.blockTime != null || flow.link.block_time != null));
-  const onChain = hasVerifiedTxReference ? 0.9 : 0;
+  const onChain = flows.length ? flows.filter(flow => hasTransactionReferenceContext(flow.link)).length / flows.length : 0;
   const declaredConfidence = Number(evidence?.confidence);
   const attribution = Number.isFinite(declaredConfidence)
     ? Math.max(0, Math.min(1, declaredConfidence))
     : evidence?.verified === true ? 0.9 : evidence?.source ? 0.4 : 0;
-  const contact = node.details?.verifiedContact?.verified === true && node.details?.verifiedContact?.source ? 1 : 0;
+  const contactRecord = node.details?.verifiedContact;
+  const contactVerifiedAt = contactRecord?.verifiedAt ? Date.parse(contactRecord.verifiedAt) : NaN;
+  const contactAgeDays = Number.isFinite(contactVerifiedAt) ? Math.max(0, (now - contactVerifiedAt) / DAY_MS) : null;
+  const contact = contactRecord?.verified === true && contactRecord.source
+    ? contactAgeDays == null ? 0.5 : contactAgeDays <= 90 ? 1 : 0.25
+    : 0;
   return {
     onChain,
     attribution,
     contact,
+    contactAgeDays,
+    contactFreshness: contact === 0 ? 'unknown' : contactAgeDays == null ? 'date unavailable' : contactAgeDays <= 90 ? 'current' : 'stale',
     evidence,
     combined: Math.max(0, onChain * 0.4 + attribution * 0.4 + contact * 0.2 - (deduplicationAmbiguous ? 0.1 : 0))
   };
@@ -184,8 +203,13 @@ export function buildRecoveryLeads(caseData, now = Date.now()) {
     const sortedFlows = [...flows].sort((a, b) => (observedTime(b.link) || 0) - (observedTime(a.link) || 0));
     const lastFlow = sortedFlows[0];
     const lastTime = observedTime(lastFlow?.link);
-    const recency = lastTime == null ? 0.2 : Math.max(0, Math.min(1, 1 - Math.max(0, now - lastTime) / (90 * DAY_MS)));
-    const evidence = scoreEvidence(destinationNode, flows, deduplicated.ambiguous);
+    const ageDays = lastTime == null ? null : Math.max(0, (now - lastTime) / DAY_MS);
+    const recency = ageDays == null ? 0 : Math.max(0, Math.min(1, 1 - ageDays / 90));
+    const freshness = ageDays == null ? 'unknown' : ageDays <= 7 ? 'current' : ageDays <= 30 ? 'aging' : 'stale';
+    const lastReviewedAt = (caseData.recoveryLeads || []).find(item => item.id === `lead_${encodeURIComponent(address)}`)?.lastReviewedAt || null;
+    const reviewAgeDays = lastReviewedAt && Number.isFinite(Date.parse(lastReviewedAt)) ? Math.max(0, (now - Date.parse(lastReviewedAt)) / DAY_MS) : null;
+    const reviewFreshness = reviewAgeDays == null ? 'not reviewed' : reviewAgeDays <= 7 ? 'current' : reviewAgeDays <= 30 ? 'due for review' : 'stale review';
+    const evidence = scoreEvidence(destinationNode, flows, deduplicated.ambiguous, now);
     const destination = verifiedDestination(destinationNode);
     const isVerifiedUnspent = destinationNode.details?.outspendSpent === false;
     const availableSats = isVerifiedUnspent
@@ -194,8 +218,21 @@ export function buildRecoveryLeads(caseData, now = Date.now()) {
         ? Math.min(attributedSats, parseSats(destinationNode.details.availableBalance)) : 0;
     const valueFactor = Math.min(1, Math.log10(1 + attributedSats / 1e8) / 2);
     const rankScore = Math.round(100 * (valueFactor * 0.35 + recency * 0.2 + evidence.combined * 0.45));
+    const leadId = `lead_${encodeURIComponent(address)}`;
+    const savedLead = (caseData.recoveryLeads || []).find(item => item.id === leadId);
+    const activeActions = (savedLead?.actions || []).filter(action => !['completed', 'unable_to_proceed', 'recovery_confirmed'].includes(action.state));
+    const latestAction = [...activeActions].sort((a, b) => Date.parse(b.updatedAt || b.createdAt || 0) - Date.parse(a.updatedAt || a.createdAt || 0))[0] || null;
+    const latestActionUpdatedAt = latestAction?.updatedAt ? Date.parse(latestAction.updatedAt) : NaN;
+    const defaultFollowUp = Number.isFinite(latestActionUpdatedAt) && ['submitted', 'awaiting_response'].includes(latestAction?.state)
+      ? latestActionUpdatedAt + 7 * DAY_MS : null;
+    const explicitDueAt = latestAction?.nextFollowUpAt && Number.isFinite(Date.parse(latestAction.nextFollowUpAt)) ? latestAction.nextFollowUpAt : null;
+    const followUpDueAt = explicitDueAt || (defaultFollowUp ? new Date(defaultFollowUp).toISOString() : null);
+    const followUpDueMs = followUpDueAt ? Date.parse(followUpDueAt) : NaN;
+    const followUpUrgency = !Number.isFinite(followUpDueMs) ? 'not scheduled' : followUpDueMs <= now ? 'overdue' : followUpDueMs - now <= 2 * DAY_MS ? 'due soon' : 'scheduled';
+    const schedulingBoost = followUpUrgency === 'overdue' ? 15 : followUpUrgency === 'due soon' ? 7 : 0;
+    const schedulingScore = Math.min(100, rankScore + schedulingBoost);
     const lead = {
-      id: `lead_${encodeURIComponent(address)}`,
+      id: leadId,
       address,
       label: destination.type === 'Unknown' ? 'Unclassified destination' : destination.type,
       currency: caseData.currency || 'BTC',
@@ -208,21 +245,30 @@ export function buildRecoveryLeads(caseData, now = Date.now()) {
         : 'gross destination flow and tainted subset; current availability requires an unspent output',
       deduplicationAmbiguous: deduplicated.ambiguous,
       lastObserved: lastTime == null ? 'Transaction time unavailable' : new Date(lastTime).toISOString(),
+      lastObservedAgeDays: ageDays,
+      freshness,
+      lastReviewedAt,
+      reviewFreshness,
+      reviewNote: savedLead?.reviewNote || '',
       lastTransactionId: lastFlow?.link?.txid || lastFlow?.link?.transactionId || lastFlow?.link?.details?.txid || null,
       destinationType: destination.type,
       destinationEvidence: destination.evidence,
       evidence: {
-        onChain: { confidence: evidence.onChain, reference: lastFlow?.link?.txid || lastFlow?.link?.transactionId || null },
+        onChain: { referenceCoverage: evidence.onChain, reference: lastFlow?.link?.txid || lastFlow?.link?.transactionId || null },
         attributionHypothesis: { confidence: evidence.attribution, source: evidence.evidence?.source || null, verified: evidence.evidence?.verified === true },
         confirmedRecovery: { status: 'not_confirmed', evidence: null }
       },
-      verifiedContact: evidence.contact === 1 ? destinationNode.details.verifiedContact : null,
-      scoreFactors: { value: valueFactor, recency, evidence: evidence.combined, evidenceBreakdown: { onChain: evidence.onChain, attribution: evidence.attribution, contact: evidence.contact, deduplicationAmbiguous: deduplicated.ambiguous } },
+      verifiedContact: evidence.contact > 0 ? destinationNode.details.verifiedContact : null,
+      contactFreshness: evidence.contactFreshness,
+      followUpDueAt,
+      followUpUrgency,
+      schedulingScore,
+      scoreFactors: { value: valueFactor, recency, freshness, evidence: evidence.combined, evidenceBreakdown: { onChain: evidence.onChain, attribution: evidence.attribution, contact: evidence.contact, contactFreshness: evidence.contactFreshness, deduplicationAmbiguous: deduplicated.ambiguous } },
       rankScore,
       priority: rankScore >= 70 ? 'High' : rankScore >= 40 ? 'Medium' : 'Low',
       actions: []
     };
-    queue.enqueue(lead, rankScore);
+    queue.enqueue(lead, schedulingScore);
   });
 
   const results = [];

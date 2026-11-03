@@ -732,3 +732,108 @@ body {
     padding: 1.1rem;
   }
 }
+
+/* Evidence and recovery workflow surfaces */
+.workflow-page {
+  min-width: 0;
+}
+
+.workflow-header {
+  border-color: var(--border-strong) !important;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.055), var(--bg-card) 42%);
+}
+
+.workflow-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.workflow-summary span {
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 0.24rem 0.6rem;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.workflow-summary strong {
+  color: var(--text-primary);
+  margin-right: 0.2rem;
+}
+
+.workflow-notice {
+  border-left: 2px solid var(--primary-accent) !important;
+  line-height: 1.55;
+}
+
+.workflow-section {
+  min-width: 0;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.12);
+}
+
+.workflow-record,
+.evidence-gap,
+.recovery-action {
+  min-width: 0;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.workflow-record:hover,
+.evidence-gap:hover,
+.recovery-action:hover {
+  border-color: var(--border-strong) !important;
+}
+
+.workflow-record > div:first-child strong,
+.recovery-lead h3 {
+  letter-spacing: -0.015em;
+}
+
+.recovery-lead {
+  border-top: 2px solid rgba(59, 130, 246, 0.42) !important;
+}
+
+.recovery-action-form {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(145px, 0.7fr) auto !important;
+}
+
+.recovery-action-form > *,
+.recovery-action > * {
+  min-width: 0;
+}
+
+.evidence-gap {
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 2fr) !important;
+}
+
+@media (max-width: 768px) {
+  .workflow-page {
+    padding-top: 0.75rem !important;
+  }
+
+  .workflow-header {
+    align-items: flex-start !important;
+  }
+
+  .workflow-summary {
+    width: 100%;
+  }
+
+  .evidence-gap {
+    grid-template-columns: 1fr !important;
+  }
+
+  .evidence-gap > span[style*="grid-column"] {
+    grid-column: 1 !important;
+  }
+
+  .recovery-action-form {
+    grid-template-columns: 1fr !important;
+  }
+
+  .recovery-action > * {
+    grid-column: 1 / -1;
+  }
+}
