@@ -53,7 +53,7 @@ trace is computed live from gateway data.
   Linked cases, Risk, Watchlist, Report) plus graph canvas/sidebar/timeline.
 - `src/utils/` — chain API, heuristics, taint, clustering, risk, dossiers,
   custody, cross-chain bridge analysis, and narrative modules. Every module has colocated `.test.js`
-  tests (41 test files and 265 tests in the latest full-suite run).
+  tests (41 test files and 271 tests in the latest full-suite run).
 - `src/data/` — `judicialCorpus.js` separates public-case/source leads and
   unverified trace references from the verified benchmark; `forensicCorpus.js`
   contains candidate identifiers, not ground truth, alongside seed scenarios.
@@ -80,17 +80,21 @@ Be precise about what the numbers mean:
   Their agreement and coverage do not estimate real-world accuracy.
 - **Ground-truth benchmark** (`npm run verify:ground-truth`) keeps source leads
   and candidate transaction references out of scoring. A benchmark entry must
-  include primary-source citations with exact locations tied to each label,
-  reviewed transaction output indexes/addresses/roles, canonical on-chain
-  response digests, and a recorded review method. The evaluator reports output
-  precision/recall/F1 and labeled payment/change agreement.
-  Current status: no judicial records meet that bar yet, so the benchmark
-  reports `NO_VERIFIED_CASES` rather than a misleading score. Passing the
-  evaluator tests validates the evaluation machinery, not AegisTrace accuracy.
+  include cited label sources with exact locations, reviewed transaction
+  output indexes/addresses/roles, canonical on-chain response digests, and a
+  recorded review method. Source tier is explicit: the current first
+  person-to-person transaction case is source-corroborated by Bitcoin.com and
+  its transaction outputs are independently checked against Blockstream.
+  It reports exact-output and payment/change agreement, not independently
+  established legal identity. `JUDICIAL_GROUND_TRUTH` remains empty until
+  court-backed labels meet a separate evidence standard.
+- `npm run verify:ground-truth` tests the evaluator and a regression fixture
+  based on that one historical transaction; this small, curated case does not
+  estimate accuracy on new transactions or establish generalization.
 - Historical cases can support regression and confidence assessment, but do
   not prove performance on unseen transactions; that requires held-out,
   representative cases and explicit coverage/error analysis.
-- **Test Suite Status**: 41 test files and 265 tests passed in the latest
+- **Test Suite Status**: 41 test files and 271 tests passed in the latest
   full-suite run. Run `npm test` for the current result.
 
 To demonstrate end to end: run `npm run verify` for the offline table, then

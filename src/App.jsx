@@ -16,7 +16,7 @@ const RiskAnalyzer = lazy(() => import('./components/RiskAnalyzer'));
 const ReportGenerator = lazy(() => import('./components/ReportGenerator'));
 const WatchlistMonitor = lazy(() => import('./components/WatchlistMonitor'));
 const AssetRecovery = lazy(() => import('./features/recovery/AssetRecovery'));
-const EvidenceReview = lazy(() => import('./features/evidence/EvidenceReview'));
+const EvidenceReview = lazy(() => import('./features/evidence/EvidenceReview.jsx'));
 
 const ROUTE_COMPONENTS = {
   dashboard: Dashboard,

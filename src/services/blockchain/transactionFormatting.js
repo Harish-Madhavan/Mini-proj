@@ -434,7 +434,7 @@ export function formatBlockstreamTx(tx, outspends = [], addressMeta = null) {
     const prep = prepareOutput({ tx, txid: tx.txid, output, outputIndex: i, outspends, inputScriptTypes, seenAddresses, isCoinJoin, addressMeta });
     if (prep.opReturn) {
       nodes.push(buildOpReturnNode({ txId: tx.txid, index: i, payload: prep.opReturn }));
-      links.push({ source: txNodeId, target: `op_${tx.txid}_${i}`, value: '0 BTC Data', timestamp: 'Embedded', txid: tx.txid, blockTime: tx.status?.block_time || null });
+      links.push({ source: txNodeId, target: `op_${tx.txid}_${i}`, value: '0 BTC Data', timestamp: 'Embedded', txid: tx.txid, outputIndex: i, blockTime: tx.status?.block_time || null });
       return;
     }
     const { addr, valBtc, outNodeId, scriptStd, cls } = prep;
@@ -447,7 +447,7 @@ export function formatBlockstreamTx(tx, outspends = [], addressMeta = null) {
       nodes.push(buildOutputNode({ outNodeId, addr, valBtc, scriptStd, cls, tx, lastActive, outspendSpent: outspends[i]?.spent }));
     }
 
-    links.push({ source: txNodeId, target: outNodeId, value: `${valBtc} BTC`, timestamp: tx.status?.block_time ? new Date(tx.status.block_time*1000).toLocaleDateString() : 'On-chain', txid: tx.txid, blockTime: tx.status?.block_time || null });
+    links.push({ source: txNodeId, target: outNodeId, value: `${valBtc} BTC`, timestamp: tx.status?.block_time ? new Date(tx.status.block_time*1000).toLocaleDateString() : 'On-chain', txid: tx.txid, outputIndex: i, blockTime: tx.status?.block_time || null });
     seenAddresses.add(addr);
   });
 

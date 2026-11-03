@@ -1,6 +1,13 @@
-import { JUDICIAL_GROUND_TRUTH } from '../data/judicialCorpus';
+import { TRACE_BENCHMARK_CASES } from '../data/judicialCorpus';
+import { parseSats } from './taintAnalysis';
 
 const VALID_ROLES = new Set(['payment', 'change']);
+const ALLOWED_SOURCE_TYPES = new Set([
+  'primary_record',
+  'primary_chain_data',
+  'secondary_explorer',
+  'secondary_historical_reference',
+]);
 
 function isValidTxid(value) {
   return typeof value === 'string' && /^[0-9a-f]{64}$/i.test(value);
@@ -12,8 +19,8 @@ function isValidTxid(value) {
  */
 export function validateGroundTruthCase(caseEntry) {
   const errors = [];
-  if (!caseEntry || caseEntry.status !== 'VERIFIED') {
-    errors.push('Case status must be VERIFIED.');
+  if (!caseEntry || !['VERIFIED', 'SOURCE_CORROBORATED'].includes(caseEntry.status)) {
+    errors.push('Case status must be VERIFIED or SOURCE_CORROBORATED.');
   }
   if (!caseEntry?.review?.reviewer || !caseEntry.review.reviewedAt || !caseEntry.review.method) {
     errors.push('Reviewer, review date, and verification method are required.');
@@ -21,9 +28,10 @@ export function validateGroundTruthCase(caseEntry) {
   if (!Array.isArray(caseEntry?.sources) || caseEntry.sources.length === 0) {
     errors.push('At least one cited source is required.');
   } else if (caseEntry.sources.some(source =>
-    !source || !source.id || !source.title || !source.url || !source.locator || source.primary !== true
+    !source || !source.id || !source.title || !source.url || !source.locator ||
+    !ALLOWED_SOURCE_TYPES.has(source.type) || !source.labelBasis
   )) {
-    errors.push('Each source must have an ID and be primary with a title, URL, and page/paragraph locator.');
+    errors.push('Each source must have an ID, supported type, title, URL, locator, and label basis.');
   }
   const sourceIds = new Set((caseEntry?.sources || []).filter(Boolean).map(source => source.id));
   const chainEvidenceTxids = new Set((caseEntry?.chainEvidence || [])
@@ -66,6 +74,10 @@ export function validateGroundTruthCase(caseEntry) {
 function traceRole(node) {
   if (node?.type === 'change' || node?.details?.isChange === true) return 'change';
   if (node?.type === 'receiver' || node?.details?.isPayment === true) return 'payment';
+  if (typeof node?.details?.heuristicScore === 'number') {
+    if (node.details.heuristicScore < -1) return 'change';
+    if (node.details.heuristicScore > 1) return 'payment';
+  }
   return null;
 }
 
@@ -91,9 +103,10 @@ export function evaluateTraceAgainstGroundTruth(trace, caseEntry) {
     const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
     const targetId = typeof link.target === 'object' ? link.target.id : link.target;
     const node = nodes.get(targetId);
+    const valueSats = parseSats(link.value);
     if (!txids.has(txid) || sourceId !== `tx_${link.txid}` ||
-        !Number.isInteger(link.outputIndex) || !node?.details?.address) continue;
-    predictions.set(`${txid}:${link.outputIndex}`, { node });
+        !Number.isInteger(link.outputIndex) || valueSats <= 0 || !node?.details?.address) continue;
+    predictions.set(`${txid}:${link.outputIndex}`, { node, valueSats });
   }
 
   const matched = [];
@@ -101,7 +114,12 @@ export function evaluateTraceAgainstGroundTruth(trace, caseEntry) {
     const prediction = predictions.get(key);
     if (!prediction) continue;
     const node = prediction.node;
-    if (!node || (output.address && node.details?.address?.toLowerCase() !== output.address.toLowerCase())) continue;
+    const addressMatches = output.address &&
+      node?.details?.address?.toLowerCase() === output.address.toLowerCase();
+    const traceIdentifierMatches = output.traceIdentifier &&
+      node?.details?.address === output.traceIdentifier;
+    const valueMatches = output.valueSats == null || prediction.valueSats === output.valueSats;
+    if (!node || (!addressMatches && !traceIdentifierMatches) || !valueMatches) continue;
     matched.push({
       key,
       expectedRole: output.expectedRole,
@@ -119,6 +137,7 @@ export function evaluateTraceAgainstGroundTruth(trace, caseEntry) {
 
   return {
     caseId: caseEntry.id,
+    evidenceStatus: caseEntry.status,
     matchedOutputs: truePositives,
     expectedOutputs: expected.size,
     predictedOutputs: predictions.size,
@@ -128,7 +147,7 @@ export function evaluateTraceAgainstGroundTruth(trace, caseEntry) {
     classifiedOutputs: classified.length,
     correctlyClassifiedOutputs: classified.filter(row => row.actualRole === row.expectedRole).length,
     classificationAccuracy,
-    limitations: 'Measures exact transaction/output coverage and labeled payment/change agreement only; it does not validate ownership beyond the cited case labels or generalize to unseen cases.',
+    limitations: 'Measures exact transaction/output coverage and published payment/change label agreement only; source-corroborated labels are not independent legal findings and do not generalize to unseen cases.',
   };
 }
 
@@ -137,7 +156,7 @@ export function evaluateTraceAgainstGroundTruth(trace, caseEntry) {
  * never a success-shaped 100% score.
  */
 export function evaluateGroundTruthBenchmark(
-  cases = JUDICIAL_GROUND_TRUTH,
+  cases = TRACE_BENCHMARK_CASES,
   tracesByCaseId = {}
 ) {
   if (!Array.isArray(cases)) throw new TypeError('Ground-truth benchmark cases must be an array.');
@@ -163,9 +182,12 @@ export function evaluateGroundTruthBenchmark(
   });
   const precision = totals.predictedOutputs === 0 ? 0 : totals.matchedOutputs / totals.predictedOutputs;
   const recall = totals.expectedOutputs === 0 ? 0 : totals.matchedOutputs / totals.expectedOutputs;
+  const status = cases.some(caseEntry => caseEntry.status === 'SOURCE_CORROBORATED')
+    ? 'SOURCE_CORROBORATED'
+    : 'EVALUATED';
 
   return {
-    status: 'EVALUATED',
+    status,
     caseCount: results.length,
     cases: results,
     aggregate: {
@@ -177,6 +199,6 @@ export function evaluateGroundTruthBenchmark(
         ? null
         : totals.correctlyClassifiedOutputs / totals.classifiedOutputs,
     },
-    limitations: 'Results measure only reviewed labels represented in this benchmark; they do not prove source authenticity, legal admissibility, or performance on unseen cases.',
+    limitations: 'Results measure only cited labels represented in this benchmark; secondary-source labels are not independent legal findings and do not prove legal admissibility or performance on unseen cases.',
   };
 }

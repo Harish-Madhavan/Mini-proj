@@ -173,6 +173,7 @@ async function fetchWithFallbackAndCache(endpoint) {
   });
 
   let lastError = null;
+  const providerErrors = [];
   for (const gw of orderedGateways) {
     const url = `${gw.baseUrl}${endpoint}`;
     try {
@@ -208,6 +209,7 @@ async function fetchWithFallbackAndCache(endpoint) {
           cooldownSec: 60
         });
         lastError = new RateLimitError(`Rate limited (429) on ${gw.name} - cooldown 60s`, gw.name, 60);
+        providerErrors.push(`${gw.name}: HTTP 429`);
       } else {
         gw.consecutiveFailures++;
         if (gw.consecutiveFailures >= 2) {
@@ -221,6 +223,7 @@ async function fetchWithFallbackAndCache(endpoint) {
           status: response.status
         });
         lastError = new Error(`HTTP ${response.status} for ${endpoint}`);
+        providerErrors.push(`${gw.name}: HTTP ${response.status}`);
       }
     } catch (err) {
       gw.consecutiveFailures++;
@@ -229,6 +232,7 @@ async function fetchWithFallbackAndCache(endpoint) {
         gw.cooldownUntil = now + 30000;
       }
       lastError = err.name === 'AbortError' ? new Error(`Request timeout for ${endpoint}`) : err;
+      providerErrors.push(`${gw.name}: ${lastError.message}`);
       emitGatewayEvent({
         type: 'GATEWAY_TIMEOUT',
         gateway: gw.name,
@@ -238,6 +242,10 @@ async function fetchWithFallbackAndCache(endpoint) {
     }
   }
 
+  const notFound = providerErrors.find(error => error.endsWith('HTTP 404'));
+  if (notFound && providerErrors.length > 1) {
+    throw new GatewayError(`Resource not found at one provider and unavailable at others (${providerErrors.join('; ')}). Check the identifier and retry.`);
+  }
   throw lastError || new GatewayError(`Failed to fetch data for ${endpoint}`);
 }
 

@@ -82,7 +82,7 @@ flowchart TD
 | **Bundler** | **Vite 8** | Sub-second HMR, optimized ES-module chunking, and strict tree-shaking for lean bundles. |
 | **Icons & UI** | **Lucide React** + Glassmorphic CSS | High-contrast law enforcement dark-mode UI; Outfit for typography, JetBrains Mono for addresses/hashes. |
 | **Blockchain Gateways** | **Blockstream.info + Mempool.space** | RESTful Esplora-compatible endpoints with automatic fallback, timeout handling, and no API key barriers. |
-| **Testing** | **Vitest 3.2** | 41 test files and 265 tests passed in the latest full-suite run; run `npm test` for current results. |
+| **Testing** | **Vitest 3.2** | 41 test files and 271 tests passed in the latest full-suite run; run `npm test` for current results. |
 | **Code Quality** | **OxLint** | High-performance Rust-based linter ensuring strict correctness and zero undefined symbols. |
 
 ---
@@ -532,11 +532,11 @@ src/
 │   └── navigation.js              # Tab routes and shortcuts
 ├── data/
 │   ├── forensicCorpus.js          # Unverified candidate IDs; not ground truth
-│   ├── judicialCorpus.js          # Candidate/source leads separated from verified labels
+│   ├── judicialCorpus.js          # Notable-source labels, trace benchmark, judicial candidates
 │   └── scenarios.js               # Seed baseline forensic cases
 └── utils/
     ├── accuracy.js                # Offline heuristic fixture regression evaluator
-    ├── groundTruthEvaluation.js   # Source-gated exact-output benchmark metrics
+    ├── groundTruthEvaluation.js   # Provenance-gated exact-output benchmark metrics
     ├── bitcoinApi.js              # Esplora gateway, BFS recursive tracer
     ├── caseHelpers.js             # Case builders and algorithmic mock generation
     ├── chainOfCustody.js          # SHA-256 digest chain (unsigned, unanchored)

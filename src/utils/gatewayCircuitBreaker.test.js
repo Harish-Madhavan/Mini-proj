@@ -104,6 +104,20 @@ describe('Gateway Circuit Breaker & LRU Cache Telemetry', () => {
     await expect(fetchTx(mockTxId)).rejects.toThrow();
   });
 
+  it('preserves a not-found response when the fallback provider times out', async () => {
+    const mockTxId = 'e'.repeat(64);
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      if (url.includes('blockstream.info')) {
+        return { ok: false, status: 404, json: async () => ({}) };
+      }
+      throw new DOMException('The operation was aborted', 'AbortError');
+    }));
+
+    await expect(fetchTx(mockTxId)).rejects.toThrow(
+      'Resource not found at one provider and unavailable at others (Blockstream: HTTP 404; Mempool.space: Request timeout for /tx/' + mockTxId + '). Check the identifier and retry.'
+    );
+  });
+
   it('resets circuit breaker with resetGatewayCircuitBreaker', () => {
     const statusBefore = getGatewayStatus();
     expect(statusBefore[0].status).toBe('HEALTHY');

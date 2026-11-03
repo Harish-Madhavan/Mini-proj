@@ -17,7 +17,7 @@ Most analysis executes in the browser, but case data is stored in unencrypted br
 | **Build & Tooling** | **Vite 8** + `@vitejs/plugin-react` | Ultra-fast HMR, ES module chunking, and strict tree-shaking. |
 | **Iconography & Styling** | **Lucide React** + Glassmorphic CSS | High-contrast law enforcement dark-mode UI; Outfit (UI) + JetBrains Mono (hashes/scripts). |
 | **Linter** | **OxLint** | Rust-based high-speed static analyzer (91 rules, zero errors/warnings across 87 files). |
-| **Test Runner** | **Vitest 3.2** | Latest full-suite run passed **41 test files and 265 tests**; run `npm test` for current results. |
+| **Test Runner** | **Vitest 3.2** | Latest full-suite run passed **41 test files and 271 tests**; run `npm test` for current results. |
 | **Blockchain Gateways** | **Blockstream.info + Mempool.space** | RESTful Esplora API layer with LRU caching, timeout handling, and automatic circuit-breaking failover. |
 
 ```mermaid
@@ -95,11 +95,11 @@ flowchart TD
 
 ## 4. Verification & Test Suite Status
 
-The latest full-suite run passed **41 test files and 265 tests**.
+The latest full-suite run passed **41 test files and 271 tests**.
 Run `npm test` for a fresh result; a passing unit suite does not establish
 real-world forensic accuracy or legal admissibility.
 
-The offline heuristic fixtures (`npm run verify`) are in-code regression examples, not independently verified or held-out ground truth. Their results are not empirical accuracy estimates; heuristic confidence is not a probability, and real-world transaction interpretation still requires independent review.
+The offline heuristic fixtures (`npm run verify`) are regression examples, not held-out ground truth or empirical accuracy estimates. The source-corroborated first person-to-person transaction case is exercised by `npm run verify:ground-truth`: its output scripts and values were checked against Blockstream, while Bitcoin.com's published address/role labels are secondary-source claims. The single historical case is a regression check, not an accuracy estimate or proof of generalization; the judicial ground-truth set remains empty.
 
 ---
 
