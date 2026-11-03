@@ -8,7 +8,7 @@
 
 ## 1. Executive Summary & Problem Context
 
-**AegisTrace** is a production-grade, client-side cryptocurrency blockchain forensics workstation engineered specifically for law enforcement agencies (e.g., India's **Narcotics Control Bureau - NCB**). It reconstructs, analyzes, de-anonymizes, and produces court-admissible evidence for illicit Bitcoin fund flows moving across the live Bitcoin Mainnet.
+**AegisTrace** is a software solution developed in response to the SIH-1675 problem statement for Bitcoin tracing and forensic investigation. It reconstructs and analyzes fund-flow graphs from live public blockchain data and supports case management, review, and report preparation. It is an investigative aid: its heuristics do not establish identity or prove attribution, and its reports are not automatically certified as court-admissible evidence.
 
 ### Core Problem Solved:
 1. **Obfuscated Illicit Capital Flows**: Criminal syndicates launder illicit revenue through layering techniques: peel chains, smurfing/structuring, non-KYC swap routers, and CoinJoin privacy pools (Wasabi, Whirlpool).
@@ -82,7 +82,7 @@ flowchart TD
 | **Bundler** | **Vite 8** | Sub-second HMR, optimized ES-module chunking, and strict tree-shaking for lean bundles. |
 | **Icons & UI** | **Lucide React** + Glassmorphic CSS | High-contrast law enforcement dark-mode UI; Outfit for typography, JetBrains Mono for addresses/hashes. |
 | **Blockchain Gateways** | **Blockstream.info + Mempool.space** | RESTful Esplora-compatible endpoints with automatic fallback, timeout handling, and no API key barriers. |
-| **Testing** | **Vitest 3.2** | 33 test suites, 221 unit tests verifying financial correctness, heuristic accuracy, and zero regression. |
+| **Testing** | **Vitest 3.2** | 41 test files and 257 tests were discovered in the last full-suite run; run `npm test` for current results. |
 | **Code Quality** | **OxLint** | High-performance Rust-based linter ensuring strict correctness and zero undefined symbols. |
 
 ---
@@ -191,7 +191,7 @@ Groups disparate Bitcoin addresses under the control of a single criminal entity
 ### Feature 4: Cross-Case Syndicate Resolution & Network Correlation
 
 #### 1. Purpose & Capabilities
-Bridges the gap between individual isolated cases. If a drug trafficking case in Mumbai and a ransomware case in Delhi share the same cash-out deposit address or intermediary peel hop, AegisTrace automatically flags the shared syndicate.
+Surfaces addresses shared across loaded cases for investigator review. An overlap is a lead only: it does not establish common ownership, a shared operator, or criminal association.
 
 #### 2. Implementation Files
 - [`src/utils/syndicateAnalysis.js`](file:///e:/Git%20Repo/Mini-proj/src/utils/syndicateAnalysis.js)
@@ -206,8 +206,8 @@ Bridges the gap between individual isolated cases. If a drug trafficking case in
 3. **Link Scoring & Endpoint Weighting**:
    - Shared **terminal receivers** (exchange deposit points) are scored significantly higher than intermediate transit hops:
      $$\text{LinkScore} = \min(99, (\text{SharedCount} \times 20) + (\text{EndpointShares} \times 15))$$
-   - Categorizes linkages into:
-     - `SAME_OPERATOR_LIKELY` (Score $\ge 70$)
+   - Categorizes candidate linkages into:
+     - `SAME_OPERATOR_LIKELY` (Score $\ge 70$; heuristic label, not an attribution finding)
      - `SHARED_INFRASTRUCTURE` (Score $40\text{--}69$)
      - `WEAK_OVERLAP` (Score $<40$)
 
@@ -253,7 +253,7 @@ Synthesizes all structural, network, and entity signals into an objective Risk S
 1. **Five Orthogonal Forensic Dimensions** (plus two graph-derived signals):
    - **Obfuscation Score (Default Weight: 35%)**: Presence of CoinJoin mixers, Wasabi pools, or instant swap routers.
    - **Layering Depth Score (Default Weight: 12% per hop, max 40%)**: Distance and hop count from the original suspect UTXO.
-   - **Destination Attribution Score (Default Weight: 18%)**: High risk if funds terminate at unspent private wallets or non-KYC hubs; reduced if terminating at a KYC-verified regulated exchange.
+   - **Destination Score (18 points in the current aggregate)**: The current engine does not accept case-provided KYC or identity labels as verified evidence and applies no KYC-based discount. Risk scores are heuristic triage signals, not measured probabilities or findings of identity.
    - **Velocity Score (Default: 3–6%)**: Rapid automated movement across blocks.
    - **Protocol Anomalies (Default: 6%)**: Replace-By-Fee (RBF) signaling, extreme sat/vB fee anomalies, or non-standard scripts.
    - **Consolidation Sweep (Fixed: 15 imminent / 8 watch)**: Fan-in hubs from `scanCaseSweeps` (single-out and dominant-2-out seizure shapes); node-only callers score no signal rather than failing.
@@ -261,9 +261,10 @@ Synthesizes all structural, network, and entity signals into an objective Risk S
 2. **Historical Era Modulation**:
    - Satoshi-era transactions (2009–2011, P2PK scripts, coinbase reward splits) are calibrated with an era discount (maximum risk capped at 25) so innocent early adoption isn't flagged as money laundering.
 3. **Statutory Action Mapping**:
-   - `CRITICAL` ($\ge 70$): Immediate freeze request, urgent Section 67 NDPS notice, exchange subpoena.
-   - `MEDIUM` ($35\text{--}69$): Continuous mempool monitoring, watchlist tagging, secondary clustering.
-   - `LOW` ($<35$): Routine filing, evidence preservation.
+   - `CRITICAL` ($\ge 70$): Suggests review of urgent follow-up options.
+   - `MEDIUM` ($35\text{--}69$): Suggests monitoring, watchlist review, and additional clustering.
+   - `LOW` ($<35$): Suggests routine review and evidence preservation.
+   These are heuristic prompts only; the application does not issue freezes, subpoenas, or legal determinations.
 
 ---
 
@@ -314,7 +315,7 @@ Enables law enforcement officers to track high-value suspect wallets and detect 
 ### Feature 9: Evidence Admissibility, Chain-of-Custody & Statutory Reports
 
 #### 1. Purpose & Capabilities
-Transforms raw technical blockchain data into formal legal notices and admissible court exhibits compliant with Indian criminal procedure.
+Provides draft notice/report templates and case-review aids. The generated material is not legal advice, a validated certificate, or a guarantee of admissibility.
 
 #### 2. Implementation Files
 - [`src/utils/chainOfCustody.js`](file:///e:/Git%20Repo/Mini-proj/src/utils/chainOfCustody.js)
@@ -327,15 +328,15 @@ Transforms raw technical blockchain data into formal legal notices and admissibl
 1. **Hash-Chained Chain of Custody Ledger (`buildChainOfCustody`)**:
    - Orders transfers chronologically. Each event $E_i$ commits to the previous event's digest:
      $$\text{EventHash}_i = \text{Digest}(E_i.\text{from} + E_i.\text{to} + E_i.\text{amount} + E_i.\text{blockTime} + \text{EventHash}_{i-1})$$
-   - Any modification, deletion, or reordering of hops invalidates the terminal hash (`verifyChainOfCustody`).
+   - The current ledger implementation uses a 64-bit non-cryptographic hash (`cyrb53`) for change detection. It is not a cryptographic seal and must not be relied on as a tamper-proof evidentiary chain.
    - Automatically detects **Value Discontinuities** (losses $>50\%$ indicating off-graph branching) and **Unanchored Hops** (unconfirmed/dateless steps).
 2. **Section 67 NDPS Act, 1985 Statutory Notice Generator**:
    - Generates legal notices to designated exchange compliance officers (WazirX, CoinDCX, Binance, CoinSwitch Kuber, ZebPay, KuCoin) demanding KYC identity records, IP logs, linked bank accounts, and immediate freezing of funds.
-3. **Section 65B Certificate & Digital Canvas Signer**:
-   - Formats a certificate of electronic evidence (under the Indian Evidence Act / Section 63 BSA 2023).
-   - Computes a WebCrypto `SHA-256` integrity digest over case attributes.
-   - Integrates an HTML5 Canvas signature pad where the Investigating Officer signs electronically and locks the dossier.
-   - Clean, professional print stylesheet (`@media print` in `App.css`) that hides navigation and formats white-background dossiers for court submission.
+3. **Report Drafting & Payload Digest**:
+   - Produces report text and certificate-language templates for investigator review; the application does not establish that statutory requirements are satisfied.
+   - Computes a WebCrypto `SHA-256` digest over the canonical report payload. This detects changes to that payload but does not authenticate source data or authorship.
+   - The canvas signature is a drawn image, not a certificate-backed digital signature or authenticated officer identity.
+   - Print styles format reports for review and printing; formatting does not make a report court-admissible.
 
 ---
 
@@ -427,7 +428,7 @@ When demonstrating AegisTrace to project mentors or evaluators, follow this stru
 
 > *"Respected Mentors, cryptocurrency transactions are pseudonymous, but they are not anonymous. When narcotics cartels or cybercriminals launder money via Bitcoin, they attempt to obscure the money trail using peel chains, mixers, and instant swap routers before cashing out on Indian exchanges like WazirX or CoinDCX.*  
 >  
-> *AegisTrace is a dedicated, production-tested cryptocurrency forensics suite designed for the Narcotics Control Bureau (NCB). It connects directly to the live Bitcoin Mainnet, performs multi-hop recursive forward tracing, applies an 8-factor weighted heuristic engine to distinguish change from payments, calculates mathematical taint propagation across three legal models, clusters common-wallet entities, and produces hash-chained, Section 65B-admissible court evidence dossiers with a single click."*
+> *AegisTrace is a software solution developed for the SIH-1675 Bitcoin forensics problem statement. It queries public blockchain gateways, builds bounded multi-hop traces, applies explainable change/payment heuristics, calculates several taint models, and prepares case reports for investigator review. Results require independent verification; heuristic output does not establish attribution or legal admissibility."*
 
 ---
 
@@ -441,7 +442,7 @@ When demonstrating AegisTrace to project mentors or evaluators, follow this stru
 | **4** | **Highlight Critical Trail** | Toggle **"Focus Trail"** (Dijkstra algorithm finds the dominant money path) and **"Taint Heatmap"** (shows the contamination dilution percentage). |
 | **5** | **Deep Node Metadata** | Click on any node. Show the sidebar with: **Node Centrality (in/out degree)**, **Endpoint Profile (single-use deposit vs pass-through)**, and **Script Disassembler** showing raw opcodes. |
 | **6** | **Live Address Expansion** | Click **"Expand Address (+)"** to fetch the next block of live outgoing transactions from the mainnet and see the graph grow dynamically. |
-| **7** | **Clustering Tab** | Switch to **Clustering**. Explain the **CIOH (Common Input Ownership Heuristic)** and show the **Shannon Entropy calculation** that mathematically proves CoinJoin mixing. |
+| **7** | **Clustering Tab** | Switch to **Clustering**. Explain the **CIOH (Common Input Ownership Heuristic)** and Shannon-entropy-based mixer indicators; these heuristics do not prove common ownership or CoinJoin participation. |
 | **8** | **Syndicate Correlation** | Switch to **Linked Cases**. Show how AegisTrace cross-references addresses across independent cases to uncover common criminal operators. |
 | **9** | **Risk Analyzer** | Show the **5-Dimensional Risk Radar**. Adjust the weights live to show how the threat score adapts to organizational risk thresholds. |
 | **10** | **Report & Section 65B** | Switch to **Report**. Show the **Hash-Chained Chain of Custody** (prove that editing any event breaks the chain), demonstrate the **Digital Signature Pad**, and trigger **Print Preview** showing the court-ready exhibit. |
@@ -452,7 +453,7 @@ When demonstrating AegisTrace to project mentors or evaluators, follow this stru
 
 #### Q1: "Why did you build this when Chainalysis and Elliptic already exist?"
 > **Answer:**  
-> *"Chainalysis and Elliptic are expensive, proprietary cloud platforms that store investigative data on third-party servers, creating data-sovereignty concerns for Indian national security agencies like the NCB. Furthermore, they are closed 'black-boxes' that cannot be audited in an Indian court of law. AegisTrace runs locally on the investigator's machine, provides 100% mathematical auditability (exact heuristic weights, Shannon entropy formulas, DSU clustering), and generates statutory notices under Indian laws (Section 67 NDPS Act and Section 65B Evidence Act) that foreign tools don't support."*
+> *"AegisTrace addresses the SIH-1675 problem statement with inspectable Bitcoin tracing and review workflows. Its current deployment stores case data in browser localStorage without at-rest encryption, and live lookups send queried identifiers to public gateways. Operational use with sensitive investigations therefore requires an approved deployment and appropriate privacy controls."*
 
 #### Q2: "How do you distinguish change outputs from payment outputs? Isn't Bitcoin designed to make that impossible?"
 > **Answer:**  
@@ -468,7 +469,7 @@ When demonstrating AegisTrace to project mentors or evaluators, follow this stru
 
 #### Q3: "How does your taint analysis work when funds are mixed with clean funds?"
 > **Answer:**  
-> *"We implement three recognized legal models:  
+> *"We implement three taint-accounting conventions, not legal determinations:
 > 1. **Proportionate / Haircut**: Downstream hops inherit taint percentage weighted by their value contribution.  
 > 2. **FIFO (First-In, First-Out)**: Tainted satoshis are consumed sequentially based on chronological block arrival.  
 > 3. **Poison**: Zero-tolerance model where any contact with illicit UTXOs contaminates all downstream outputs.  
@@ -483,55 +484,15 @@ When demonstrating AegisTrace to project mentors or evaluators, follow this stru
 
 #### Q5: "How is this legally admissible under Indian Law?"
 > **Answer:**  
-> *"Under the Indian Evidence Act (and the new Bharatiya Sakshya Adhiniyam, 2023), electronic evidence must demonstrate integrity and provenance. We implement:  
-> 1. A cryptographic hash-chained chain-of-custody ledger where each transaction event commits to the previous event's hash,  
-> 2. Automatic gap detection for unanchored or branching transfers,  
-> 3. A SHA-256 case digest sealing all investigation parameters, and  
-> 4. Electronic signing with Section 65B certification language."*
+> *"The application can draft report and certificate-language templates, record a review trail, and compute a SHA-256 digest for a canonical report payload. Its custody timeline currently uses a non-cryptographic 64-bit hash, and its canvas signature is not an authenticated digital signature. These features do not prove source authenticity, chain of custody, statutory compliance, or legal admissibility; those require independent process and expert review."*
 
 ---
 
 ## 7. Verification & Test Suite Summary
 
-The AegisTrace codebase maintains 100% test pass status across **33 separate test suites** comprising **221 automated unit tests**:
-
-```text
-✓ src/utils/crossChainForensics.test.js (11 tests)
-✓ src/utils/graphAlgorithms.test.js (6 tests)
-✓ src/utils/taintAnalysis.test.js (14 tests)
-✓ src/utils/clusteringAlgorithms.test.js (14 tests)
-✓ src/utils/watchlistManager.test.js (7 tests)
-✓ src/utils/obfuscationForensics.test.js (6 tests)
-✓ src/utils/traceVerification.test.js (12 tests)
-✓ src/utils/endReceiverAccuracy.test.js (19 tests)
-✓ src/utils/forensicUtils.test.js (7 tests)
-✓ src/utils/reuseGating.test.js (1 test)
-✓ src/utils/riskScoring.test.js (11 tests)
-✓ src/utils/bitcoinApi.test.js (10 tests)
-✓ src/utils/gatewayCircuitBreaker.test.js (6 tests)
-✓ src/utils/peelDepth.test.js (1 test)
-✓ src/utils/traceBranches.test.js (6 tests)
-✓ src/utils/mixerPrecision.test.js (6 tests)
-✓ src/utils/forensicCorpus.test.js (6 tests)
-✓ src/utils/unknownTxHandling.test.js (4 tests)
-✓ src/utils/narrativeGenerator.test.js (4 tests)
-✓ src/utils/knownEntities.test.js (5 tests)
-✓ src/utils/traceHeuristics.test.js (5 tests)
-✓ src/utils/chainOfCustody.test.js (6 tests)
-✓ src/utils/accuracy.test.js (1 test)
-✓ src/utils/sweepAndFee.test.js (10 tests)
-✓ src/utils/structuringAnalysis.test.js (6 tests)
-✓ src/utils/syndicateAnalysis.test.js (5 tests)
-✓ src/utils/caseHelpers.test.js (5 tests)
-✓ src/utils/judicialAccuracy.test.js (5 tests)
-✓ src/utils/scriptDecoder.test.js (7 tests)
-✓ src/utils/endpointProfile.test.js (6 tests)
-✓ src/components/EmptyState.test.jsx (1 test)
-✓ src/components/RiskAnalyzer.test.jsx (4 tests)
-✓ src/components/HeuristicClustering.test.jsx (4 tests)
-
-Total: 33 test files passed, 221 tests passed (100% passing)
-```
+The last full-suite run passed **41 test files and 257 tests**. Run `npm test`
+for a fresh result; a passing unit suite does not establish real-world forensic
+accuracy or legal admissibility.
 
 ---
 
@@ -572,13 +533,13 @@ src/
 │   └── navigation.js              # Tab routes and shortcuts
 ├── data/
 │   ├── forensicCorpus.js          # Reference list of known mainnet IDs
-│   ├── judicialCorpus.js          # Certified ground truth from unsealed court dockets (FBI/IRS-CI/BKA)
+│   ├── judicialCorpus.js          # Labeled reference examples attributed to public court-docket material
 │   └── scenarios.js               # Seed baseline forensic cases
 └── utils/
     ├── accuracy.js                # Labeled ground-truth decision boundary validator
     ├── bitcoinApi.js              # Esplora gateway, BFS recursive tracer
     ├── caseHelpers.js             # Case builders and algorithmic mock generation
-    ├── chainOfCustody.js          # Cryptographic hash-chained custody ledger
+    ├── chainOfCustody.js          # Prototype non-cryptographic hash-chained ledger
     ├── clusteringAlgorithms.js    # DSU, CIOH, Shannon entropy, peel detector
     ├── crossChainForensics.js     # Bridge memo disassembler & EVM/Tron target extractor
     ├── download.js                # File export utilities (JSON, text, CSV)
@@ -607,8 +568,8 @@ A comprehensive architectural evaluation has identified five key engineering pil
 
 ### Pillar 1: Data Persistence & Cryptographic Local Storage
 1. **Migration to IndexedDB (Dexie.js / Native IDB)**:
-   - **Rationale**: `localStorage` enforces a strict 5MB quota limit that risks data eviction when storing large graphs (>50 cases or deep multi-hop branches).
-   - **Implementation**: Adopt an asynchronous IndexedDB store supporting 500MB+ of persistent local cases, offline graph geometries, and raw transaction byte caches.
+   - **Rationale**: Browser-managed `localStorage` has limited, implementation-dependent capacity. Writes can fail at quota, and the current provider does not notify users when persistence fails.
+   - **Implementation**: Adopt an asynchronous IndexedDB store for larger case portfolios and graph data, with explicit handling and user notification for storage failures.
 2. **At-Rest Zero-Knowledge Vault Encryption (AES-GCM-256)**:
    - **Rationale**: Investigative case notes, target names, and suspect addresses must be protected against forensic extraction from seized analyst workstations.
    - **Implementation**: Introduce PBKDF2/WebCrypto key derivation from an investigator master passphrase to encrypt local database entries before persistence.
@@ -629,8 +590,8 @@ A comprehensive architectural evaluation has identified five key engineering pil
 
 ### Pillar 3: Court Evidence Standards & Interoperability
 1. **Asymmetric Hardware & Digital Signatures (ECDSA P-256 / Ed25519)**:
-   - **Rationale**: Handwritten canvas signatures are persuasive in court, but cryptographic digital signatures under Section 65B Evidence Act / Section 63 BSA 2023 provide ironclad non-repudiation.
-   - **Implementation**: Integrate WebCrypto `SubtleCrypto.sign()` allowing investigators to digitally sign Section 65B integrity digests with their officer keypair or USB cryptographic tokens (e-Mudhra / FIPS-140).
+   - **Rationale**: The current canvas signature is a drawn image and does not authenticate the signer's identity or bind a verified key to the report.
+   - **Implementation**: Evaluate a managed digital-signature workflow with identity, key custody, audit, and applicable legal requirements before claiming signer authentication or non-repudiation.
 2. **Threat Intelligence & Graph Database Export Formats**:
    - **STIX 2.1 JSON**: Standardized cyber threat intelligence indicators for CERT-In / Interpol data exchanges.
    - **Neo4j Cypher Script (`.cyp`)**: Direct graph ingestion into enterprise link-analysis tools (Neo4j, Maltego, i2 Analyst's Notebook).

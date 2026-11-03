@@ -2,9 +2,9 @@
 
 ## 1. Executive Overview
 
-**AegisTrace** is a production-grade, client-side cryptocurrency blockchain forensics workstation engineered specifically for law enforcement agencies (e.g., India's **Narcotics Control Bureau — NCB**, adhering to **SIH-1675**). It reconstructs, analyzes, de-anonymizes, and produces court-admissible evidence for illicit Bitcoin fund flows moving across the live Bitcoin Mainnet.
+**AegisTrace** is a software solution developed in response to the SIH-1675 problem statement for Bitcoin tracing and forensic investigation. It reconstructs and analyzes fund-flow graphs from live public blockchain data and supports case management, review, and report preparation. It is an investigative aid: its heuristics do not establish identity or prove attribution, and its reports are not automatically certified as court-admissible evidence.
 
-Unlike proprietary cloud platforms (Chainalysis, Elliptic) that function as closed black-boxes and store sensitive investigative queries on third-party servers, AegisTrace executes all forensic algorithms entirely in the investigator's local browser environment. It interfaces directly with public or self-hosted Esplora-compatible nodes via bounded, failover-protected gateways.
+Most analysis executes in the browser, but case data is stored in unencrypted browser `localStorage`, and live lookups send queried transaction IDs or addresses to Blockstream or Mempool.space. The current build is neither air-gapped nor query-private and should not be used for sensitive investigations without an approved deployment and privacy controls.
 
 ---
 
@@ -17,7 +17,7 @@ Unlike proprietary cloud platforms (Chainalysis, Elliptic) that function as clos
 | **Build & Tooling** | **Vite 8** + `@vitejs/plugin-react` | Ultra-fast HMR, ES module chunking, and strict tree-shaking. |
 | **Iconography & Styling** | **Lucide React** + Glassmorphic CSS | High-contrast law enforcement dark-mode UI; Outfit (UI) + JetBrains Mono (hashes/scripts). |
 | **Linter** | **OxLint** | Rust-based high-speed static analyzer (91 rules, zero errors/warnings across 87 files). |
-| **Test Runner** | **Vitest 3.2** | Automated test suite comprising **33 test suites and 221 unit tests** (100% pass rate). |
+| **Test Runner** | **Vitest 3.2** | Last full-suite run discovered **41 test files and 257 tests**; run `npm test` for current results. |
 | **Blockchain Gateways** | **Blockstream.info + Mempool.space** | RESTful Esplora API layer with LRU caching, timeout handling, and automatic circuit-breaking failover. |
 
 ```mermaid
@@ -74,20 +74,20 @@ flowchart TD
 * **[GraphCanvas.jsx](file:///e:/Git%20Repo/Mini-proj/src/components/graph/GraphCanvas.jsx)**: Interactive SVG vector graph with node dragging, Dijkstra critical money trail highlighting, circular flow detection, chronological playback animation, and taint heatmaps.
 * **[MetadataSidebar.jsx](file:///e:/Git%20Repo/Mini-proj/src/components/graph/MetadataSidebar.jsx)**: Detailed node inspection showing centrality metrics, endpoint behavioral classification, raw script disassembly, bridge memos, and investigator case notes.
 * **[HeuristicClustering.jsx](file:///e:/Git%20Repo/Mini-proj/src/components/HeuristicClustering.jsx)**: Visualizes Common Input Ownership Heuristic (CIOH) clusters, Shannon entropy mixer detection, and chronological peel chain sequences.
-* **[SyndicateMap.jsx](file:///e:/Git%20Repo/Mini-proj/src/components/SyndicateMap.jsx)**: Cross-case address overlap analysis that discovers shared infrastructure and common criminal syndicates across isolated investigations.
-* **[RiskAnalyzer.jsx](file:///e:/Git%20Repo/Mini-proj/src/components/RiskAnalyzer.jsx)**: 5-dimensional interactive risk radar with tunable statutory weights and era-calibrated risk thresholds.
+* **[SyndicateMap.jsx](file:///e:/Git%20Repo/Mini-proj/src/components/SyndicateMap.jsx)**: Cross-case address overlap analysis that surfaces shared addresses for investigator review; overlap alone does not establish common ownership or criminal association.
+* **[RiskAnalyzer.jsx](file:///e:/Git%20Repo/Mini-proj/src/components/RiskAnalyzer.jsx)**: Interactive heuristic risk dimensions and configurable weights for triage, not statutory thresholds or findings of wrongdoing.
 * **[WatchlistMonitor.jsx](file:///e:/Git%20Repo/Mini-proj/src/components/WatchlistMonitor.jsx)**: Real-time 0-confirmation mempool surveillance and high-value target wallet monitor.
 * **[OSINTIntegrator.jsx](file:///e:/Git%20Repo/Mini-proj/src/components/OSINTIntegrator.jsx)**: Formats formal **Section 67 NDPS Act, 1985** statutory legal freeze notices directed to Indian exchanges (WazirX, CoinDCX, ZebPay, Binance).
-* **[ReportGenerator.jsx](file:///e:/Git%20Repo/Mini-proj/src/components/ReportGenerator.jsx)**: Admissible court exhibit generator with cryptographic hash-chained chain-of-custody, SHA-256 case digest, digital canvas signature, and Section 65B Indian Evidence Act / Section 63 BSA 2023 certification.
+* **[ReportGenerator.jsx](file:///e:/Git%20Repo/Mini-proj/src/components/ReportGenerator.jsx)**: Report and certificate-language drafting with a SHA-256 report-payload digest and optional drawn canvas signature. The digest does not authenticate source data; the signature is not a certificate-backed digital signature, and the report is not guaranteed admissible.
 
 ### Core Algorithmic Engines (`src/utils/`)
 * **[bitcoinApi.js](file:///e:/Git%20Repo/Mini-proj/src/utils/bitcoinApi.js)**: Recursive breadth-first search (BFS) forward tracer with bounded concurrency (5 concurrent requests), LRU caching (5-minute TTL), circuit breaker failover, and endpoint profiling.
 * **[traceHeuristics.js](file:///e:/Git%20Repo/Mini-proj/src/utils/traceHeuristics.js)**: 8-factor weighted change-vs-payment classifier (Script consistency, address reuse, roundness/peel share, output position, dwell timing, fingerprinting, fee market, and single-output identity).
-* **[taintAnalysis.js](file:///e:/Git%20Repo/Mini-proj/src/utils/taintAnalysis.js)**: Mathematical taint propagation engine supporting three legal models: **Proportionate / Haircut**, **FIFO (First-In, First-Out)**, and **Poison (100% Contamination)** via fixed-point iterative relaxation.
+* **[taintAnalysis.js](file:///e:/Git%20Repo/Mini-proj/src/utils/taintAnalysis.js)**: Taint propagation engine supporting three accounting conventions: **Proportionate / Haircut**, **FIFO (First-In, First-Out)**, and **Poison (100% Contamination)** via fixed-point iterative relaxation.
 * **[clusteringAlgorithms.js](file:///e:/Git%20Repo/Mini-proj/src/utils/clusteringAlgorithms.js)**: Disjoint Set Union (DSU) with path compression for $O(\alpha(N))$ address clustering; Shannon entropy calculation for Wasabi/Whirlpool mixing detection.
 * **[syndicateAnalysis.js](file:///e:/Git%20Repo/Mini-proj/src/utils/syndicateAnalysis.js)**: Cross-case entity resolution indexing addresses to cases, weighting shared terminal cash-out endpoints.
 * **[crossChainForensics.js](file:///e:/Git%20Repo/Mini-proj/src/utils/crossChainForensics.js)**: Disassembles cross-chain bridge memos (THORChain, Maya, SideShift, ChangeNOW) and extracts target secondary addresses on Ethereum, Tron, and Solana.
-* **[chainOfCustody.js](file:///e:/Git%20Repo/Mini-proj/src/utils/chainOfCustody.js)**: Hash-chained event ledger where each hop commits to the previous hop's digest, mathematically detecting any post-hoc evidence tampering or value leakage.
+* **[chainOfCustody.js](file:///e:/Git%20Repo/Mini-proj/src/utils/chainOfCustody.js)**: Prototype event ledger using a 64-bit non-cryptographic hash; not suitable as a tamper-proof evidentiary seal.
 * **[scriptDecoder.js](file:///e:/Git%20Repo/Mini-proj/src/utils/scriptDecoder.js)**: Bytecode disassembler for Bitcoin opcodes, script templates (P2PK, P2PKH, P2SH, SegWit, Taproot), and ASCII `OP_RETURN` payload extraction.
 * **[traceVerification.js](file:///e:/Git%20Repo/Mini-proj/src/utils/traceVerification.js)**: Mathematical assurance engine verifying value conservation invariants, seed pinning, and FIFO anti-minting guarantees.
 
@@ -95,47 +95,11 @@ flowchart TD
 
 ## 4. Verification & Test Suite Status
 
-The test suite runs via **Vitest 3.2**, testing 33 independent test files with 221 test cases:
+The last run before this document update passed **41 test files and 257 tests**.
+Run `npm test` for a fresh result; a passing unit suite does not establish
+real-world forensic accuracy or legal admissibility.
 
-```text
-✓ src/utils/crossChainForensics.test.js (11 tests)
-✓ src/utils/graphAlgorithms.test.js (6 tests)
-✓ src/utils/taintAnalysis.test.js (14 tests)
-✓ src/utils/clusteringAlgorithms.test.js (14 tests)
-✓ src/utils/watchlistManager.test.js (7 tests)
-✓ src/utils/obfuscationForensics.test.js (6 tests)
-✓ src/utils/traceVerification.test.js (12 tests)
-✓ src/utils/endReceiverAccuracy.test.js (19 tests)
-✓ src/utils/forensicUtils.test.js (7 tests)
-✓ src/utils/reuseGating.test.js (1 test)
-✓ src/utils/riskScoring.test.js (11 tests)
-✓ src/utils/bitcoinApi.test.js (10 tests)
-✓ src/utils/gatewayCircuitBreaker.test.js (6 tests)
-✓ src/utils/peelDepth.test.js (1 test)
-✓ src/utils/traceBranches.test.js (6 tests)
-✓ src/utils/mixerPrecision.test.js (6 tests)
-✓ src/utils/forensicCorpus.test.js (6 tests)
-✓ src/utils/unknownTxHandling.test.js (4 tests)
-✓ src/utils/narrativeGenerator.test.js (4 tests)
-✓ src/utils/knownEntities.test.js (5 tests)
-✓ src/utils/traceHeuristics.test.js (5 tests)
-✓ src/utils/chainOfCustody.test.js (6 tests)
-✓ src/utils/accuracy.test.js (1 test)
-✓ src/utils/sweepAndFee.test.js (10 tests)
-✓ src/utils/structuringAnalysis.test.js (6 tests)
-✓ src/utils/syndicateAnalysis.test.js (5 tests)
-✓ src/utils/caseHelpers.test.js (5 tests)
-✓ src/utils/judicialAccuracy.test.js (5 tests)
-✓ src/utils/scriptDecoder.test.js (7 tests)
-✓ src/utils/endpointProfile.test.js (6 tests)
-✓ src/components/EmptyState.test.jsx (1 test)
-✓ src/components/RiskAnalyzer.test.jsx (4 tests)
-✓ src/components/HeuristicClustering.test.jsx (4 tests)
-
-Total: 33 passed, 221 tests (100% passing)
-```
-
-Ground-truth verification (`npm run verify`) confirms 100% precision and recall across historical benchmark mainnet transactions (Pizza purchase, Hal Finney 10 BTC, Satoshi change spend, Ransomware peel slivers, Coinbase reward splits, and modern Taproot self-consolidations).
+The labeled-set harness (`npm run verify`) measures behavior only on its committed examples. Its result is not a general accuracy guarantee; heuristic confidence is not a probability, and real-world transaction interpretation still requires independent review.
 
 ---
 
@@ -144,7 +108,7 @@ Ground-truth verification (`npm run verify`) confirms 100% precision and recall 
 A forensic and software engineering audit of the codebase yielded the following concrete enhancement opportunities:
 
 ### 1. Storage & Persistence Architecture (High Impact)
-* **Finding**: In [`src/utils/storage.js`](file:///e:/Git%20Repo/Mini-proj/src/utils/storage.js), the application relies on `localStorage` which is capped at 5MB. On `QuotaExceededError`, the recovery routine attempts to remove `aegistrace_scenarios`, creating a risk of accidental data loss when saving large traces.
+* **Finding**: In `src/utils/storage.js`, case data is persisted in browser `localStorage` without at-rest encryption. Writes that exceed browser quota are logged and return failure; the provider does not currently surface that persistence failure to the user. Public gateway lookups also disclose the requested transaction IDs or addresses to those providers.
 * **Recommendation**: 
   - Migrate case portfolios and node graphs to **IndexedDB** (using native IDB or Dexie.js).
   - IndexedDB supports hundreds of megabytes of structured data, eliminating quota failures for deep, complex cases.

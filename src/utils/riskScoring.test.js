@@ -34,7 +34,7 @@ describe('riskScoring engine', () => {
     expect(result.threatBadge.level).toBe('LOW');
   });
 
-  it('applies identity discount when destination resolves to regulated exchange', () => {
+  it('does not treat case-provided identity labels as verified for a risk discount', () => {
     const withoutKycNodes = [
       { id: 'suspect', type: 'suspect' },
       { id: 'hop', type: 'hop' },
@@ -46,10 +46,10 @@ describe('riskScoring engine', () => {
       { id: 'receiver', type: 'receiver', details: { kycStatus: 'IDENTITY VERIFIED' } }
     ];
 
-    const scoreNoKyc = calculateForensicRiskScore(withoutKycNodes).riskScore;
-    const scoreKyc = calculateForensicRiskScore(withKycNodes).riskScore;
+    const scoreUnverified = calculateForensicRiskScore(withoutKycNodes).riskScore;
+    const scoreLabeledVerified = calculateForensicRiskScore(withKycNodes).riskScore;
 
-    expect(scoreKyc).toBeLessThan(scoreNoKyc);
+    expect(scoreLabeledVerified).toBe(scoreUnverified);
   });
 
   it('returns correct statutory legal actions based on score', () => {

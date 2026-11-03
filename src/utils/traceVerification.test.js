@@ -164,7 +164,7 @@ describe('traceVerification', () => {
   });
 
   describe('auditTraceCorrectness', () => {
-    it('awards VERIFIED status and high assurance score to clean invariant-compliant graphs', () => {
+    it('reports consistency without claiming external verification for invariant-compliant graphs', () => {
       const graph = {
         nodes: [
           { id: 'in_suspect', type: 'suspect', balance: '2.0 BTC', details: { blockTime: 1600000000 } },
@@ -183,11 +183,12 @@ describe('traceVerification', () => {
       expect(audit.isAudited).toBe(true);
       expect(audit.isValid).toBe(true);
       expect(audit.assuranceScore).toBeGreaterThanOrEqual(90);
-      expect(audit.rating).toBe('VERIFIED');
-      expect(audit.summary).toContain('All 4 core forensic invariants mathematically verified');
+      expect(audit.rating).toBe('CONSISTENT');
+      expect(audit.summary).toContain('Applicable internal consistency checks passed');
+      expect(audit.summary).toContain('does not verify path attribution or ownership');
     });
 
-    it('downgrades rating to SUSPECT upon detecting value or temporal violations', () => {
+    it('reports internal inconsistencies and withholds a score when checks are incomplete', () => {
       const badGraph = {
         nodes: [
           { id: 'in_suspect', type: 'suspect', balance: '1.0 BTC', details: { blockTime: 1600010000 } },
@@ -202,8 +203,9 @@ describe('traceVerification', () => {
 
       const audit = auditTraceCorrectness(badGraph);
       expect(audit.isValid).toBe(false);
-      expect(audit.assuranceScore).toBeLessThan(50);
-      expect(audit.rating).toBe('SUSPECT');
+      expect(audit.assuranceScore).toBeNull();
+      expect(audit.rating).toBe('INCONSISTENT');
+      expect(audit.hasViolations).toBe(true);
     });
   });
 });

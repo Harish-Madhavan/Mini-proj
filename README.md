@@ -5,6 +5,9 @@ Mempool.space gateways, with failover and cache) and turns them into
 reviewable cases: fund-flow graphs, change-vs-payment classification, taint
 maps, cluster analysis, risk scores, and printable reports.
 
+The project is developed in response to the SIH-1675 problem statement for
+Bitcoin tracing and forensic investigation.
+
 ## Quick start
 
 ```bash
@@ -34,8 +37,9 @@ trace is computed live from gateway data.
   and received-funds accounting from fetched histories.
 - **Typologies** — batch structuring, consolidation sweeps, bridge/swap
   routers, and cross-case address correlation.
-- **Evidence** — hash-chained chain-of-custody timelines, Section 67 notices,
-  Section 65B certificates, and print-ready reports.
+- **Evidence workflow** — case timelines, notice/report templates, reviewable
+  evidence claims, and a SHA-256 digest of the report payload. These are
+  investigative aids, not a legal-admissibility or identity-verification guarantee.
 - **Cross-Chain Intelligence** — bridge memo extraction (THORChain, Maya Protocol,
   SideShift, ChangeNOW) identifying hop destinations to secondary networks
   (Ethereum, Tron, Solana).
@@ -48,13 +52,16 @@ trace is computed live from gateway data.
   Linked cases, Risk, Watchlist, Report) plus graph canvas/sidebar/timeline.
 - `src/utils/` — chain API, heuristics, taint, clustering, risk, dossiers,
   custody, cross-chain bridge analysis, and narrative modules. Every module has colocated `.test.js`
-  coverage (33 test files, 221 automated tests).
+  tests (41 test files and 257 tests at the last full-suite run).
 - `src/data/` — `judicialCorpus.js` (unsealed court docket ground truth: FBI/IRS-CI/BKA),
   `forensicCorpus.js` (reference list of known mainnet transaction IDs), and seed scenarios.
 - `src/hooks/`, `src/context/`, `src/constants/` — shared state and config.
 
 Live network calls happen only on explicit user actions (trace, expand,
-fee compare, mempool scan, endpoint profiles); everything else runs locally.
+fee compare, mempool scan, endpoint profiles). Case data is stored in browser
+`localStorage` without at-rest encryption. Live lookups send the requested
+transaction IDs or addresses to Blockstream or Mempool.space, so this is not
+an air-gapped or query-private deployment.
 
 ## Measuring accuracy & test suite
 
@@ -74,21 +81,24 @@ Be precise about what the numbers mean:
   and each verdict's margin past the decision boundary — thin margins flag
   where the next labeled case should go. The risk suite additionally checks
   that threat bands survive ±20% weight changes.
-- **Test Suite Status**: 33 test files, 221 passing unit tests across all
-  financial, graph, cryptographic, and algorithmic modules.
+- **Test Suite Status**: 41 test files and 257 tests were discovered in the
+  last full-suite run. Run `npm test` for the current result.
 
 To demonstrate end to end: run `npm run verify` for the offline table, then
 paste any mainnet txid or address on the Dashboard and trace it live.
-Value-conservation warnings, taint continuity, and dwell consistency act as
-independent cross-checks; the chain-of-custody ledger makes any post-hoc edit
-of the trail mechanically detectable.
+Value-conservation warnings, taint continuity, and dwell consistency are
+internal consistency checks, not independent confirmation of attribution or
+path completeness. The custody ledger currently uses a 64-bit non-cryptographic
+hash and is not suitable as a tamper-proof evidentiary seal. The report SHA-256
+digest detects changes to its canonical payload but does not authenticate its
+source or prove legal admissibility.
 
 ## System Improvement & Evolution Roadmap
 
 A technical evaluation identified key strategic vectors for the project's evolution:
 
 1. **Storage & Local Security (Priority 1)**:
-   - Migrate persistence from `localStorage` (5MB ceiling) to **IndexedDB** to store 1,000+ deep graph nodes and historical traces safely.
+   - Migrate persistence from browser-managed `localStorage` to **IndexedDB** for larger case graphs, and handle storage failures explicitly.
    - Implement **AES-GCM-256** local at-rest vault encryption using PBKDF2 WebCrypto keys for sensitive case notes and suspect PII.
    - Add custom private node RPC endpoint configuration in `config.js` for air-gapped forensic laboratories.
 
@@ -106,5 +116,3 @@ A technical evaluation identified key strategic vectors for the project's evolut
    - **Subset-Sum Knapsack CoinJoin Solver**: Exponential-search partition solver with fee tolerance that unmixes ambiguous transactions and flags exact 1-to-1 or multi-input sub-clusters.
    - **Lightning Network & Submarine Swap HTLC Forensics**: Script classifier that inspects witness programs and redeem scripts to identify 2-of-2 funding channels, Boltz/Loop submarine swap HTLCs (hashlocks + timelocks), and Layer-2 off-ramp evasions.
    - **Multi-Chain Bridge Expansion**: Multi-network address validator (EVM `0x...`, TRON `T...`, Solana) and stablecoin contract inspector tracking ERC-20 and TRC-20 USDT token contracts (`0xdac17f...`, `TR7NHq...`) with direct block explorer cross-chain deep links.
-
-
