@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { traceEndReceiver, clearCache } from './bitcoinApi';
+import { TRACE_CONFIG } from '../constants/config';
 
 const ok = (data) => ({ ok: true, status: 200, json: async () => data });
 const notFound = () => ({ ok: false, status: 404, json: async () => [] });
@@ -47,6 +48,62 @@ describe('trace branch behavior', () => {
     expect(res.nodes.find(n => n.id === 'out_bc1qdust111111111111111111111111')).toBeDefined();
     expect(res.nodes.some(n => n.id === `tx_${DUST_CHILD}`)).toBe(false);
     expect(res.meta.stats.fetchedTxCount).toBe(1);
+  });
+
+  it('caps total graph nodes and records exact omitted input nodes', async () => {
+    const ROOT = 'a'.repeat(64);
+    const root = txShape({
+      txid: ROOT,
+      ins: Array.from({ length: TRACE_CONFIG.MAX_NODES * 2 }, (_, i) => [`bc1qinput${i}`, 100000]),
+      outs: [['bc1qoutputa', 9000000], ['bc1qoutputb', 10000000]],
+    });
+    stubRoutes([
+      [`/tx/${ROOT}/outspends`, [{ spent: false }, { spent: false }]],
+      [`/tx/${ROOT}`, root],
+    ]);
+
+    const result = await traceEndReceiver(ROOT, 1);
+    expect(result.nodes.length).toBeLessThanOrEqual(TRACE_CONFIG.MAX_NODES);
+    expect(result.nodes.some(node => node.id === 'out_bc1qoutputa')).toBe(true);
+    expect(result.nodes.some(node => node.id === 'out_bc1qoutputb')).toBe(true);
+    expect(result.meta.stats.omittedNodeCount).toBeGreaterThan(0);
+    expect(result.meta.stats.omittedNodeIds.length).toBe(result.meta.stats.omittedNodeCount);
+    expect(result.meta.haltReason).toBe('NODE_LIMIT');
+  });
+
+  it('preserves transaction and output-index provenance across a spend edge', async () => {
+    const ROOT = 'b'.repeat(64);
+    const CHILD = 'c'.repeat(64);
+    const root = txShape({
+      txid: ROOT,
+      ins: [['bc1qsource111111111111111111111111', 2000000]],
+      outs: [['bc1qmiddle111111111111111111111111', 1999000]],
+    });
+    const child = txShape({
+      txid: CHILD,
+      ins: [['bc1qmiddle111111111111111111111111', 1999000]],
+      outs: [['bc1qterminal1111111111111111111111', 1998000]],
+      height: 800001,
+    });
+    stubRoutes([
+      [`/tx/${ROOT}/outspends`, [{ spent: true, txid: CHILD, status: { confirmed: true, block_height: 800001 } }]],
+      [`/tx/${CHILD}/outspends`, [{ spent: false }]],
+      [`/tx/${CHILD}`, child],
+      [`/tx/${ROOT}`, root],
+    ]);
+
+    const result = await traceEndReceiver(ROOT, 1);
+    const outputLink = result.links.find(link => link.source === `tx_${ROOT}` && link.target === 'out_bc1qmiddle111111111111111111111111');
+    const spendLink = result.links.find(link => link.source === 'out_bc1qmiddle111111111111111111111111' && link.target === `tx_${CHILD}`);
+    expect(outputLink).toMatchObject({ txid: ROOT, outputIndex: 0 });
+    expect(spendLink).toMatchObject({
+      txid: CHILD,
+      previousTxid: ROOT,
+      spendingTxid: CHILD,
+      outputIndex: 0,
+    });
+    expect(result.meta.collection.sourceManifest).toHaveLength(2);
+    expect(result.meta.collection.sourceManifest[0].transactionResponse.canonicalResponseSha256).toMatch(/^SHA256:/);
   });
 
   it('skips self-loop spends without hanging', async () => {
@@ -169,9 +226,8 @@ describe('trace branch behavior', () => {
   });
 
   it('follows spent branches past a heavy fan-in root (seizure-sweep shape)', async () => {
-    // e60887… shape: 150 inputs collapse into a spent branch + an unspent
-    // terminal. Input leaves must not spend the node budget, or the trace
-    // halts at depth 0 and the user only ever sees the root transaction.
+    // A heavy fan-in root must stay within the hard cap while preserving a
+    // slot for a spent branch's transaction and first output.
     const ROOT = 'd'.repeat(64);
     const CHILD = 'e'.repeat(64);
     const ins = Array.from({ length: 150 }, (_, i) => [`bc1qin${String(i).padStart(3, '0')}1111111111111111`, 100000]);
@@ -195,10 +251,10 @@ describe('trace branch behavior', () => {
       [`/tx/${CHILD}`, child],
     ]);
     const res = await traceEndReceiver(ROOT, 2);
-    // 153 total nodes (>120 cap) but the spent branch is still followed.
-    expect(res.nodes.length).toBeGreaterThan(120);
+    expect(res.nodes.length).toBeLessThanOrEqual(TRACE_CONFIG.MAX_NODES);
     expect(res.nodes.some(n => n.id === `tx_${CHILD}`)).toBe(true);
     expect(res.nodes.some(n => n.id === 'out_bc1qend11111111111111111111111111')).toBe(true);
-    expect(res.meta.haltReason).not.toBe('NODE_LIMIT');
+    expect(res.meta.stats.omittedNodeCount).toBeGreaterThan(0);
+    expect(res.meta.haltReason).toBe('NODE_LIMIT');
   });
 });

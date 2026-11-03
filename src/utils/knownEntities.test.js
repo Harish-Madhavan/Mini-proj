@@ -13,12 +13,9 @@ describe('knownEntities', () => {
     expect(tagKnownEntity('0x12D6' + 'a'.repeat(36))).not.toMatchObject({ category: 'sanctioned' });
   });
 
-  it('tags the FBI seizure wallet as secured government funds, never sanctioned', () => {
-    // The bc1qa5wk prefix is the FBI Individual-X forfeiture wallet
-    // (69,370 BTC, 0 spends). Scoring it as a sanctioned contact would be
-    // a false attribution in the risk engine.
-    const seizure = tagKnownEntity('bc1qa5wksynthseizurewallet000001');
-    expect(seizure?.category).not.toBe('seizure');
+  it('does not apply unverified exact-identifier attributions', () => {
+    expect(tagKnownEntity('34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo')?.category).toBe('exchange-heuristic');
+    expect(tagKnownEntity('bc1qa2dn50l6k0m2m3wdf3c08z6gq2fsmrwhj5v6d7')).toBeNull();
   });
 
   it('returns explorer urls for tx and bitcoin address', () => {

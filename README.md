@@ -14,7 +14,8 @@ Bitcoin tracing and forensic investigation.
 npm install
 npm run dev      # local dev server
 npm test         # unit suite (vitest)
-npm run verify   # labeled-set accuracy table (offline)
+npm run verify   # offline heuristic-fixture regression table
+npm run verify:ground-truth # source/provenance checks and reviewed-case evaluator tests
 npm run lint     # oxlint
 npm run build    # production bundle
 ```
@@ -52,9 +53,10 @@ trace is computed live from gateway data.
   Linked cases, Risk, Watchlist, Report) plus graph canvas/sidebar/timeline.
 - `src/utils/` — chain API, heuristics, taint, clustering, risk, dossiers,
   custody, cross-chain bridge analysis, and narrative modules. Every module has colocated `.test.js`
-  tests (41 test files and 257 tests at the last full-suite run).
-- `src/data/` — `judicialCorpus.js` (unsealed court docket ground truth: FBI/IRS-CI/BKA),
-  `forensicCorpus.js` (reference list of known mainnet transaction IDs), and seed scenarios.
+  tests (41 test files and 265 tests in the latest full-suite run).
+- `src/data/` — `judicialCorpus.js` separates public-case/source leads and
+  unverified trace references from the verified benchmark; `forensicCorpus.js`
+  contains candidate identifiers, not ground truth, alongside seed scenarios.
 - `src/hooks/`, `src/context/`, `src/constants/` — shared state and config.
 
 Live network calls happen only on explicit user actions (trace, expand,
@@ -68,28 +70,37 @@ an air-gapped or query-private deployment.
 Be precise about what the numbers mean:
 
 - **Per-hop confidence** (0–1) measures how strongly the heuristics agree on
-  one output — margin of the weighted score, decayed by trace depth, floored
-  for near-deterministic identity calls. It is *not* a measured probability.
+  one output — margin of the weighted score, decayed by trace depth. It is
+  *not* a measured probability; a fresh output address does not prove external ownership.
 - **Trace confidence** averages per-hop confidence, discounted for ambiguous
   hops and chain length. A CoinJoin halt or a trace with no scored hops
   reports unknown instead of a default 50%.
-- **Labeled-set accuracy** (`npm run verify`) is the actual measurement:
-  ground-truth payment/change labels on real mainnet shapes (pizza purchase,
-  first-ever transaction, ransom splits, self-consolidations, coinbase),
-  scored by the same thresholds the product uses. Accuracy is reported over
-  committed decisions only, alongside coverage, per-class precision/recall,
-  and each verdict's margin past the decision boundary — thin margins flag
-  where the next labeled case should go. The risk suite additionally checks
-  that threat bands survive ±20% weight changes.
-- **Test Suite Status**: 41 test files and 257 tests were discovered in the
-  last full-suite run. Run `npm test` for the current result.
+- **Offline heuristic fixtures** (`npm run verify`) are in-code regression
+  examples, not an independently verified or held-out ground-truth benchmark.
+  Their agreement and coverage do not estimate real-world accuracy.
+- **Ground-truth benchmark** (`npm run verify:ground-truth`) keeps source leads
+  and candidate transaction references out of scoring. A benchmark entry must
+  include primary-source citations with exact locations tied to each label,
+  reviewed transaction output indexes/addresses/roles, canonical on-chain
+  response digests, and a recorded review method. The evaluator reports output
+  precision/recall/F1 and labeled payment/change agreement.
+  Current status: no judicial records meet that bar yet, so the benchmark
+  reports `NO_VERIFIED_CASES` rather than a misleading score. Passing the
+  evaluator tests validates the evaluation machinery, not AegisTrace accuracy.
+- Historical cases can support regression and confidence assessment, but do
+  not prove performance on unseen transactions; that requires held-out,
+  representative cases and explicit coverage/error analysis.
+- **Test Suite Status**: 41 test files and 265 tests passed in the latest
+  full-suite run. Run `npm test` for the current result.
 
 To demonstrate end to end: run `npm run verify` for the offline table, then
 paste any mainnet txid or address on the Dashboard and trace it live.
 Value-conservation warnings, taint continuity, and dwell consistency are
 internal consistency checks, not independent confirmation of attribution or
-path completeness. The custody ledger currently uses a 64-bit non-cryptographic
-hash and is not suitable as a tamper-proof evidentiary seal. The report SHA-256
+path completeness. Cases produced from offline estimates and manually supplied
+hypotheses are explicitly non-evidentiary and receive no numeric risk score.
+The custody ledger now uses a SHA-256 event chain, but it is not signed or
+externally anchored and is not a trusted evidentiary seal. The report SHA-256
 digest detects changes to its canonical payload but does not authenticate its
 source or prove legal admissibility.
 

@@ -59,12 +59,16 @@ export function CaseProvider({ children }) {
   const [traceDepth, setTraceDepth] = useState(2);
 
   useEffect(() => {
-    safeSetItem('aegistrace_scenarios', scenarios.slice(0, MAX_SCENARIOS));
-  }, [scenarios]);
+    if (!safeSetItem('aegistrace_scenarios', scenarios.slice(0, MAX_SCENARIOS))) {
+      showToast("Cases are in memory only; browser storage could not save the latest changes.", "error", 6000);
+    }
+  }, [scenarios, showToast]);
 
   useEffect(() => {
-    safeSetItem('aegistrace_activeCaseId', activeCaseId);
-  }, [activeCaseId]);
+    if (!safeSetItem('aegistrace_activeCaseId', activeCaseId)) {
+      showToast("The selected case may not remain selected after reload; browser storage is unavailable.", "error", 6000);
+    }
+  }, [activeCaseId, showToast]);
 
   // Subscribe to gateway events to notify user of circuit-breaker failovers
   useEffect(() => {
@@ -226,6 +230,9 @@ export function CaseProvider({ children }) {
         showToast("Looking up address history...", "info", 2500);
         const found = await findSignificantAddressTx(trimmed);
         if (found.tx) {
+          if (!found.historyComplete) {
+            showToast(`Partial address history (${found.pages} page(s)): ${found.incompleteReason}`, "warning", 6000);
+          }
           if (found.significant && found.pages > 1) {
             showToast(
               `Newest activity is dust — tracing the ${satsToBtc(found.volumeSats, 2)} BTC movement ${found.pages - 1} page(s) back instead.`,
@@ -248,6 +255,15 @@ export function CaseProvider({ children }) {
           if (!formatted.nodes?.length) {
             throw new Error(`No trace data for ${trimmed.slice(0, 12)}...`);
           }
+          formatted.meta = {
+            ...formatted.meta,
+            addressHistoryScan: {
+              pagesScanned: found.pages,
+              transactionsScanned: found.scanned,
+              complete: found.historyComplete,
+              incompleteReason: found.incompleteReason,
+            },
+          };
           setScenarios(prev => {
             const res = createAddressTraceCase(trimmed, totalCount, found.tx.txid, formatted, prev);
             queueMicrotask(() => setActiveCaseId(res.newCaseId));

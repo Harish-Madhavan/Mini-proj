@@ -82,7 +82,7 @@ flowchart TD
 | **Bundler** | **Vite 8** | Sub-second HMR, optimized ES-module chunking, and strict tree-shaking for lean bundles. |
 | **Icons & UI** | **Lucide React** + Glassmorphic CSS | High-contrast law enforcement dark-mode UI; Outfit for typography, JetBrains Mono for addresses/hashes. |
 | **Blockchain Gateways** | **Blockstream.info + Mempool.space** | RESTful Esplora-compatible endpoints with automatic fallback, timeout handling, and no API key barriers. |
-| **Testing** | **Vitest 3.2** | 41 test files and 257 tests were discovered in the last full-suite run; run `npm test` for current results. |
+| **Testing** | **Vitest 3.2** | 41 test files and 265 tests passed in the latest full-suite run; run `npm test` for current results. |
 | **Code Quality** | **OxLint** | High-performance Rust-based linter ensuring strict correctness and zero undefined symbols. |
 
 ---
@@ -122,7 +122,7 @@ Traces forward fund movement from any transaction ID or Bitcoin address across m
    - **H5: Spent Status & Dwell Time (18%)**: Terminal unspent outputs get $+3.5$ payment score; spent outputs evaluate block dwell time (immediate spend $\le 6$ blocks indicates change transit sweep, whereas dwelling $\ge 144$ blocks indicates recipient ownership).
    - **H6: Transaction Fingerprint (8%)**: Identifies 1-in-2-out peels vs batch dispersal vs many-to-many structures.
    - **H7: Fee Market Context (6%)**: Analyzes fee rate relative to post-2015 fee market standards.
-   - **H8: Single-Output Identity**: If an output is the sole value-bearing output, checks input identity: self-consolidation (change by construction) vs fresh destination (payment by construction).
+   - **H8: Single-Output Identity**: A sole value-bearing output does not establish a payment; matching an input identity is only a change-leaning clue, and a fresh destination remains ownership-unknown.
 5. **Confidence Decay & Hop Propagation**:
    $$\text{hopDecay} = \max(0.75, 1 - (\text{depth} \times 0.07))$$
    $$\text{Confidence} = \min(0.95, (\frac{|\text{WeightedScore}|}{8}) \times \text{hopDecay})$$
@@ -253,11 +253,11 @@ Synthesizes all structural, network, and entity signals into an objective Risk S
 1. **Five Orthogonal Forensic Dimensions** (plus two graph-derived signals):
    - **Obfuscation Score (Default Weight: 35%)**: Presence of CoinJoin mixers, Wasabi pools, or instant swap routers.
    - **Layering Depth Score (Default Weight: 12% per hop, max 40%)**: Distance and hop count from the original suspect UTXO.
-   - **Destination Score (18 points in the current aggregate)**: The current engine does not accept case-provided KYC or identity labels as verified evidence and applies no KYC-based discount. Risk scores are heuristic triage signals, not measured probabilities or findings of identity.
+   - **Destination Score (0 by default)**: Unknown ownership does not add risk points. Cases with no qualifying signals report "insufficient evidence" rather than a numeric baseline score.
    - **Velocity Score (Default: 3–6%)**: Rapid automated movement across blocks.
    - **Protocol Anomalies (Default: 6%)**: Replace-By-Fee (RBF) signaling, extreme sat/vB fee anomalies, or non-standard scripts.
    - **Consolidation Sweep (Fixed: 15 imminent / 8 watch)**: Fan-in hubs from `scanCaseSweeps` (single-out and dominant-2-out seizure shapes); node-only callers score no signal rather than failing.
-   - **Sanctioned/Darknet Attribution (Fixed: 15 / 10)**: Curated `tagKnownEntity` hits on case addresses; historical-era cases score zero on both (designations postdate them), and the FBI seizure prefix (`bc1qa5wk`) is tagged `seizure`, never sanctioned.
+   - **Sanctioned/Darknet Attribution**: Candidate address references do not affect scoring unless their full identifiers and source provenance have been independently reviewed and explicitly enabled. No bundled entry is currently enabled.
 2. **Historical Era Modulation**:
    - Satoshi-era transactions (2009–2011, P2PK scripts, coinbase reward splits) are calibrated with an era discount (maximum risk capped at 25) so innocent early adoption isn't flagged as money laundering.
 3. **Statutory Action Mapping**:
@@ -328,7 +328,7 @@ Provides draft notice/report templates and case-review aids. The generated mater
 1. **Hash-Chained Chain of Custody Ledger (`buildChainOfCustody`)**:
    - Orders transfers chronologically. Each event $E_i$ commits to the previous event's digest:
      $$\text{EventHash}_i = \text{Digest}(E_i.\text{from} + E_i.\text{to} + E_i.\text{amount} + E_i.\text{blockTime} + \text{EventHash}_{i-1})$$
-   - The current ledger implementation uses a 64-bit non-cryptographic hash (`cyrb53`) for change detection. It is not a cryptographic seal and must not be relied on as a tamper-proof evidentiary chain.
+   - The custody timeline uses a SHA-256 event chain for change detection. It is not signed or externally anchored and must not be relied on as a tamper-proof evidentiary chain.
    - Automatically detects **Value Discontinuities** (losses $>50\%$ indicating off-graph branching) and **Unanchored Hops** (unconfirmed/dateless steps).
 2. **Section 67 NDPS Act, 1985 Statutory Notice Generator**:
    - Generates legal notices to designated exchange compliance officers (WazirX, CoinDCX, Binance, CoinSwitch Kuber, ZebPay, KuCoin) demanding KYC identity records, IP logs, linked bank accounts, and immediate freezing of funds.
@@ -484,15 +484,14 @@ When demonstrating AegisTrace to project mentors or evaluators, follow this stru
 
 #### Q5: "How is this legally admissible under Indian Law?"
 > **Answer:**  
-> *"The application can draft report and certificate-language templates, record a review trail, and compute a SHA-256 digest for a canonical report payload. Its custody timeline currently uses a non-cryptographic 64-bit hash, and its canvas signature is not an authenticated digital signature. These features do not prove source authenticity, chain of custody, statutory compliance, or legal admissibility; those require independent process and expert review."*
+> *"The application can draft report and certificate-language templates, record a review trail, and compute SHA-256 digests for a canonical report payload and event chain. These digests are not signed or externally anchored, and the canvas signature is not an authenticated digital signature. These features do not prove source authenticity, chain of custody, statutory compliance, or legal admissibility; those require independent process and expert review."*
 
 ---
 
 ## 7. Verification & Test Suite Summary
 
-The last full-suite run passed **41 test files and 257 tests**. Run `npm test`
-for a fresh result; a passing unit suite does not establish real-world forensic
-accuracy or legal admissibility.
+Run `npm test` for the current result; a passing unit suite does not establish
+real-world forensic accuracy or legal admissibility.
 
 ---
 
@@ -532,14 +531,15 @@ src/
 │   ├── legalConstants.js          # Exchange SLAs, Section 67 & 65B templates
 │   └── navigation.js              # Tab routes and shortcuts
 ├── data/
-│   ├── forensicCorpus.js          # Reference list of known mainnet IDs
-│   ├── judicialCorpus.js          # Labeled reference examples attributed to public court-docket material
+│   ├── forensicCorpus.js          # Unverified candidate IDs; not ground truth
+│   ├── judicialCorpus.js          # Candidate/source leads separated from verified labels
 │   └── scenarios.js               # Seed baseline forensic cases
 └── utils/
-    ├── accuracy.js                # Labeled ground-truth decision boundary validator
+    ├── accuracy.js                # Offline heuristic fixture regression evaluator
+    ├── groundTruthEvaluation.js   # Source-gated exact-output benchmark metrics
     ├── bitcoinApi.js              # Esplora gateway, BFS recursive tracer
     ├── caseHelpers.js             # Case builders and algorithmic mock generation
-    ├── chainOfCustody.js          # Prototype non-cryptographic hash-chained ledger
+    ├── chainOfCustody.js          # SHA-256 digest chain (unsigned, unanchored)
     ├── clusteringAlgorithms.js    # DSU, CIOH, Shannon entropy, peel detector
     ├── crossChainForensics.js     # Bridge memo disassembler & EVM/Tron target extractor
     ├── download.js                # File export utilities (JSON, text, CSV)

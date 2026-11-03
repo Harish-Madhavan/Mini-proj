@@ -7,7 +7,9 @@ export const SCENARIOS = [
     suspectName: "Origin Address (bc1qxy2...)",
     initialTxHash: "4b9a8f2e71d3c05c8a9f0e1d2c3b4a5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b",
     status: "ACTIVE_TRACE",
-    riskScore: 85,
+    riskScore: null,
+    traceType: "SIMULATED_ESTIMATE",
+    evidenceStatus: "SIMULATED",
     description: "Synthetic trace ending at an address with a possible custodial-service pattern; owner is not established.",
     nodes: [
       {
@@ -85,7 +87,9 @@ export const SCENARIOS = [
     suspectName: "Suspect Syndicate Alpha",
     initialTxHash: "7c12f49a21b3e8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3",
     status: "ACTIVE_TRACE",
-    riskScore: 92,
+    riskScore: null,
+    traceType: "SIMULATED_ESTIMATE",
+    evidenceStatus: "SIMULATED",
     description: "Detects cross-chain laundering via THORChain Asgard Vault with OP_RETURN swap memo settling to Ethereum ERC-20 USDT.",
     nodes: [
       {

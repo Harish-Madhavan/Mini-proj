@@ -88,7 +88,7 @@ export function verifyValueConservation(nodes = [], links = []) {
       const fee = inSat - outSat;
 
       // Violation: Output exceeds input (creation of satoshis)
-      if (outSat > inSat + 546) {
+      if (outSat > inSat) {
         violations.push({
           nodeId: hub.id,
           check: 'VALUE_CREATION_VIOLATION',
@@ -371,6 +371,7 @@ export function computeMultiModelConcordance(nodes = [], links = [], taintedNode
 
   return {
     score,
+    converged: comparison.converged,
     consensusSinks,
     modelSinks: {
       fifo: Array.from(fifoTainted),
@@ -436,7 +437,7 @@ export function auditTraceCorrectness(caseOrGraph, options = {}) {
     : { passed: null, violations: [] };
   const computedConcordance = taintApplicable ? computeMultiModelConcordance(nodes, links, taintedNodeIds) : null;
   const concordance = computedConcordance
-    ? { ...computedConcordance, status: 'checked' }
+    ? { ...computedConcordance, status: computedConcordance.converged === false ? 'incomplete' : 'checked' }
     : { status: 'unknown', score: null, consensusSinks: [], modelSinks: { fifo: [], proportionate: [], poison: [] }, maxSpread: null };
 
   const allViolations = [
@@ -474,17 +475,31 @@ export function auditTraceCorrectness(caseOrGraph, options = {}) {
       count: heuristicAudit.violations.length
     },
     taintConservation: {
-      status: taintApplicable ? (fifoTaintAudit.passed && propTaintAudit.passed ? 'passed' : 'failed') : 'unknown',
-      passed: taintApplicable ? fifoTaintAudit.passed && propTaintAudit.passed : null,
+      status: !taintApplicable
+        ? 'unknown'
+        : !fifoTaintAudit.converged || !propTaintAudit.converged
+          ? 'incomplete'
+          : fifoTaintAudit.passed && propTaintAudit.passed ? 'passed' : 'failed',
+      passed: taintApplicable && fifoTaintAudit.converged && propTaintAudit.converged
+        ? fifoTaintAudit.passed && propTaintAudit.passed
+        : null,
       fifoViolations: fifoTaintAudit.violations.length,
-      propViolations: propTaintAudit.violations.length
+      propViolations: propTaintAudit.violations.length,
+      fifoIterations: fifoTaintAudit.iterations || 0,
+      propIterations: propTaintAudit.iterations || 0,
+      nonConvergedNodeIds: [
+        ...(fifoTaintAudit.nonConvergedNodeIds || []),
+        ...(propTaintAudit.nonConvergedNodeIds || []),
+      ],
     },
     multiModelConcordance: {
       status: concordance.status,
       score: concordance.score
     }
   };
-  const isComplete = Object.values(invariantResults).every(result => result.status !== 'unknown');
+  const isComplete = Object.values(invariantResults).every(result =>
+    ['passed', 'failed', 'checked'].includes(result.status)
+  );
 
   // 2. Score is an internal consistency measure, not a probability or a
   // validation of the inferred transaction path. It is withheld if checks

@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   apiCache,
   clearCache,
+  fetchTx,
+  getResponseProvenance,
   formatBlockstreamTx,
   getScriptTypeFromAddress,
   parseOpReturnPayload,
@@ -16,6 +18,27 @@ import { API_CONFIG } from '../constants/config';
 describe('bitcoinApi LRU Cache & Formatting', () => {
   beforeEach(() => {
     clearCache();
+  });
+
+  it('records provider, canonical response digest, and cache provenance', async () => {
+    const txid = 'a'.repeat(64);
+    vi.stubGlobal('fetch', async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ txid, status: { confirmed: true, block_height: 800000 } }),
+    }));
+    try {
+      await fetchTx(txid);
+      const fetched = getResponseProvenance(`/tx/${txid}`);
+      expect(fetched.provider).toBe('Blockstream');
+      expect(fetched.canonicalResponseSha256).toMatch(/^SHA256:[0-9A-F]{64}$/);
+      expect(fetched.cacheHit).toBe(false);
+
+      await fetchTx(txid);
+      expect(getResponseProvenance(`/tx/${txid}`).cacheHit).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('should store items in LRU cache up to MAX_CACHE_SIZE', () => {
@@ -134,10 +157,7 @@ describe('bitcoinApi LRU Cache & Formatting', () => {
     expect(isCoinJoinTransaction(normalTx)).toBe(false);
   });
 
-  it('should classify an early-era sole fresh output as payment despite 1-block dwell (pizza shape)', () => {
-    // May-2010 pizza purchase shape: many funder inputs, one fresh output,
-    // spent in the very next block. Sole-fresh identity is payment by
-    // construction — dwell must not override it into a change step.
+  it('does not infer payment ownership from an early-era fresh sole output', () => {
     const funder = '1XPTgDRhN8RFnzniWCddobD9iKZatrvH4';
     const fresh = '17SkEw2md5avVNyYgj6RiXuQKNwkXaxFyQ';
     const pizzaLike = {
@@ -155,8 +175,9 @@ describe('bitcoinApi LRU Cache & Formatting', () => {
     const formatted = formatBlockstreamTx(pizzaLike, [{ spent: true, status: { block_height: 57044 } }]);
     const out = formatted.nodes.find(n => n.id === `out_${fresh}`);
     expect(out).toBeDefined();
-    expect(out.label).toBe('Payment (early network)');
-    expect(out.details?.kycStatus).toBe('HISTORICAL PAYMENT');
+    expect(out.label).toBe('Unclassified output (early network)');
+    expect(out.details?.kycStatus).toBe('HISTORICAL DIRECT TRANSFER');
+    expect(out.details?.heuristicConfidence).toBe(0.5);
   });
 
   it('measures address involvement ignoring foreign value and coinbase inputs', () => {

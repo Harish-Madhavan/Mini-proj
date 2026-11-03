@@ -1,18 +1,16 @@
 /**
- * Labeled-set accuracy harness: the honest answer to "does it trace correctly?"
+ * Offline regression fixtures for the heuristic decision thresholds.
  *
  * In-product confidence scores (per-hop and trace-level) measure how strongly
  * the heuristics agree — they are NOT measured accuracy. This module measures
- * actual correctness against ground-truth labels on real mainnet shapes:
- * the pizza purchase, the first-ever transaction (real pubkeys and spend
- * heights), the live-verified ransom splits, and definitional cases
- * (an output paying its own funder is change, by construction).
+ * The fixtures are assembled in this file and are not an independently
+ * verified or held-out ground-truth benchmark. Passing them only checks that
+ * known synthetic shapes retain their expected code behavior.
  *
  * Methodology: each case predicts payment / change / abstain from the same
- * scoreOutputHeuristics thresholds the product uses (>1.0 / <-1.0). Accuracy
+ * scoreOutputHeuristics thresholds the product uses (>1.0 / <-1.0). Fixture agreement
  * is reported over COMMITTED decisions only, alongside coverage — otherwise a
- * model could fake 100% by abstaining on everything. The coverage floor in
- * accuracy.test.js guards that degenerate case.
+ * and coverage are regression statistics, not empirical accuracy estimates.
  */
 
 import { scoreOutputHeuristics } from './traceHeuristics';
@@ -71,8 +69,8 @@ function halTx() {
 
 export const LABELED_CASES = [
   {
-    name: 'pizza payment (131-in-1-out, fresh round output)',
-    expected: 'payment',
+    name: 'single fresh output (recipient ownership unresolved)',
+    expected: 'unknown',
     tx: pizzaTx(PIZZA_PAYEE),
     outputIndex: 0,
     inputScriptTypes: ['Legacy (P2PKH)'],
@@ -89,8 +87,8 @@ export const LABELED_CASES = [
     seenAddresses: new Set([PIZZA_FUNDER]),
   },
   {
-    name: 'unspent sole output (terminal holder)',
-    expected: 'payment',
+    name: 'unspent sole output (external ownership unresolved)',
+    expected: 'unknown',
     tx: pizzaTx('1FreshUnspentAddrXyz123456789012'),
     outputIndex: 0,
     inputScriptTypes: ['Legacy (P2PKH)'],
@@ -98,8 +96,8 @@ export const LABELED_CASES = [
     seenAddresses: new Set([PIZZA_FUNDER]),
   },
   {
-    name: 'tempered single output (previously seen address)',
-    expected: 'payment',
+    name: 'reused sole output (ownership unresolved)',
+    expected: 'unknown',
     tx: pizzaTx('1ReusedWalletAddrXyz12345678901'),
     outputIndex: 0,
     inputScriptTypes: ['Legacy (P2PKH)'],
@@ -190,7 +188,7 @@ export const LABELED_CASES = [
   },
   {
     name: 'coinbase reward (no funder inputs at all)',
-    expected: 'payment',
+    expected: 'unknown',
     tx: tx({
       ins: [],
       outs: [['bc1qminerrewardxyz12345678901234567890', 'v0_p2wpkh', 312500000]],
@@ -253,24 +251,26 @@ export function evaluateAccuracy(cases = LABELED_CASES) {
       // calls worth watching — a correct verdict at 0.13 margin can flip on
       // any weight tweak, while one at 4.0 cannot.
       margin: predicted === 'abstain' ? 0 : Math.abs(r.score) - 1.0,
-      correct: predicted === c.expected,
+      correct: c.expected === 'unknown' ? null : predicted === c.expected,
     };
   });
-  const committed = rows.filter((r) => r.predicted !== 'abstain');
+  const evaluable = rows.filter((r) => r.expected !== 'unknown');
+  const committed = evaluable.filter((r) => r.predicted !== 'abstain');
   const correct = committed.filter((r) => r.correct);
   const confCorrect = correct.map((r) => r.confidence);
   return {
     total: rows.length,
+    evaluable: evaluable.length,
     committed: committed.length,
     correct: correct.length,
     accuracy: committed.length > 0 ? correct.length / committed.length : 0,
-    coverage: rows.length > 0 ? committed.length / rows.length : 0,
+    coverage: evaluable.length > 0 ? committed.length / evaluable.length : 0,
     payment: perClassStats(rows, 'payment'),
     change: perClassStats(rows, 'change'),
     avgConfidenceCorrect: confCorrect.length > 0
       ? confCorrect.reduce((s, v) => s + v, 0) / confCorrect.length : null,
-    misses: rows.filter((r) => r.predicted !== 'abstain' && !r.correct),
-    abstentions: rows.filter((r) => r.predicted === 'abstain'),
+    misses: evaluable.filter((r) => r.predicted !== 'abstain' && !r.correct),
+    abstentions: evaluable.filter((r) => r.predicted === 'abstain'),
     rows,
   };
 }
@@ -279,16 +279,16 @@ export function formatAccuracyReport(report) {
   const line = (cols, widths) => cols.map((c, i) => String(c).padEnd(widths[i]).slice(0, widths[i])).join(' | ');
   const widths = [44, 9, 9, 8, 7, 7, 7];
   const out = [
-    'ACCURACY (labeled mainnet shapes, offline)',
+    'OFFLINE HEURISTIC REGRESSION FIXTURES (not empirical accuracy)',
     line(['case', 'expected', 'result', 'score', 'conf', 'margin', 'verdict'], widths),
     '-'.repeat(102),
     ...report.rows.map((r) => line(
-      [r.name, r.expected, r.predicted, r.score.toFixed(2), r.confidence.toFixed(2), r.margin.toFixed(2), r.correct ? 'OK' : 'WRONG'],
+      [r.name, r.expected, r.predicted, r.score.toFixed(2), r.confidence.toFixed(2), r.margin.toFixed(2), r.correct == null ? 'UNLABELED' : r.correct ? 'OK' : 'WRONG'],
       widths
     )),
     '-'.repeat(102),
-    `accuracy (committed): ${(report.accuracy * 100).toFixed(1)}%  ` +
-    `coverage: ${(report.coverage * 100).toFixed(1)}% (${report.committed}/${report.total})  ` +
+    `fixture agreement (committed): ${(report.accuracy * 100).toFixed(1)}%  ` +
+    `fixture coverage: ${(report.coverage * 100).toFixed(1)}% (${report.committed}/${report.evaluable} labeled fixtures; ${report.total} total)  ` +
     `avg confidence when right: ${report.avgConfidenceCorrect != null ? report.avgConfidenceCorrect.toFixed(2) : 'n/a'}`,
     `payment: precision ${(report.payment.precision * 100).toFixed(0)}% / recall ${(report.payment.recall * 100).toFixed(0)}% (n=${report.payment.support})  ` +
     `change: precision ${(report.change.precision * 100).toFixed(0)}% / recall ${(report.change.recall * 100).toFixed(0)}% (n=${report.change.support})`,

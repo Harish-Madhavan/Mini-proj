@@ -16,10 +16,8 @@
  *       (single-output shape is owned by H8, not fingerprinted as "consolidation")
  *  H7: Fee Market Context (6%) — post-2015 fee rates only; pre-fee-market eras skip this signal
  *  H8: Single-Output Address Identity (shares H2 budget) — one value-bearing output cannot be
- *      "change alongside a payment". Identity is decisive: back to an input address =>
- *      self-consolidation (change); anywhere else => payment. Fresh output => high
- *      confidence (cf. May-2010 10,000 BTC pizza purchase: 131 inputs, one fresh
- *      round output); previously-seen output => tempered (possible change-address reuse).
+ *      "change alongside a payment". A destination not seen among inputs is not proof of
+ *      external ownership; self-identity is only a change-leaning clue.
  *  H9: Chain Reuse (shares H2 budget, tracing only) — needs pre-fetched address
  *      summaries. An output address funded twice or more on-chain predates this
  *      transaction; change addresses are almost never reused, so reuse leans
@@ -59,7 +57,7 @@ export function isRoundValue(sats) {
  */
 export const FEE_MARKET_GENESIS_TIME = 1420070400;
 
-export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outspends, seenAddresses, outputId = null, addressMeta = null }) {
+export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outspends, seenAddresses, addressMeta = null }) {
   const outputs = tx.vout || [];
   const output = outputs[outputIndex];
   if (!output) return { score: 0, confidence: 0, breakdown: {}, isChangeCandidate: false, isPaymentCandidate: false };
@@ -212,22 +210,11 @@ export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outsp
   // seen (but non-input) address is tempered: likely payment, but compatible
   // with change-address reuse, so confidence stays modest.
   let identityScore = 0;
-  let identityStrength = null; // 'decisive' | 'tempered' | null
+  let identityStrength = null;
   if (isSoleValueOutput && outputIdentityKey) {
     if (inputIdentityKeys.includes(outputIdentityKey)) {
-      identityScore = -4.0; // self-consolidation — change by construction
-      identityStrength = 'decisive';
-    } else {
-      // Freshness via the classifier's identifier (real address or P2PK
-      // pseudo-id); falls back to decisive when no address index exists.
-      const seenKey = outputId || address;
-      if (seenKey && seenAddresses && seenAddresses.has(seenKey)) {
-        identityScore = 1.5; // sole output to a known address — payment, tempered
-        identityStrength = 'tempered';
-      } else {
-        identityScore = 4.0; // sole output to a fresh identity — payment by construction
-        identityStrength = 'decisive';
-      }
+      identityScore = -2.0;
+      identityStrength = 'corroborating';
     }
   }
 
@@ -253,11 +240,6 @@ export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outsp
 
   const hopDecay = Math.max(0.75, 1 - (typeof tx._traceDepth === 'number' ? tx._traceDepth * 0.07 : 0));
   let confidence = Math.min(0.95, (Math.abs(weightedScore) / 8) * hopDecay);
-  // Identity-decisive outcomes are near-deterministic accounting, not a
-  // behavioral guess — floor their confidence instead of letting the /8 norm
-  // dilute them into ambiguity.
-  if (identityStrength === 'decisive') confidence = Math.max(confidence, 0.85);
-  else if (identityStrength === 'tempered') confidence = Math.max(confidence, 0.6);
   const breakdown = {
     scriptScore: parseFloat(scriptScore.toFixed(2)),
     reuseScore: parseFloat(reuseScore.toFixed(2)),
@@ -268,6 +250,7 @@ export function scoreOutputHeuristics({ tx, outputIndex, inputScriptTypes, outsp
     feeScore: parseFloat(feeScore.toFixed(2)),
     identityScore: parseFloat(identityScore.toFixed(2)),
     chainReuseScore: parseFloat(chainReuseScore.toFixed(2)),
+    identityStrength,
     dwellBlocks,
     weightedScore: parseFloat(weightedScore.toFixed(2)),
   };

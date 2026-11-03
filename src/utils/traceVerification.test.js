@@ -45,6 +45,21 @@ describe('traceVerification', () => {
       expect(res.violations.some(v => v.check === 'VALUE_CREATION_VIOLATION')).toBe(true);
     });
 
+    it('rejects even a one-satoshi excess output', () => {
+      const nodes = [
+        { id: 'in', type: 'suspect' },
+        { id: 'tx_root', type: 'hub' },
+        { id: 'out', type: 'receiver' },
+      ];
+      const links = [
+        { source: 'in', target: 'tx_root', value: '1 BTC' },
+        { source: 'tx_root', target: 'out', value: '1.00000001 BTC' },
+      ];
+      const result = verifyValueConservation(nodes, links);
+      expect(result.passed).toBe(false);
+      expect(result.violations.some(v => v.check === 'VALUE_CREATION_VIOLATION')).toBe(true);
+    });
+
     it('flags negative miner fees', () => {
       const nodes = [
         { id: 'in_addr1', type: 'suspect', balance: '0.5 BTC' },

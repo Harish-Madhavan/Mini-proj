@@ -64,6 +64,8 @@ export default function ReportGenerator() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
   const [integrityHash, setIntegrityHash] = useState('Computing SHA-256...');
+  const [custodyState, setCustodyState] = useState(null);
+  const [custodyError, setCustodyError] = useState(null);
   const [signatureRevision, setSignatureRevision] = useState(0);
   const [officerName, setOfficerName] = useState('');
   const [officerBadge, setOfficerBadge] = useState('');
@@ -72,12 +74,37 @@ export default function ReportGenerator() {
   const [investigatorNotes, setInvestigatorNotes] = useState('');
 
   const narrative = useMemo(() => generateForensicNarrative(activeCase), [activeCase]);
-  const custody = useMemo(() => buildChainOfCustody(activeCase), [activeCase]);
-  const custodyVerification = useMemo(() => verifyChainOfCustody(custody.events), [custody]);
+  const custody = custodyState?.chain || { events: [], eventCount: 0, gaps: [], terminalHash: null };
+  const custodyVerification = custodyState?.verification || {
+    valid: false,
+    checkedEvents: 0,
+    brokenAtSeq: null,
+    reason: custodyError || 'Computing SHA-256 chain',
+  };
+  const custodyStatusLabel = custodyState
+    ? custodyVerification.valid ? `INTACT (${custodyVerification.checkedEvents} events)` : `BROKEN at seq ${custodyVerification.brokenAtSeq} — ${custodyVerification.reason}`
+    : custodyError ? `UNAVAILABLE — ${custodyError}` : 'COMPUTING SHA-256 chain';
   const traceAudit = useMemo(() => activeCase ? auditTraceCorrectness(activeCase) : null, [activeCase]);
   const crossChainReport = useMemo(() => activeCase ? analyzeCaseCrossChainActivity(activeCase.nodes || [], activeCase.links || []) : null, [activeCase]);
   const reportReceiverAddress = activeCase?.nodes?.find(n => n.type === 'receiver')?.details?.address;
   const endpointProfile = useEndpointProfile(reportReceiverAddress, true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCustodyState(null);
+    setCustodyError(null);
+    Promise.resolve().then(async () => {
+      const chain = await buildChainOfCustody(activeCase);
+      const verification = await verifyChainOfCustody(chain.events);
+      if (!cancelled) setCustodyState({ chain, verification });
+    }).catch(error => {
+      if (!cancelled) {
+        console.error('[report] Failed to compute custody digest:', error);
+        setCustodyError(error.message);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [activeCase]);
 
   useEffect(() => {
     if (!activeCase) return undefined;
@@ -210,6 +237,7 @@ export default function ReportGenerator() {
     return `# NARCOTICS CONTROL BUREAU (NCB) â€” FORENSIC REPORT
 **Issuing Zonal Unit:** ${bureauZone}  
 **Classification:** ${watermark}  
+**Trace status:** ${activeCase.traceType === 'SIMULATED_ESTIMATE' ? 'SIMULATED ESTIMATE — NOT ON-CHAIN EVIDENCE' : activeCase.traceType === 'MANUAL_HYPOTHESIS' ? 'USER-SUPPLIED HYPOTHESIS — NOT VERIFIED' : 'Observed trace data; review source provenance and completeness'}<br>
 **Case Title:** ${activeCase.title}  
 **Case Ref:** ${getRefCode()}-${activeCase.id.toUpperCase()}  
 **Date:** ${new Date().toISOString().split('T')[0]}  
@@ -222,10 +250,27 @@ export default function ReportGenerator() {
 - **Starting wallet:** ${activeCase.suspectName}
 - **Currency:** ${activeCase.currency}
 - **Amount traced:** ${suspectNode?.balance || 'N/A'} (â‰ˆ ${fiatVal.formattedUsd} / ${fiatVal.formattedInr})
-- **Risk score:** ${activeCase.riskScore}%
+- **Risk score:** ${activeCase.riskScore == null ? 'Not assessed (insufficient evidence)' : `${activeCase.riskScore}%`}
+
+## Trace completeness
+- Halt reason: ${activeCase.traceMeta?.haltReason || 'Configured depth reached or no further branches'}
+- Recorded nodes/links: ${activeCase.traceMeta?.stats?.nodeCount ?? activeCase.nodes?.length ?? 0}/${activeCase.traceMeta?.stats?.linkCount ?? activeCase.links?.length ?? 0}
+- Omitted nodes/links: ${activeCase.traceMeta?.stats?.omittedNodeCount ?? 0}/${activeCase.traceMeta?.stats?.omittedLinkCount ?? 0}
+- Pruned branches: ${activeCase.traceMeta?.stats?.prunedBranches?.length ?? 0}
+${(activeCase.traceMeta?.warnings || []).map(warning => `- Warning: ${warning}`).join('\n')}
+
+## Data collection manifest
+${activeCase.traceMeta?.collection
+    ? `- Completed: ${activeCase.traceMeta.collection.completedAt}; requested depth: ${activeCase.traceMeta.collection.requestedDepth}; each response digest is over canonicalized parsed JSON, not the original wire bytes.\n${(activeCase.traceMeta.collection.sourceManifest || []).map(entry => `- ${entry.txid}: block ${entry.blockHeight ?? 'unconfirmed/unknown'}, hash ${entry.blockHash || 'not supplied by provider'}; transaction provider ${entry.transactionResponse?.provider || 'unknown'}${entry.transactionResponse?.cacheHit ? ' (cached)' : ''}, digest ${entry.transactionResponse?.canonicalResponseSha256 || 'unavailable'}; outspends provider ${entry.outspendsResponse?.provider || 'unknown'}${entry.outspendsResponse?.cacheHit ? ' (cached)' : ''}, digest ${entry.outspendsResponse?.canonicalResponseSha256 || 'unavailable'}`).join('\n')}`
+    : '- No per-response source manifest recorded.'}
 
 ## 2. Transaction steps
 ${(activeCase.links || []).map((link, i) => `${i + 1}. \`${link.source}\` âž” \`${link.target}\` | **${link.value}** (${link.timestamp || 'On-chain'})`).join('\n')}
+
+## Address history scan scope
+${activeCase.traceMeta?.addressHistoryScan
+    ? `- Pages scanned: ${activeCase.traceMeta.addressHistoryScan.pagesScanned}; transactions scanned: ${activeCase.traceMeta.addressHistoryScan.transactionsScanned}; full history scan: ${activeCase.traceMeta.addressHistoryScan.complete ? 'yes' : 'no'}${activeCase.traceMeta.addressHistoryScan.incompleteReason ? `; note: ${activeCase.traceMeta.addressHistoryScan.incompleteReason}` : ''}`
+    : '- Not applicable or not recorded.'}
 
 ## 3. End receiver
 - **Endpoint:** ${receiverNode?.entityName || 'Unresolved'}
@@ -244,9 +289,9 @@ ${(narrative?.findings || []).map(f => `- ${f}`).join('\n')}
 **Limits:**
 ${(narrative?.limitations || []).map(l => `- ${l}`).join('\n')}
 
-## 6. Transfer event sequence (prototype tamper-evident hash chain)
-- Transfers sealed: ${custody.eventCount} Â· Verification: ${custodyVerification.valid ? `INTACT (${custodyVerification.checkedEvents} events)` : `BROKEN at seq ${custodyVerification.brokenAtSeq} â€” ${custodyVerification.reason}`}
-- Terminal event digest (non-cryptographic prototype hash): \`${custody.terminalHash || 'N/A'}\`
+## 6. Transfer event sequence (SHA-256 digest chain; not externally anchored)
+- Transfers sealed: ${custody.eventCount} Â· Verification: ${custodyStatusLabel}
+- Terminal event digest (SHA-256; no external signature or trusted timestamp): \`${custody.terminalHash || 'N/A'}\`
 ${custody.gaps.length > 0 ? custody.gaps.map(g => `- Gap after seq ${g.afterSeq} [${g.kind}]: ${g.note}`).join('\n') : '- No custody gaps flagged.'}
 
 ## 7. Internal consistency checks (not proof of path accuracy or ownership)
@@ -434,7 +479,15 @@ ${investigatorNotes}
                 </div>
                 <div>
                   <span style={{ color: '#999', display: 'block', fontSize: '0.74rem' }}>Risk</span>
-                  <strong style={{ color: '#1a1a1a' }}>{activeCase.riskScore}%</strong>
+                  <strong style={{ color: '#1a1a1a' }}>{activeCase.riskScore == null ? 'Not assessed' : `${activeCase.riskScore}%`}</strong>
+                </div>
+                <div>
+                  <span style={{ color: '#999', display: 'block', fontSize: '0.74rem' }}>Trace status</span>
+                  <strong style={{ color: '#1a1a1a' }}>
+                    {activeCase.traceType === 'SIMULATED_ESTIMATE' ? 'Simulated — not on-chain evidence'
+                      : activeCase.traceType === 'MANUAL_HYPOTHESIS' ? 'User-supplied — not verified'
+                        : 'Observed trace — provenance review required'}
+                  </strong>
                 </div>
               </div>
 
@@ -559,7 +612,7 @@ ${investigatorNotes}
               {custody.eventCount > 0 && (
                 <div style={{ position: 'relative', zIndex: 1 }}>
                   <h4 style={{ fontSize: '0.82rem', fontWeight: 600, color: '#1a1a1a', marginBottom: '0.4rem' }}>
-                    Chain of custody Â· {custodyVerification.valid ? `intact (${custodyVerification.checkedEvents})` : `broken at ${custodyVerification.brokenAtSeq}`}
+                    Event digest chain · {custodyStatusLabel}
                   </h4>
                   <table style={{ width: '100%', fontSize: '0.76rem', borderCollapse: 'collapse' }}>
                     <thead>
@@ -584,6 +637,9 @@ ${investigatorNotes}
                   <p className="mono-addr" style={{ fontSize: '0.7rem', color: '#999', marginTop: '0.35rem', wordBreak: 'break-all' }}>
                     {custody.terminalHash}
                     {custody.gaps.length > 0 && ` Â· ${custody.gaps.map(g => g.note).join(' ')}`}
+                  </p>
+                  <p style={{ fontSize: '0.72rem', color: '#777' }}>
+                    SHA-256 detects changes to this event sequence; it is not signed or externally anchored and does not prove source authenticity or legal custody.
                   </p>
                 </div>
               )}

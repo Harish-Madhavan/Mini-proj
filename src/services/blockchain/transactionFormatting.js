@@ -142,12 +142,12 @@ function classifyHistoricalOutput({ tx, output, outspend, isSpent, value, script
   if (!isSpent) {
     return classifiedNode({
       nodeType: 'receiver',
-      label: 'End receiver (early network)',
-      entityName: 'Early network wallet',
+      label: 'Unspent output (early network)',
+      entityName: 'Unspent output; owner unknown',
       kycStatus: 'HISTORICAL UNSPENT FUNDS',
-      ipLog: 'Early Bitcoin user',
-      riskReason: `Early Bitcoin era output holding unspent funds (${scriptStd}). Direct transfer between people.`,
-      confidence: 0.85,
+      ipLog: 'Historical chain data only',
+      riskReason: `Early Bitcoin era output remains unspent (${scriptStd}); chain data does not identify its owner or purpose.`,
+      confidence: 0.5,
     });
   }
   // Era-independent identity: funder addresses OR bare pubkeys (2009-era
@@ -156,40 +156,31 @@ function classifyHistoricalOutput({ tx, output, outspend, isSpent, value, script
   const histOutKey = getIdentityKey(output);
   const histValueOutputs = (tx.vout || []).filter(o => (o.value || 0) > 0);
   const histIsSelf = !!histOutKey && histInputKeys.has(histOutKey);
-  const histIsSoleFresh = !histIsSelf && value > 0 && histValueOutputs.length === 1 && histValueOutputs[0] === output;
-  // Dwell behavior from spender heights: fast sweep vs dwelled payment.
-  // A sole fresh output is payment BY CONSTRUCTION (no change can exist
-  // alongside it) and outranks dwell: e.g. the May-2010 10,000 BTC pizza
-  // purchase (131 inputs, one fresh output, spent 1 block later) is a
-  // payment despite the 1-block dwell that would otherwise read as a
-  // change sweep. Self-transfer still outranks everything (change by
-  // construction).
+  const histIsSoleValueOutput = value > 0 && histValueOutputs.length === 1 && histValueOutputs[0] === output;
+  // Dwell and input-identity patterns are clues, not proof of intent or ownership.
   const histDwell = getSpendDwellBlocks(tx, outspend);
-  const histIsQuickSweep = !histIsSelf && !histIsSoleFresh && histDwell != null && histDwell <= QUICK_SPEND_BLOCKS;
-  const histIsDwelled = !histIsSelf && !histIsSoleFresh && histDwell != null && histDwell >= LONG_DWELL_BLOCKS;
+  const histIsQuickSweep = !histIsSelf && !histIsSoleValueOutput && histDwell != null && histDwell <= QUICK_SPEND_BLOCKS;
+  const histIsDwelled = !histIsSelf && !histIsSoleValueOutput && histDwell != null && histDwell >= LONG_DWELL_BLOCKS;
   const histVerdict = histIsSelf ? 'change'
-    : histIsSoleFresh ? 'payment'
     : histIsQuickSweep ? 'change'
     : histIsDwelled ? 'payment' : null;
   if (histVerdict) {
     const histIsChange = histVerdict === 'change';
-    const histScore = histIsSelf ? -4.0 : histIsSoleFresh ? 4.0 : histIsChange ? -1.5 : 1.5;
-    const histConf = (histIsSelf || histIsSoleFresh) ? 0.85 : 0.65;
+    const histScore = histIsSelf ? -2.0 : histIsChange ? -1.5 : 1.5;
+    const histConf = histIsSelf ? 0.55 : 0.65;
     const histWhy = histIsSelf
-      ? `Output reuses a funder key (Block #${blockHeight || 'early'}) â€” self-consolidation, not a payment.`
-      : histIsSoleFresh
-        ? `Sole output to a fresh identity (${valBtc} BTC, Block #${blockHeight || 'early'}) â€” payment by construction, no change exists.`
-        : histIsChange
+      ? `Output reuses an input identity (${valBtc} BTC, Block #${blockHeight || 'early'}); this is a change-leaning clue, not proof of ownership.`
+      : histIsChange
           ? `Spent ${histDwell} blocks after confirmation â€” fast change sweep (Block #${blockHeight || 'early'}).`
           : `Dwelled ${histDwell} blocks before moving â€” recipient holding, not a change sweep (Block #${blockHeight || 'early'}).`;
     return classifiedNode({
       nodeType: 'hop',
       label: histIsChange
-        ? (histIsSelf ? 'Change (early network)' : 'Change step (early network)')
-        : 'Payment (early network)',
-      entityName: histIsChange ? 'Early change' : 'Early payment receiver',
-      kycStatus: histIsChange ? 'HISTORICAL CHANGE' : 'HISTORICAL PAYMENT',
-      ipLog: 'Early Bitcoin user',
+        ? (histIsSelf ? 'Possible change (early network)' : 'Possible change step (early network)')
+        : 'Possible payment (early network)',
+      entityName: histIsChange ? 'Early output; role uncertain' : 'Early output; owner unknown',
+      kycStatus: histIsChange ? 'HISTORICAL CHANGE CANDIDATE' : 'HISTORICAL PAYMENT CANDIDATE',
+      ipLog: 'Historical chain data only',
       riskReason: histWhy,
       confidence: histConf,
       extra: {
@@ -207,12 +198,12 @@ function classifyHistoricalOutput({ tx, output, outspend, isSpent, value, script
   }
   return classifiedNode({
     nodeType: 'hop',
-    label: 'Pass-through (early network)',
-    entityName: 'Early network transfer',
+    label: 'Unclassified output (early network)',
+    entityName: 'Early output; owner and role unknown',
     kycStatus: 'HISTORICAL DIRECT TRANSFER',
-    ipLog: 'Early Bitcoin user',
-    riskReason: `Early direct on-chain transfer (Block #${blockHeight || 'early'}). Plain historical flow.`,
-    confidence: 0.9,
+    ipLog: 'Historical chain data only',
+    riskReason: `Early direct on-chain transfer (Block #${blockHeight || 'early'}); available chain data does not establish payment or change.`,
+    confidence: 0.5,
   });
 }
 
@@ -250,11 +241,9 @@ function classifyOutputShared({
   const blockTime = tx.status?.block_time;
   const isHistoricalEra = (blockHeight && blockHeight < 350000) || (blockTime && blockTime < 1400000000) || addr.includes('P2PK') || output.scriptpubkey_type === 'p2pk';
 
-  // Historical era has own simplified rules, but address identity is
-  // era-independent accounting: a spent output back to a funder address is
-  // change, and a sole fresh output is a payment (e.g. the May-2010 10,000 BTC
-  // pizza purchase: 131 funder inputs, one fresh round output). Flattening
-  // both to a generic transit hop destroys that decisive signal.
+  // Historical-era outputs use the same cautious evidence standard: a
+  // matching input identity is only a clue, and a fresh output is not proof
+  // that an external recipient controls it.
   if (isHistoricalEra) {
     return classifyHistoricalOutput({ tx, output, outspend, isSpent, value, scriptStd, valBtc, blockHeight });
   }
@@ -296,7 +285,6 @@ function classifyOutputShared({
     inputScriptTypes,
     outspends,
     seenAddresses,
-    outputId: addr,
     addressMeta,
   });
 
@@ -465,5 +453,3 @@ export function formatBlockstreamTx(tx, outspends = [], addressMeta = null) {
 
   return { nodes, links };
 }
-
-

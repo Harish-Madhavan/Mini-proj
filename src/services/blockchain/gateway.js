@@ -1,5 +1,7 @@
 ﻿import { API_CONFIG, ADDRESS_TRACE_CONFIG } from '../../constants/config';
+import { hashEvidencePayload } from '../../utils/evidenceIntegrity';
 export const apiCache = new Map();
+const lastResponseProvenance = new Map();
 
 let cacheStats = {
   hits: 0,
@@ -18,6 +20,7 @@ export function getCacheStats() {
 
 export function clearCache() {
   apiCache.clear();
+  lastResponseProvenance.clear();
   cacheStats = { hits: 0, misses: 0, evictions: 0 };
 }
 
@@ -36,10 +39,15 @@ function getFromCache(cacheKey) {
   apiCache.delete(cacheKey);
   apiCache.set(cacheKey, cached);
   cacheStats.hits++;
+  lastResponseProvenance.set(cacheKey, {
+    ...(cached.provenance || {}),
+    cacheHit: true,
+    retrievedAt: new Date().toISOString(),
+  });
   return cached.data;
 }
 
-function putInCache(cacheKey, data) {
+function putInCache(cacheKey, data, provenance) {
   if (apiCache.has(cacheKey)) {
     apiCache.delete(cacheKey);
   } else if (apiCache.size >= API_CONFIG.MAX_CACHE_SIZE) {
@@ -49,7 +57,13 @@ function putInCache(cacheKey, data) {
       cacheStats.evictions++;
     }
   }
-  apiCache.set(cacheKey, { timestamp: Date.now(), data });
+  apiCache.set(cacheKey, { timestamp: Date.now(), data, provenance });
+  lastResponseProvenance.set(cacheKey, { ...provenance, cacheHit: false });
+}
+
+export function getResponseProvenance(endpoint) {
+  const provenance = lastResponseProvenance.get(endpoint);
+  return provenance ? { ...provenance } : null;
 }
 
 export class RateLimitError extends Error {
@@ -165,6 +179,12 @@ async function fetchWithFallbackAndCache(endpoint) {
       const response = await fetchWithTimeout(url);
       if (response.ok) {
         const data = await response.json();
+        const provenance = {
+          provider: gw.name,
+          fetchedAt: new Date().toISOString(),
+          canonicalResponseSha256: await hashEvidencePayload(data),
+          cacheHit: false,
+        };
         if (gw.consecutiveFailures > 0 || gw.cooldownUntil > 0) {
           emitGatewayEvent({
             type: 'RECOVERED',
@@ -175,7 +195,7 @@ async function fetchWithFallbackAndCache(endpoint) {
         gw.status = 'HEALTHY';
         gw.cooldownUntil = 0;
         gw.consecutiveFailures = 0;
-        putInCache(cacheKey, data);
+        putInCache(cacheKey, data, provenance);
         return data;
       } else if (response.status === 429) {
         gw.status = 'RATE_LIMITED';
@@ -308,21 +328,36 @@ export async function findSignificantAddressTx(address, opts = {}) {
   let scanned = firstPage.length;
   let pages = 1;
   let lastTxid = firstPage[firstPage.length - 1].txid;
+  let historyComplete = firstPage.length < 25;
+  let incompleteReason = null;
 
   while (best && best.volumeSats < minSats && pages < maxPages) {
     let page = null;
     try {
       page = await fetchAddressTxPage(address, lastTxid);
-    } catch {
+    } catch (error) {
+      incompleteReason = `Older history page could not be fetched: ${error.message}`;
       break;
     }
-    if (!page || page.length === 0) break;
+    if (!page || page.length === 0) {
+      historyComplete = true;
+      break;
+    }
     pages += 1;
     scanned += page.length;
     const candidate = pickSignificantTx(page, address);
     if (candidate && candidate.volumeSats > best.volumeSats) best = candidate;
     lastTxid = page[page.length - 1].txid;
-    if (page.length < 25) break;
+    if (page.length < 25) {
+      historyComplete = true;
+      break;
+    }
+  }
+
+  if (!historyComplete && !incompleteReason && pages >= maxPages && best?.volumeSats < minSats) {
+    incompleteReason = `Address history scan reached the ${maxPages}-page limit before finding a significant transaction.`;
+  } else if (!historyComplete && !incompleteReason) {
+    incompleteReason = 'History scan stopped after finding a significant transaction; older history was not exhaustively scanned.';
   }
 
   return {
@@ -332,6 +367,8 @@ export async function findSignificantAddressTx(address, opts = {}) {
     scanned,
     pages,
     significant: (best?.volumeSats || 0) >= minSats,
+    historyComplete,
+    incompleteReason,
   };
 }
 
@@ -416,5 +453,3 @@ export function classifyEndpointActivity(summary) {
   if (txCount >= 10 || fundedCount >= 5) return { ...base, profile: 'ACTIVE_REUSED_WALLET' };
   return { ...base, profile: 'DORMANT_HOLDER' };
 }
-
-

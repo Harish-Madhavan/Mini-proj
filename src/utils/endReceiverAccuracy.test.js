@@ -42,30 +42,31 @@ function scorePizza(outputAddr, { seen = null, blockTime = PIZZA_TIME } = {}) {
   });
 }
 
-describe('end-receiver accuracy (pizza-tx grounded)', () => {
-  it('classifies the pizza purchase output as a high-confidence payment', () => {
+describe('historical single-output inference safeguards (pizza-shaped fixture)', () => {
+  it('does not infer payment from a fresh sole output without corroborating evidence', () => {
     const r = scorePizza(PIZZA_RECIPIENT);
-    expect(r.isPaymentCandidate).toBe(true);
+    expect(r.isPaymentCandidate).toBe(false);
     expect(r.isChangeCandidate).toBe(false);
-    expect(r.breakdown.identityScore).toBe(4);
-    expect(r.confidence).toBeGreaterThanOrEqual(0.8);
+    expect(r.breakdown.identityScore).toBe(0);
+    expect(r.confidence).toBeLessThan(0.6);
   });
 
-  it('classifies a single output back to the funder as change', () => {
+  it('treats a single output back to the funder as a change-leaning clue, not proof', () => {
     const r = scorePizza(PIZZA_FUNDER);
     expect(r.isChangeCandidate).toBe(true);
     expect(r.isPaymentCandidate).toBe(false);
-    expect(r.breakdown.identityScore).toBe(-4);
-    expect(r.confidence).toBeGreaterThanOrEqual(0.8);
+    expect(r.breakdown.identityScore).toBe(-2);
+    expect(r.confidence).toBeLessThan(0.8);
   });
 
-  it('tempers single-output confidence for previously-seen addresses', () => {
+  it('uses address reuse as a moderate payment-leaning clue for a sole output', () => {
     const seen = new Set([PIZZA_FUNDER, '1ReusedWalletAddrXXX']);
     const r = scorePizza('1ReusedWalletAddrXXX', { seen, blockTime: 1700000000 });
     expect(r.isPaymentCandidate).toBe(true);
-    expect(r.breakdown.identityScore).toBe(1.5);
-    expect(r.confidence).toBeLessThan(0.85);
-    expect(r.confidence).toBeGreaterThanOrEqual(0.6);
+    expect(r.breakdown.reuseScore).toBe(1.5);
+    expect(r.breakdown.identityScore).toBe(0);
+    expect(r.confidence).toBeLessThan(0.6);
+    expect(r.confidence).toBeGreaterThan(0);
   });
 
   it('gates the fee heuristic to the post-2015 fee market', () => {
@@ -250,7 +251,7 @@ describe('end-receiver accuracy (first-tx grounded)', () => {
     expect(r.breakdown.scriptScore).toBe(-3);
   });
 
-  it('splits the live-verified ransom peel (0.04% peel vs 99.96% change)', () => {
+  it('splits the ransom-shaped peel (0.04% peel vs 99.96% change)', () => {
     // 2b22df65…: 9.028 BTC in, 329,381-sat peel + 9.024 BTC remainder.
     // Change swept 8 blocks later; peel dwelled 4,001 blocks.
     const tx = {

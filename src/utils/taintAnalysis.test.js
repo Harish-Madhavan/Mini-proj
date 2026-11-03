@@ -121,6 +121,22 @@ describe('taintAnalysis', () => {
     expect([...unseeded.values()].every(value => value === 0)).toBe(true);
   });
 
+  it('converges on a long reverse-ordered chain beyond the old pass ceiling', () => {
+    const length = 120;
+    const chainNodes = Array.from({ length }, (_, index) => ({
+      id: `n${length - index - 1}`,
+      type: index === length - 1 ? 'suspect' : 'hop',
+    }));
+    const chainLinks = Array.from({ length: length - 1 }, (_, index) => ({
+      source: `n${index}`,
+      target: `n${index + 1}`,
+      value: '1 BTC',
+    })).reverse();
+    const result = calculateTaintMap(chainNodes, chainLinks, ['n0'], 'proportionate');
+    expect(result.converged).toBe(true);
+    expect(result.get(`n${length - 1}`)).toBe(1);
+  });
+
   it('produces tier labels', () => {
     expect(taintTier(0.9).label).toBe('High');
     expect(taintTier(0.5).label).toBe('Medium');

@@ -1,4 +1,4 @@
-﻿import { fetchTx, fetchOutspends, fetchAddressSummaries } from './gateway';
+import { fetchTx, fetchOutspends, fetchAddressSummaries, getResponseProvenance } from './gateway';
 import {
   getAddressOrIdentifier,
   getScriptTypeFromAddress,
@@ -25,20 +25,53 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
   const seenAddresses = new Set();
   const pendingHeuristics = [];
   const warnings = [];
+  const omittedNodeIds = [];
+  const prunedBranches = [];
+  const sourceManifest = [];
   let haltReason = null;
+  let nodeLimitReached = false;
+  let omittedLinkCount = 0;
   let totalFetched = 0;
 
   // Dedup helpers
   const nodeIds = new Set();
+  function recordOmittedNode(nodeId) {
+    haltReason = 'NODE_LIMIT';
+    if (!omittedNodeIds.includes(nodeId)) omittedNodeIds.push(nodeId);
+    if (!warnings.some(w => w.startsWith(`Total node limit ${TRACE_CONFIG.MAX_NODES}`))) {
+      warnings.push(`Total node limit ${TRACE_CONFIG.MAX_NODES} reached; additional nodes and dependent edges are omitted.`);
+    }
+  }
   function addNode(node) {
-    if (!nodeIds.has(node.id)) { nodeIds.add(node.id); nodes.push(node); }
+    if (nodeIds.has(node.id)) return true;
+    if (nodeIds.size >= TRACE_CONFIG.MAX_NODES) {
+      nodeLimitReached = true;
+      recordOmittedNode(node.id);
+      return false;
+    }
+    nodeIds.add(node.id);
+    nodes.push(node);
+    return true;
   }
   const linkKeys = new Set();
-  function addLink(src, tgt, value, ts, tx = null) {
-    const k = `${src}->${tgt}::${value}`;
+  function addLink(src, tgt, value, ts, tx = null, provenance = {}) {
+    if (!nodeIds.has(src) || !nodeIds.has(tgt)) {
+      omittedLinkCount++;
+      return;
+    }
+    const k = `${src}->${tgt}::${value}::${provenance.txid || tx?.txid || ''}::${provenance.outputIndex ?? ''}::${provenance.inputOutpoint || ''}`;
     if (!linkKeys.has(k)) {
       linkKeys.add(k);
-      links.push({ source: src, target: tgt, value, timestamp: ts, txid: tx?.txid || null, blockTime: tx?.status?.block_time || null });
+      links.push({
+        source: src,
+        target: tgt,
+        value,
+        timestamp: ts,
+        txid: provenance.txid || tx?.txid || null,
+        blockTime: provenance.blockTime || tx?.status?.block_time || null,
+        blockHeight: provenance.blockHeight || tx?.status?.block_height || null,
+        ...provenance,
+      });
     }
   }
 
@@ -58,7 +91,16 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
         try {
           const [tx, outspends] = await Promise.all([fetchTx(id), fetchOutspends(id)]);
           totalFetched++;
-          return { id, tx, outspends, error: null };
+          return {
+            id,
+            tx,
+            outspends,
+            error: null,
+            sources: {
+              transaction: getResponseProvenance(`/tx/${id}`),
+              outspends: getResponseProvenance(`/tx/${id}/outspends`),
+            },
+          };
         } catch (e) {
           return { id, tx: null, outspends: null, error: e.message };
         }
@@ -73,17 +115,17 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
     // (`in_*`) never expand, so letting a heavy fan-in root (e.g. a 592-in
     // seizure sweep = ~400 leaves) spend the whole budget would truncate the
     // trace before the spent branches are ever followed.
-    let budgetNodes = 0;
-    for (const id of nodeIds) {
-      if (!id.startsWith('in_')) budgetNodes++;
-    }
-    if (budgetNodes > TRACE_CONFIG.MAX_NODES) {
-      warnings.push(`Node limit ${TRACE_CONFIG.MAX_NODES} reached â€” truncating trace`);
+    if (nodeLimitReached || nodeIds.size >= TRACE_CONFIG.MAX_NODES) {
       haltReason = 'NODE_LIMIT';
       break;
     }
     if (frontier.length > TRACE_CONFIG.MAX_BRANCHING * 2) {
-      warnings.push(`Branching factor ${frontier.length} exceeds limit â€” pruning weakest branches`);
+      const pruned = frontier
+        .slice()
+        .sort((a, b) => (a.branchValueSats || 0) - (b.branchValueSats || 0))
+        .slice(0, frontier.length - TRACE_CONFIG.MAX_BRANCHING * 2);
+      prunedBranches.push(...pruned.map(({ txId, branchValueSats }) => ({ txId, valueSats: branchValueSats || 0 })));
+      warnings.push(`Branching limit pruned ${pruned.length} branch(es): ${pruned.map(b => `${b.txId} (${b.branchValueSats || 0} sats)`).join(', ')}`);
       // Prune lowest-value branches first so the dominant money trail survives
       frontier = [...frontier]
         .sort((a, b) => (b.branchValueSats || 0) - (a.branchValueSats || 0))
@@ -103,6 +145,17 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
       break;
     }
     depthReached = Math.max(depthReached, depth);
+
+    sourceManifest.push(...txResults
+      .filter(result => result.tx)
+      .map(result => ({
+        txid: result.id,
+        blockHeight: result.tx.status?.block_height ?? null,
+        blockHash: result.tx.status?.block_hash ?? null,
+        blockTime: result.tx.status?.block_time ?? null,
+        transactionResponse: result.sources?.transaction || null,
+        outspendsResponse: result.sources?.outspends || null,
+      })));
 
     const txMap = new Map(txResults.map(r => [r.id, r]));
     const nextFrontier = [];
@@ -149,13 +202,25 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
       }));
 
       if (item.parentOutNodeId) {
-        addLink(item.parentOutNodeId, txNodeId, item.parentValue || '0 BTC', 'Forwarded');
+        addLink(item.parentOutNodeId, txNodeId, item.parentValue || '0 BTC', 'Forwarded', tx, {
+          previousTxid: item.parentTxId || null,
+          outputIndex: item.parentOutputIndex ?? null,
+          spendingTxid: item.txId,
+        });
       }
 
-      // Inputs (only for depth 0 to avoid duplication)
+      // Input leaves are bounded too, but leave enough room for a continuation
+      // transaction and its first output when this branch can still expand.
       const inputScriptTypes = [];
       if (depth === 0) {
+        const remainingCapacity = Math.max(0, TRACE_CONFIG.MAX_NODES - nodeIds.size);
+        const continuationReserve = depth < (item.limit ?? maxDepth) ? 2 : 0;
+        const outputReserve = Math.min(
+          (tx.vout || []).length,
+          Math.max(0, remainingCapacity - continuationReserve)
+        );
         for (const input of (tx.vin || [])) {
+          if (nodeLimitReached) break;
           const addr = input.prevout ? getAddressOrIdentifier(input.prevout) : (input.is_coinbase ? 'Coinbase (Mining Reward)' : null);
           const scriptStd = input.prevout ? getScriptTypeFromAddress(addr, input.prevout?.scriptpubkey_type) : 'Coinbase';
           if (scriptStd) inputScriptTypes.push(scriptStd);
@@ -164,8 +229,15 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
             const sat = input.prevout?.value || 0;
             const valBtc = satsToBtc(sat);
             const inputNodeId = `in_${addr}`;
+            if (nodeIds.size >= TRACE_CONFIG.MAX_NODES - outputReserve - continuationReserve) {
+              recordOmittedNode(inputNodeId);
+              omittedLinkCount++;
+              continue;
+            }
             addNode(buildInputNode({ addr, scriptStd, satoshis: sat }));
-            addLink(inputNodeId, txNodeId, `${valBtc} BTC`, 'On-chain');
+            addLink(inputNodeId, txNodeId, `${valBtc} BTC`, 'On-chain', tx, {
+              inputOutpoint: input.txid && Number.isInteger(input.vout) ? `${input.txid}:${input.vout}` : null,
+            });
           }
         }
       } else {
@@ -183,11 +255,12 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
       // Pass 1: classify everything without chain data.
       const pending = [];
       for (let i = 0; i < (tx.vout || []).length; i++) {
+        if (nodeLimitReached) break;
         const output = tx.vout[i];
         const prep = prepareOutput({ tx, txid: item.txId, output, outputIndex: i, outspends, inputScriptTypes, seenAddresses, isCoinJoin });
         if (prep.opReturn) {
-          addNode(buildOpReturnNode({ txId: item.txId, index: i, payload: prep.opReturn }));
-          addLink(txNodeId, `op_${item.txId}_${i}`, '0 BTC Data', 'Embedded');
+          if (!addNode(buildOpReturnNode({ txId: item.txId, index: i, payload: prep.opReturn }))) break;
+          addLink(txNodeId, `op_${item.txId}_${i}`, '0 BTC Data', 'Embedded', tx, { txid: item.txId, outputIndex: i });
           continue;
         }
         pending.push({ output, index: i, ...prep });
@@ -216,6 +289,7 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
       }
 
       for (const p of pending) {
+        if (nodeLimitReached) break;
         const { addr, valBtc, outNodeId, scriptStd, cls, output, index: i } = p;
         const outspend = outspends[i] || {};
         const isSpent = outspend.spent === true;
@@ -224,8 +298,8 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
         if (cls.heuristics) pendingHeuristics.push(cls.heuristics);
 
         const lastActive = cls.kycStatus?.includes('UNSPENT') ? 'Holds unspent funds' : cls.kycStatus?.includes('MIXED') ? 'Mixed funds' : 'On chain';
-        addNode(buildOutputNode({ outNodeId, addr, valBtc, scriptStd, cls, tx, lastActive, outspendSpent: outspend.spent }));
-        addLink(txNodeId, outNodeId, `${valBtc} BTC`, tx.status?.block_time ? new Date(tx.status.block_time*1000).toLocaleDateString() : 'On-chain', tx);
+        if (!addNode(buildOutputNode({ outNodeId, addr, valBtc, scriptStd, cls, tx, lastActive, outspendSpent: outspend.spent }))) break;
+        addLink(txNodeId, outNodeId, `${valBtc} BTC`, tx.status?.block_time ? new Date(tx.status.block_time*1000).toLocaleDateString() : 'On-chain', tx, { txid: item.txId, outputIndex: i });
         seenAddresses.add(addr);
 
         // Queue next hop only if: spent, not dust, not CoinJoin, not self-loop, and under depth
@@ -243,7 +317,17 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
             (item.limit ?? maxDepth) + (isHighConfChange ? 1 : 0)
           );
           // Carry branch value so over-wide frontiers prune dust first, not the money trail
-          nextFrontier.push({ txId: spendingTxId, depth: depth + 1, parentOutNodeId: outNodeId, parentValue: `${valBtc} BTC`, branchValueSats: output.value || 0, _isChange: isHighConfChange, limit: childLimit });
+          nextFrontier.push({
+            txId: spendingTxId,
+            depth: depth + 1,
+            parentOutNodeId: outNodeId,
+            parentTxId: item.txId,
+            parentOutputIndex: i,
+            parentValue: `${valBtc} BTC`,
+            branchValueSats: output.value || 0,
+            _isChange: isHighConfChange,
+            limit: childLimit,
+          });
         } else if (isDustOutput(output.value)) {
           // ignore
         }
@@ -256,7 +340,13 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
       if (a._isChange !== b._isChange) return a._isChange ? -1 : 1;
       return (b.branchValueSats || 0) - (a.branchValueSats || 0);
     });
-    frontier = nextFrontier.slice(0, TRACE_CONFIG.MAX_BRANCHING * 3);
+    const frontierLimit = TRACE_CONFIG.MAX_BRANCHING * 3;
+    if (nextFrontier.length > frontierLimit) {
+      const pruned = nextFrontier.slice(frontierLimit);
+      prunedBranches.push(...pruned.map(({ txId, branchValueSats }) => ({ txId, valueSats: branchValueSats || 0 })));
+      warnings.push(`Frontier limit pruned ${pruned.length} branch(es): ${pruned.map(b => `${b.txId} (${b.branchValueSats || 0} sats)`).join(', ')}`);
+    }
+    frontier = nextFrontier.slice(0, frontierLimit);
   }
 
   // No scored hops (e.g. halted at a mixing root before any output was
@@ -271,10 +361,24 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
     verification,
     warnings,
     haltReason,
-    stats: { fetchedTxCount: totalFetched, nodeCount: nodes.length, linkCount: links.length, depthReached },
+    stats: {
+      fetchedTxCount: totalFetched,
+      nodeCount: nodes.length,
+      linkCount: links.length,
+      depthReached,
+      omittedNodeCount: omittedNodeIds.length,
+      omittedNodeIds,
+      omittedLinkCount,
+      prunedBranches,
+    },
+    collection: {
+      schemaVersion: 1,
+      completedAt: new Date().toISOString(),
+      requestedDepth: maxDepth,
+      sourceManifest,
+    },
   };
 
   // Attach meta to result for consumers; keep nodes/links backward compatible
   return { nodes, links, meta };
 }
-

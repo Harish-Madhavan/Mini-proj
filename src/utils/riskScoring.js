@@ -56,6 +56,8 @@ export function calculateForensicRiskScore(caseOrNodes, customWeights = {}) {
   // Sweep detection needs graph links; node-only callers (unit fixtures)
   // simply score no consolidation signal instead of crashing.
   const links = Array.isArray(caseOrNodes) ? [] : (caseOrNodes?.links || []);
+  const isSimulated = !Array.isArray(caseOrNodes) &&
+    ['SIMULATED_ESTIMATE', 'MANUAL_HYPOTHESIS'].includes(caseOrNodes?.traceType);
   const weights = sanitizeWeights(customWeights);
 
   const hasMixer = nodes.some(n => n.type === 'mixer');
@@ -85,9 +87,7 @@ export function calculateForensicRiskScore(caseOrNodes, customWeights = {}) {
     ? Math.min(10, hopCount * 2)
     : Math.min(40, hopCount * weights.hopWeight);
 
-  const destinationScore = isHistoricalEra
-    ? 5
-    : (isKycVerified ? 0 : 18);
+  const destinationScore = isHistoricalEra ? 5 : 0;
 
   const velocityScore = isHistoricalEra
     ? 5
@@ -129,7 +129,13 @@ export function calculateForensicRiskScore(caseOrNodes, customWeights = {}) {
     ? Math.min(25, baseScore + layeringScore + obfuscationScore)
     : baseScore + obfuscationScore + layeringScore + destinationScore + velocityScore + anomalyScore + consolidationScore + attributionScore - (isKycVerified ? weights.kycDiscountWeight : 0);
 
-  const calculatedRiskScore = Math.round(Math.min(99, Math.max(5, rawCalculatedScore)));
+  const hasRiskSignal = !isSimulated && (
+    isHistoricalEra || hasMixer || hasBridge || hopCount > 0 ||
+    anomalyScore > 0 || consolidationScore > 0 || attributionScore > 0
+  );
+  const calculatedRiskScore = hasRiskSignal
+    ? Math.round(Math.min(99, Math.max(5, rawCalculatedScore)))
+    : null;
 
   const threatBadge = getThreatBadge(calculatedRiskScore);
   const statutoryAction = getStatutoryLegalAction(calculatedRiskScore, isKycVerified, isHistoricalEra, {
@@ -155,6 +161,9 @@ export function calculateForensicRiskScore(caseOrNodes, customWeights = {}) {
 
   return {
     riskScore: calculatedRiskScore,
+    assessmentStatus: isSimulated
+      ? caseOrNodes.traceType === 'SIMULATED_ESTIMATE' ? 'SIMULATED' : 'USER_SUPPLIED'
+      : hasRiskSignal ? 'ASSESSED' : 'INSUFFICIENT_EVIDENCE',
     isHistoricalEra,
     hasMixer,
     hasBridge,
@@ -210,13 +219,22 @@ export function collectEntityHits(nodes = []) {
  * Generate threat severity badge styling & label.
  */
 export function getThreatBadge(score) {
+  if (!Number.isFinite(score)) {
+    return {
+      level: 'UNASSESSED',
+      label: 'Insufficient evidence',
+      color: '#94a3b8',
+      bg: 'rgba(148, 163, 184, 0.15)',
+      description: 'No risk score is assigned because the available case has no qualifying risk signal.'
+    };
+  }
   if (score < 35) {
     return {
       level: 'LOW',
       label: 'Low',
       color: '#10b981',
       bg: 'rgba(16, 185, 129, 0.15)',
-      description: 'Standard transaction structure without obfuscation signatures.'
+      description: 'No elevated signal was identified in the assessed data; this does not establish benign activity.'
     };
   }
   if (score < 70) {
@@ -353,47 +371,57 @@ export function evaluateThreatSignatures(nodes = [], context = {}) {
  */
 export function getStatutoryLegalAction(riskScore, isKycVerified = false, isHistoricalEra = false, signals = {}) {
   const { sweepImminent = false, hasSanctionedHit = false } = signals || {};
+  if (!Number.isFinite(riskScore) && !isHistoricalEra) {
+    return {
+      actionRequired: false,
+      urgency: 'NOT_ASSESSED',
+      recommendations: [
+        'Insufficient evidence for a risk-based action recommendation.',
+        'Obtain and independently verify transaction and attribution evidence before escalation.'
+      ]
+    };
+  }
   if (isHistoricalEra) {
     return {
       actionRequired: false,
       urgency: 'INFORMATIONAL',
       recommendations: [
-        "Historical clean peer-to-peer transaction.",
-        "No statutory freeze notice required."
+        "Historical-era chain data identified; historical timing alone does not establish purpose or ownership.",
+        "Review transaction provenance and case context before drawing conclusions."
       ]
     };
   }
 
   if (riskScore >= 70) {
     const recommendations = [
-      "Issue Section 67 NDPS Act statutory notice to destination exchange gateway.",
-      "Request immediate administrative freeze on target account and linked cash withdrawal rails.",
-      "Expand shared-spending cluster analysis across all co-spent input addresses."
+      "Priority analyst review: independently verify the trace, source data, and all material risk signals.",
+      "Do not infer ownership or wrongdoing from transaction patterns; seek independent attribution evidence.",
+      "If justified by independently verified evidence, consult counsel on applicable lawful process."
     ];
     if (sweepImminent) {
-      recommendations.push("Sweep hub at custodial output: freeze before the consolidated balance leaves the exchange.");
+      recommendations.push("Review the recent consolidation promptly; the destination is not established as a custodian or exchange.");
     }
     if (hasSanctionedHit) {
-      recommendations.push("Sanctioned-entity contact: file OFAC-referral memorandum alongside the Section 67 notice.");
+      recommendations.push("Review the exact identifier and sanctions source independently before considering a referral.");
     }
     return {
-      actionRequired: true,
-      urgency: 'CRITICAL_ACTION_REQUIRED',
+      actionRequired: false,
+      urgency: 'PRIORITY_ANALYST_REVIEW',
       recommendations
     };
   }
 
   if (riskScore >= 35) {
     const recommendations = [
-      "Deploy on-chain address monitoring for subsequent outgoing sweeps.",
-      "If a service attribution is independently established, request identity records through applicable lawful process."
+      "Analyst review is recommended; independently validate the observed transactions and the scope of the trace.",
+      "If service attribution is established from independent evidence, consult counsel on appropriate lawful process."
     ];
     if (sweepImminent) {
-      recommendations.push("Consolidation in progress: prioritize the sweep destination in the watchlist.");
+      recommendations.push("Review the consolidation pattern; it does not by itself establish a cash-out or service.");
     }
     return {
-      actionRequired: true,
-      urgency: 'MONITORING_RECOMMENDED',
+      actionRequired: false,
+      urgency: 'ANALYST_REVIEW',
       recommendations
     };
   }
@@ -402,8 +430,8 @@ export function getStatutoryLegalAction(riskScore, isKycVerified = false, isHist
     actionRequired: false,
     urgency: 'ROUTINE',
     recommendations: [
-      "Standard benign transaction flow.",
-      "Archive evidence file for audit trail."
+    "No elevated heuristic signal was identified; this is not a finding of benign activity.",
+    "Preserve the reviewed source data and record any limitations."
     ]
   };
 }

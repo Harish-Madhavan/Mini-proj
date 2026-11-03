@@ -11,7 +11,10 @@ const hasTemporalEvidence = link => {
   return typeof raw === 'string' && !['on-chain', 'settled', 'embedded', 'unknown'].includes(raw.trim().toLowerCase()) && Number.isFinite(Date.parse(raw));
 };
 
-function sourceStrength(link) {
+function sourceStrength(link, manifestEntry) {
+  if (manifestEntry?.transactionResponse?.canonicalResponseSha256) {
+    return 'Provider and canonical response digest recorded; independently verify the source and raw chain data';
+  }
   if (txReference(link) && hasTemporalEvidence(link)) return 'Transaction reference and time/block metadata recorded';
   if (txReference(link)) return 'Transaction reference recorded; corroborating time/block metadata unavailable';
   return 'Graph edge only; underlying transaction reference unavailable';
@@ -22,20 +25,32 @@ export function deriveEvidenceClaims(caseData) {
   if (!caseData) return [];
   const nodes = caseData.nodes || [];
   const generated = [];
+  const sourceByTxid = new Map(
+    (caseData.traceMeta?.collection?.sourceManifest || []).map(entry => [entry.txid, entry])
+  );
 
   (caseData.links || []).forEach((link, index) => {
     const source = nodeId(link.source);
     const target = nodeId(link.target);
     const txid = txReference(link);
+    const manifestEntry = txid ? sourceByTxid.get(txid) : null;
+    const outpoint = link.inputOutpoint ||
+      (link.previousTxid && Number.isInteger(link.outputIndex) ? `${link.previousTxid}:${link.outputIndex}` :
+        (txid && Number.isInteger(link.outputIndex) ? `${txid}:${link.outputIndex}` : null));
     generated.push({
       id: `onchain:${txid || `edge-${index}`}:${source}:${target}`,
       origin: 'derived',
       evidenceClass: txid ? 'on_chain_reference' : 'graph_record',
       classification: txid ? 'Transaction reference' : 'Graph flow record',
       statement: `Stored graph edge records value flow from ${source} to ${target}: ${link.value || 'value unavailable'}.`,
-      sourceReference: txid || `Graph link ${index + 1}`,
-      sourceStrength: sourceStrength(link),
+      sourceReference: outpoint || txid || `Graph link ${index + 1}`,
+      sourceStrength: sourceStrength(link, manifestEntry),
       observedAt: timeReference(link),
+      transactionId: txid,
+      outpoint,
+      blockHeight: link.blockHeight ?? link.block_height ?? null,
+      provider: manifestEntry?.transactionResponse?.provider || null,
+      canonicalResponseSha256: manifestEntry?.transactionResponse?.canonicalResponseSha256 || null,
       status: 'recorded',
       attributionWarning: 'This records the graph edge; it does not independently validate the underlying transaction or inferred path.'
     });

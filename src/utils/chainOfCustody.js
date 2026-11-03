@@ -8,17 +8,17 @@
  * deletion, or reordering of the evidence trail is mechanically detectable
  * via `verifyChainOfCustody`.
  *
- * NOTE: the digest here is a deterministic 64-bit non-cryptographic hash
- * (cyrb53) — sufficient to demonstrate tamper-evidence in this prototype. A
- * production deployment must swap `chainDigest` for SHA-256 (WebCrypto) and
- * anchor the terminal digest with a trusted timestamp (RFC 3161).
+ * The event chain uses SHA-256 through Web Crypto. It is not digitally signed
+ * or externally anchored, so it detects accidental changes but does not prove
+ * who created the events, source authenticity, or legal chain of custody.
  */
 
-import { parseBtcAmount, cyrb53Hex } from './forensicUtils';
+import { parseBtcAmount } from './forensicUtils';
+import { hashEvidencePayload } from './evidenceIntegrity';
 
-/** Tamper-evident event digest (canonical cyrb53 core). */
-export function chainDigest(input) {
-  return cyrb53Hex(typeof input === 'string' ? input : JSON.stringify(input));
+/** SHA-256 digest of an event payload; this digest is not externally anchored. */
+export async function chainDigest(input) {
+  return hashEvidencePayload(input);
 }
 
 const GENESIS_PREV_HASH = 'GENESIS';
@@ -27,7 +27,7 @@ const GENESIS_PREV_HASH = 'GENESIS';
  * Build the custody timeline for a case.
  * @returns {{ events: Array, eventCount: number, gaps: Array, terminalHash: string|null }}
  */
-export function buildChainOfCustody(caseObj) {
+export async function buildChainOfCustody(caseObj) {
   if (!caseObj || !Array.isArray(caseObj.nodes) || !Array.isArray(caseObj.links)) {
     return { events: [], eventCount: 0, gaps: [], terminalHash: null };
   }
@@ -54,7 +54,7 @@ export function buildChainOfCustody(caseObj) {
   const gaps = [];
   let prevHash = GENESIS_PREV_HASH;
 
-  ordered.forEach((t, seq) => {
+  for (const [seq, t] of ordered.entries()) {
     const amountBtc = parseBtcAmount(t.link.value);
     const approximateOrder = t.blockTime == null;
     const core = {
@@ -78,10 +78,10 @@ export function buildChainOfCustody(caseObj) {
         gaps.push({ afterSeq: seq, kind: 'UNANCHORED_HOP', note: `Transfer ${seq + 1} has no block timestamp — order is graph-emission approximate.` });
       }
     }
-    const eventHash = chainDigest({ ...core, prevHash });
+    const eventHash = await chainDigest({ ...core, prevHash });
     events.push({ ...core, prevHash, eventHash });
     prevHash = eventHash;
-  });
+  }
 
   return {
     events,
@@ -94,7 +94,7 @@ export function buildChainOfCustody(caseObj) {
 /**
  * Recompute and verify a custody chain. Returns the first break point, if any.
  */
-export function verifyChainOfCustody(events = []) {
+export async function verifyChainOfCustody(events = []) {
   if (!Array.isArray(events) || events.length === 0) {
     return { valid: false, checkedEvents: 0, brokenAtSeq: null, reason: 'Empty chain' };
   }
@@ -104,7 +104,7 @@ export function verifyChainOfCustody(events = []) {
       return { valid: false, checkedEvents: events.length, brokenAtSeq: e.seq, reason: `prevHash mismatch at seq ${e.seq} — chain reordered or spliced` };
     }
     const { eventHash, ...core } = e;
-    if (chainDigest({ ...core, prevHash: e.prevHash }) !== eventHash) {
+    if (await chainDigest({ ...core, prevHash: e.prevHash }) !== eventHash) {
       return { valid: false, checkedEvents: events.length, brokenAtSeq: e.seq, reason: `event digest mismatch at seq ${e.seq} — event edited after sealing` };
     }
     prevHash = eventHash;

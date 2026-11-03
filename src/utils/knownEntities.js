@@ -1,5 +1,6 @@
 /**
- * Curated known entity tags for quick attribution (local, no API). Keeps bundle tiny, deterministic.
+ * Candidate entity references for research (local, no API). No entry is
+ * verified, so none may be used for entity attribution or risk scoring.
  * Covers:
  * - Watchlist and exchange fingerprints
  * - OFAC Sanctioned Entities & Darknet Markets (Garantex, Tornado, Blender, Lazarus, Hydra)
@@ -40,9 +41,9 @@ export function tagKnownEntity(address) {
   if (!address || typeof address !== 'string') return null;
   const trimmed = address.trim();
   for (const ent of KNOWN_ENTITIES) {
-    // Entity attribution requires an exact full identifier. Short prefixes
-    // are useful heuristics, but cannot establish ownership or sanctions status.
-    if (ent.pattern.length >= 30 && trimmed.toLowerCase() === ent.pattern.toLowerCase()) return ent;
+    // Exact matching does not establish that the candidate label is accurate.
+    // Only independently sourced, reviewed entries may be enabled.
+    if (ent.verified === true && ent.pattern.length >= 30 && trimmed.toLowerCase() === ent.pattern.toLowerCase()) return ent;
   }
   // Heuristic exchange tag for custodial-looking addresses
   if (trimmed.startsWith('3') || trimmed.startsWith('bc1p')) {

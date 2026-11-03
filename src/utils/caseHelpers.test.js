@@ -20,6 +20,7 @@ describe('caseHelpers utilities', () => {
     expect(result.scenarios.length).toBe(SCENARIOS.length + 1);
     expect(result.scenarios[0].id).toBe('live-btc-4b9a8f2e');
     expect(result.scenarios[0].currency).toBe('BTC');
+    expect(result.scenarios[0].traceType).toBe('LIVE_CHAIN_TRACE');
   });
 
   it('should create an address trace case correctly', () => {
@@ -45,6 +46,8 @@ describe('caseHelpers utilities', () => {
     expect(result1.scenarios[0].links.length).toBe(2);
     expect(result1.scenarios[0].currency).toBe('BTC');
     expect(result1.scenarios[0].description).toContain('not derived from on-chain transactions');
+    expect(result1.scenarios[0].riskScore).toBeNull();
+    expect(result1.scenarios[0].traceType).toBe('SIMULATED_ESTIMATE');
     expect(result1.scenarios[0].nodes[2].details.email).toBeUndefined();
     expect(result1.scenarios[0].nodes[2].details.kycStatus).toContain('UNVERIFIED');
   });
@@ -63,6 +66,8 @@ describe('caseHelpers utilities', () => {
     expect(custom.nodes[0].balance).toBe('3.2000 BTC');
     expect(custom.nodes[0].details.ipLog).toBe('Not supplied');
     expect(custom.nodes[2].details.kycStatus).toContain('UNVERIFIED');
+    expect(custom.riskScore).toBeNull();
+    expect(custom.traceType).toBe('MANUAL_HYPOTHESIS');
   });
 
   it('contains and validates the cross-chain swap scenario case-crosschain-01', () => {

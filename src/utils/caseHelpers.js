@@ -27,6 +27,8 @@ export function createLiveTxCase(txId, formattedNodesAndLinks, scenarios) {
     suspectName: isHistorical ? `Early sender (${txId.slice(0, 6)})` : `Start (${txId.slice(0, 6)})`,
     initialTxHash: txId,
     status: "LIVE_TRACE",
+    traceType: 'LIVE_CHAIN_TRACE',
+    evidenceStatus: 'UNVERIFIED_SOURCE',
     riskScore,
     traceMeta: meta,
     description: isHistorical
@@ -60,6 +62,8 @@ export function createAddressTraceCase(address, txCount, latestTxId, formattedNo
     suspectName: `Checked address: ${address.slice(0, 12)}...`,
     initialTxHash: latestTxId,
     status: "LIVE_TRACE",
+    traceType: 'LIVE_CHAIN_TRACE',
+    evidenceStatus: 'UNVERIFIED_SOURCE',
     riskScore,
     traceMeta: meta,
     description: isHistorical
@@ -99,7 +103,9 @@ export function createAlgorithmicTraceCase(searchVal, scenarios) {
     suspectName: `Checked target (${searchVal.slice(0, 8)})`,
     initialTxHash: isAddress ? `Tx-${positiveHash.toString(16)}` : searchVal,
     status: "ACTIVE_TRACE",
-    riskScore: Math.min(90, Math.max(50, (positiveHash % 35) + 55)),
+    riskScore: null,
+    traceType: 'SIMULATED_ESTIMATE',
+    evidenceStatus: 'SIMULATED',
     description: `Synthetic estimate for ${searchVal}; this graph is not derived from on-chain transactions and does not establish destination ownership.`,
     nodes: [
       {
@@ -174,7 +180,9 @@ export function createCustomInvestigationCase(newCaseData) {
     initialTxHash: newCaseData.txHash || "custom_tx_hash_placeholder",
     suspectName: newCaseData.suspectName || "Custom target",
     description: newCaseData.description || "Manually assembled case.",
-    riskScore: newCaseData.riskScore || 85,
+    riskScore: null,
+    traceType: 'MANUAL_HYPOTHESIS',
+    evidenceStatus: 'USER_SUPPLIED',
     nodes: [
       {
         id: "custom_suspect",
@@ -242,4 +250,3 @@ export function createCustomInvestigationCase(newCaseData) {
     ]
   };
 }
-

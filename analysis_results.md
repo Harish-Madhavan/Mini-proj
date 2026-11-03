@@ -17,7 +17,7 @@ Most analysis executes in the browser, but case data is stored in unencrypted br
 | **Build & Tooling** | **Vite 8** + `@vitejs/plugin-react` | Ultra-fast HMR, ES module chunking, and strict tree-shaking. |
 | **Iconography & Styling** | **Lucide React** + Glassmorphic CSS | High-contrast law enforcement dark-mode UI; Outfit (UI) + JetBrains Mono (hashes/scripts). |
 | **Linter** | **OxLint** | Rust-based high-speed static analyzer (91 rules, zero errors/warnings across 87 files). |
-| **Test Runner** | **Vitest 3.2** | Last full-suite run discovered **41 test files and 257 tests**; run `npm test` for current results. |
+| **Test Runner** | **Vitest 3.2** | Latest full-suite run passed **41 test files and 265 tests**; run `npm test` for current results. |
 | **Blockchain Gateways** | **Blockstream.info + Mempool.space** | RESTful Esplora API layer with LRU caching, timeout handling, and automatic circuit-breaking failover. |
 
 ```mermaid
@@ -87,7 +87,7 @@ flowchart TD
 * **[clusteringAlgorithms.js](file:///e:/Git%20Repo/Mini-proj/src/utils/clusteringAlgorithms.js)**: Disjoint Set Union (DSU) with path compression for $O(\alpha(N))$ address clustering; Shannon entropy calculation for Wasabi/Whirlpool mixing detection.
 * **[syndicateAnalysis.js](file:///e:/Git%20Repo/Mini-proj/src/utils/syndicateAnalysis.js)**: Cross-case entity resolution indexing addresses to cases, weighting shared terminal cash-out endpoints.
 * **[crossChainForensics.js](file:///e:/Git%20Repo/Mini-proj/src/utils/crossChainForensics.js)**: Disassembles cross-chain bridge memos (THORChain, Maya, SideShift, ChangeNOW) and extracts target secondary addresses on Ethereum, Tron, and Solana.
-* **[chainOfCustody.js](file:///e:/Git%20Repo/Mini-proj/src/utils/chainOfCustody.js)**: Prototype event ledger using a 64-bit non-cryptographic hash; not suitable as a tamper-proof evidentiary seal.
+* **[chainOfCustody.js](file:///e:/Git%20Repo/Mini-proj/src/utils/chainOfCustody.js)**: SHA-256 event chain; it is not signed or externally anchored and is not a trusted evidentiary seal.
 * **[scriptDecoder.js](file:///e:/Git%20Repo/Mini-proj/src/utils/scriptDecoder.js)**: Bytecode disassembler for Bitcoin opcodes, script templates (P2PK, P2PKH, P2SH, SegWit, Taproot), and ASCII `OP_RETURN` payload extraction.
 * **[traceVerification.js](file:///e:/Git%20Repo/Mini-proj/src/utils/traceVerification.js)**: Mathematical assurance engine verifying value conservation invariants, seed pinning, and FIFO anti-minting guarantees.
 
@@ -95,11 +95,11 @@ flowchart TD
 
 ## 4. Verification & Test Suite Status
 
-The last run before this document update passed **41 test files and 257 tests**.
+The latest full-suite run passed **41 test files and 265 tests**.
 Run `npm test` for a fresh result; a passing unit suite does not establish
 real-world forensic accuracy or legal admissibility.
 
-The labeled-set harness (`npm run verify`) measures behavior only on its committed examples. Its result is not a general accuracy guarantee; heuristic confidence is not a probability, and real-world transaction interpretation still requires independent review.
+The offline heuristic fixtures (`npm run verify`) are in-code regression examples, not independently verified or held-out ground truth. Their results are not empirical accuracy estimates; heuristic confidence is not a probability, and real-world transaction interpretation still requires independent review.
 
 ---
 
@@ -170,4 +170,4 @@ gantt
 ```
 
 ---
-*Report updated and certified against AegisTrace v0.0.0 repository.*
+*Report updated to reflect the current repository; this review is not an independent certification.*

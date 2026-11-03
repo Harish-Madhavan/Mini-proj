@@ -25,7 +25,9 @@ export function safeSetItem(key, value) {
 export function safeRemoveItem(key) {
   try {
     localStorage.removeItem(key);
+    return true;
   } catch (e) {
     console.warn(`[storage] Failed to remove ${key}:`, e);
+    return false;
   }
 }

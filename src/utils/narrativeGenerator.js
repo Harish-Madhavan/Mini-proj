@@ -36,16 +36,18 @@ export function generateForensicNarrative(activeCase) {
   const routed = sumRoutedBtc(links);
   const traceConf = activeCase.traceMeta?.confidence;
 
-  const headline = risk.threatBadge.level === 'HIGH'
+  const headline = risk.threatBadge.level === 'UNASSESSED'
+    ? 'Insufficient evidence for a risk assessment'
+    : risk.threatBadge.level === 'HIGH'
     ? `High-risk pattern across ${hops} middle step${hops === 1 ? '' : 's'}`
     : risk.threatBadge.level === 'MEDIUM'
       ? `Multi-step flow under monitoring (${hops} step${hops === 1 ? '' : 's'})`
-      : 'Standard on-chain flow without hiding signatures';
+      : 'No elevated risk signal identified in the available trace';
 
   const summary = `Case ${activeCase.id} tracks approximately ${routed.toFixed(4)} BTC across ` +
     `${nodes.length} entities and ${links.length} transfers, from ${suspects} origin ` +
     `wallet${suspects === 1 ? '' : 's'} to ${receivers.length} terminal endpoint${receivers.length === 1 ? '' : 's'}. ` +
-    `Composite risk is ${risk.riskScore}/100 (${risk.threatBadge.label})` +
+    `${risk.riskScore == null ? 'Risk was not assessed' : `Composite risk is ${risk.riskScore}/100 (${risk.threatBadge.label})`}` +
     (typeof traceConf === 'number' ? ` with trace confidence ${(traceConf * 100).toFixed(0)}% (${activeCase.traceMeta.confidenceLevel}).` : '.');
 
   const findings = [];

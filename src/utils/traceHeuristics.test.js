@@ -75,4 +75,23 @@ describe('traceHeuristics helpers', () => {
     expect(r.score).toBeCloseTo(parseFloat(recomputed.toFixed(2)), 2);
     expect(r.breakdown.weightedScore).toBe(r.score);
   });
+
+  it('does not treat a fresh sole output as proof of external payment ownership', () => {
+    const tx = {
+      vin: [{ prevout: { scriptpubkey_address: 'input-address', scriptpubkey_type: 'p2pkh', value: 100000 } }],
+      vout: [{ scriptpubkey_address: 'fresh-output', scriptpubkey_type: 'p2pkh', value: 99000 }],
+      status: { confirmed: true, block_time: 1700000000 },
+      fee: 1000,
+      vsize: 250,
+    };
+    const result = scoreOutputHeuristics({
+      tx,
+      outputIndex: 0,
+      inputScriptTypes: ['Legacy (P2PKH)'],
+      outspends: [{ spent: true }],
+      seenAddresses: new Set(['input-address']),
+    });
+    expect(result.breakdown.identityScore).toBe(0);
+    expect(result.confidence).toBeLessThan(0.85);
+  });
 });

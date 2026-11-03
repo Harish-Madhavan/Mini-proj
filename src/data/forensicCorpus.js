@@ -1,19 +1,16 @@
 /**
- * AegisTrace Forensic Reference List — KNOWN TRANSACTION IDS (REFERENCE ONLY)
+ * AegisTrace Forensic Reference List — CANDIDATE IDENTIFIERS (UNVERIFIED)
  *
- * This file is the investigator's personal reference notebook: real Bitcoin
- * mainnet transaction/address identifiers once verified live against
- * Blockstream + Mempool.space gateways. Nothing in the application reads
- * this file at runtime — no Dashboard samples, no tracing shortcuts, no
- * scoring hints. Every trace is computed live from gateway data for
- * whatever identifier the investigator pastes in. Only
- * src/utils/forensicCorpus.test.js imports this file, solely to check the
- * reference list itself is well-formed.
+ * The identifiers and typology notes are candidate references; this
+ * repository does not include source snapshots or independent verification.
+ * Do not treat the labels or expectations as ground truth. Nothing in the
+ * application reads this file at runtime; only forensicCorpus.test.js checks
+ * that its identifiers are well-formed.
  *
  * Shape key:
  * - genesis coinbase  → coinbase-input handling, unspendable early-format output
  * - first-tx          → public-key identity (change reuse vs fresh payment) + dwell timing
- * - pizza purchase    → single-output identity (131 funder inputs, one fresh round output)
+ * - pizza purchase    → single-output transaction shape (131 inputs, one output)
  * - pizza spend       → 1-in-2-out peel split with BOTH branches spent (follow-through)
  * - batch dispersal   → 1-in-57 fan-out, branching/prune logic, dispersal-vs-structuring
  * - donation address  → address-trace across a rich multi-year history
@@ -45,10 +42,10 @@ export const FORENSIC_CORPUS = [
     label: 'Pizza Purchase (10k BTC)',
     kind: 'tx',
     value: 'a1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d',
-    typology: 'Single-output identity payment',
+    typology: 'Single-output transaction shape',
     block: 57043,
-    tests: 'H8 identity rule (131 inputs, one fresh round output)',
-    expectation: '10,000 BTC output → high-confidence payment hop, trail follows to block-57044 split',
+    tests: 'Caution against inferring ownership from a sole fresh output',
+    expectation: 'Candidate relationship to a later split requires independent verification; output role is unclassified without corroboration',
   },
   {
     key: 'pizza-spend',
@@ -148,7 +145,7 @@ export const FORENSIC_CORPUS = [
     typology: 'Single-output identity seizure (1-in-1-out, 69,369.16 BTC, 1HQ3→FBI)',
     block: 655283,
     tests: 'Reference: single-output identity probe for live tracing',
-    expectation: 'Reference only — trace live; expect high-confidence payment hop, no change split',
+    expectation: 'Candidate one-output sweep shape; ownership and payment role require independent verification',
   },
   {
     key: 'silkroad-hacker-cluster',

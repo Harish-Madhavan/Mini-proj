@@ -47,73 +47,76 @@ export function calculateTaintMap(nodes = [], links = [], taintedNodeIds = [], m
 
   const isPoison = model === 'poison';
   const isFifo = model === 'fifo';
-  const maxPasses = Math.min(50, Math.max(10, nodes.length * 2));
-
-  // Poison reachability flags (any tainted value-bearing contact => 100%)
   const poisoned = new Map();
   nodes.forEach(n => poisoned.set(n.id, seedSet.has(n.id)));
 
-  for (let pass = 0; pass < maxPasses; pass++) {
-    let maxDelta = 0;
-    // Accumulate incoming tainted sats for this pass
-    const nextPool = new Map();
-    nodes.forEach(n => nextPool.set(n.id, 0));
-    const nextPoisoned = new Map(poisoned);
+  const queue = [...seedSet];
+  const queued = new Set(queue);
+  const maxWork = 100000;
+  let iterations = 0;
 
-    for (const u of nodes.map(n => n.id)) {
-      const taintU = seedSet.has(u) ? 1.0 : (taint.get(u) || 0);
-      if (isPoison && !poisoned.get(u)) continue;
-      if (!isPoison && taintU <= 0) continue;
-      const outs = (outgoing.get(u) || [])
-        .filter(e => (e.valueSat || 0) > 0)
-        .sort((a, b) => a.linkIndex - b.linkIndex);
-      if (outs.length === 0) continue;
-
-      if (isPoison) {
-        // Poison model: any contact contaminates every value-bearing output
-        for (const e of outs) nextPoisoned.set(e.target, true);
-      } else if (isFifo) {
-        // FIFO model: the node's tainted *holdings* fill outputs in link
-        // order. Holdings are conserved: inflow × taint%. Seeds have no
-        // meaningful inflow — their outputs are definitionally 100% tainted.
-        const totalOut = outs.reduce((s, e) => s + e.valueSat, 0);
-        const isSeed = seedSet.has(u);
-        const holdings = isSeed
-          ? totalOut
-          : Math.round((totalIn.get(u) || 0) * taintU);
-        let available = Math.min(holdings, totalOut);
-        for (const e of outs) {
-          const give = Math.min(available, e.valueSat);
-          available -= give;
-          nextPool.set(e.target, nextPool.get(e.target) + give);
-        }
-      } else {
-        // Haircut (proportionate) model: every value-bearing output inherits
-        // the sender's taint *percentage* — fan-out does NOT dilute the rate.
-        for (const e of outs) {
-          nextPool.set(e.target, nextPool.get(e.target) + taintU * e.valueSat);
-        }
-      }
+  function fifoEdgeTaintSats(edge) {
+    const source = edge.source;
+    const outs = (outgoing.get(source) || [])
+      .filter(candidate => candidate.valueSat > 0)
+      .sort((a, b) => a.linkIndex - b.linkIndex);
+    const totalOut = outs.reduce((sum, candidate) => sum + candidate.valueSat, 0);
+    const sourceTaint = seedSet.has(source) ? 1 : (taint.get(source) || 0);
+    const holdings = seedSet.has(source)
+      ? totalOut
+      : Math.round((totalIn.get(source) || 0) * sourceTaint);
+    let remaining = Math.min(holdings, totalOut);
+    for (const candidate of outs) {
+      const allocated = Math.min(remaining, candidate.valueSat);
+      if (candidate.linkIndex === edge.linkIndex) return allocated;
+      remaining -= allocated;
     }
-
-    for (const n of nodes) {
-      if (seedSet.has(n.id)) continue; // seeds are definitionally 100% tainted
-      let next;
-      if (isPoison) {
-        next = nextPoisoned.get(n.id) ? 1.0 : 0;
-        if ((next > 0) !== poisoned.get(n.id)) maxDelta = Math.max(maxDelta, 1);
-        poisoned.set(n.id, nextPoisoned.get(n.id));
-      } else {
-        const inflow = totalIn.get(n.id) || 0;
-        next = inflow > 0 ? Math.min(1, (nextPool.get(n.id) || 0) / inflow) : 0;
-        const delta = Math.abs(next - (taint.get(n.id) || 0));
-        if (delta > maxDelta) maxDelta = delta;
-      }
-      taint.set(n.id, next);
-    }
-    if (maxDelta < 1e-9) break;
+    return 0;
   }
 
+  while (queue.length > 0 && iterations < maxWork) {
+    const sourceId = queue.shift();
+    queued.delete(sourceId);
+    iterations++;
+    if (isPoison && !poisoned.get(sourceId)) continue;
+
+    for (const edge of outgoing.get(sourceId) || []) {
+      if (edge.valueSat <= 0 || seedSet.has(edge.target)) continue;
+      const target = edge.target;
+      if (isPoison) {
+        if (!poisoned.get(target)) {
+          poisoned.set(target, true);
+          taint.set(target, 1);
+          if (!queued.has(target)) {
+            queue.push(target);
+            queued.add(target);
+          }
+        }
+        continue;
+      }
+
+      const inflow = totalIn.get(target) || 0;
+      if (inflow <= 0) continue;
+      const taintedInflow = (incoming.get(target) || []).reduce((sum, incomingEdge) => {
+        if (incomingEdge.valueSat <= 0) return sum;
+        if (isFifo) return sum + fifoEdgeTaintSats(incomingEdge);
+        const upstreamTaint = seedSet.has(incomingEdge.source) ? 1 : (taint.get(incomingEdge.source) || 0);
+        return sum + upstreamTaint * incomingEdge.valueSat;
+      }, 0);
+      const next = Math.min(1, taintedInflow / inflow);
+      if (Math.abs(next - (taint.get(target) || 0)) > 1e-9) {
+        taint.set(target, next);
+        if (!queued.has(target)) {
+          queue.push(target);
+          queued.add(target);
+        }
+      }
+    }
+  }
+
+  taint.converged = queue.length === 0;
+  taint.iterations = iterations;
+  taint.nonConvergedNodeIds = queue.slice();
   return taint;
 }
 
@@ -343,7 +346,14 @@ export function compareTaintModels(nodes = [], links = [], taintedNodeIds = []) 
       .filter(row => receivers.some(r => r.id === row.nodeId))
       .reduce((s, row) => s + (row.taintedSats || 0), 0);
   }
-  return { maps, ledgers, disagreement, maxSpread, terminalTaintedSats };
+  return {
+    maps,
+    ledgers,
+    disagreement,
+    maxSpread,
+    terminalTaintedSats,
+    converged: Object.values(maps).every(map => map.converged !== false),
+  };
 }
 
 /**
@@ -358,7 +368,7 @@ export function compareTaintModels(nodes = [], links = [], taintedNodeIds = []) 
  *
  * @param {Map} [edgeMap] precomputed via calculateEdgeTaintMap (recomputed if omitted)
  * @param {Array<string>} [taintedNodeIds] explicit seeds (same fallback as calculateTaintMap)
- * @returns {{ passed: boolean, violations: Array<{nodeId, check, detail}> }}
+ * @returns {{ passed: boolean, converged: boolean, iterations: number, nonConvergedNodeIds: Array<string>, violations: Array<{nodeId, check, detail}> }}
  */
 export function auditTaintConservation(nodes = [], links = [], taintMap = new Map(), model = 'proportionate', edgeMap = null, taintedNodeIds = []) {
   const violations = [];
@@ -427,5 +437,12 @@ export function auditTaintConservation(nodes = [], links = [], taintMap = new Ma
     }
   }
 
-  return { passed: violations.length === 0, violations };
+  const converged = taintMap.converged !== false;
+  return {
+    passed: converged && violations.length === 0,
+    converged,
+    iterations: taintMap.iterations || 0,
+    nonConvergedNodeIds: taintMap.nonConvergedNodeIds || [],
+    violations,
+  };
 }

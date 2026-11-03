@@ -9,6 +9,7 @@
     "lint": "oxlint",
     "test": "vitest run",
     "verify": "vitest run src/utils/accuracy.test.js",
+    "verify:ground-truth": "vitest run src/utils/judicialAccuracy.test.js",
     "preview": "vite preview"
   },
   "dependencies": {

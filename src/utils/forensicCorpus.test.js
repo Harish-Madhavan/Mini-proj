@@ -6,7 +6,7 @@ import { formatBlockstreamTx } from './bitcoinApi';
 import { validateBtcAddress } from './forensicUtils';
 import { FORENSIC_CORPUS } from '../data/forensicCorpus';
 
-// Graph-shaped links mirroring the verified 1-in-57 batch dispersal
+// Graph-shaped links mirroring a reported 1-in-57 batch dispersal
 // (4f11f496…): 19x10 BTC band + sub-cap dust fragments + remainder.
 function batchLinks() {
   const links = [];
@@ -22,7 +22,7 @@ function batchLinks() {
   return links;
 }
 
-describe('forensic corpus regression (static fixtures, live-verified shapes)', () => {
+describe('forensic corpus regression (static fixtures)', () => {
   it('rejects dust-fragment bands in the batch dispersal (share gate)', () => {
     const nodes = [{ id: 'tx_batch', type: 'hop' }];
     const r = scanCaseStructuring(nodes, batchLinks());
@@ -61,7 +61,7 @@ describe('forensic corpus regression (static fixtures, live-verified shapes)', (
     expect(out.label).toContain('early network');
   });
 
-  it('flags the live-verified ransom sweep (76-in-1-out) as WATCH payment', () => {
+  it('does not classify a fresh sole output from a ransom-shaped sweep as a payment', () => {
     // 35e5d5fe…: 76 funder inputs, 9.028 BTC to a fresh address, urgent fee.
     const per = 11891405;
     const tx = {
@@ -74,7 +74,7 @@ describe('forensic corpus regression (static fixtures, live-verified shapes)', (
     expect(sweep.isSweep).toBe(true);
     expect(sweep.inputCount).toBe(76);
     expect(sweep.cashoutUrgency).toBe('WATCH');
-    // H8: sole fresh output → high-confidence payment despite 76 inputs
+    // A sole fresh output and rapid spend do not establish recipient ownership.
     const scored = scoreOutputHeuristics({
       tx: { ...tx, fee: 1055079, vsize: 11500, weight: 46000, status: { confirmed: true, block_height: 478796, block_time: 1501770000 } },
       outputIndex: 0,
@@ -82,8 +82,8 @@ describe('forensic corpus regression (static fixtures, live-verified shapes)', (
       outspends: [{ spent: true, status: { block_height: 478829 } }],
       seenAddresses: new Set(['12t9YDPgwueZ9NyMgw519p7AA8isjr6SMw']),
     });
-    expect(scored.isPaymentCandidate).toBe(true);
-    expect(scored.confidence).toBeGreaterThanOrEqual(0.8);
+    expect(scored.isPaymentCandidate).toBe(false);
+    expect(scored.confidence).toBeLessThan(0.8);
   });
 
   it('flags the pizza-shaped many-in-one-out as a WATCH sweep (not imminent)', () => {
