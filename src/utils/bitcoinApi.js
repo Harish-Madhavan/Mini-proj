@@ -859,7 +859,7 @@ export function formatBlockstreamTx(tx, outspends = [], addressMeta = null) {
       if (!nodes.some(n => n.id === inputNodeId)) {
         nodes.push(buildInputNode({ addr, scriptStd, satoshis: sat }));
       }
-      links.push({ source: inputNodeId, target: txNodeId, value: `${valBtc} BTC`, timestamp: 'On-chain' });
+      links.push({ source: inputNodeId, target: txNodeId, value: `${valBtc} BTC`, timestamp: tx.status?.block_time ? new Date(tx.status.block_time * 1000).toLocaleDateString() : 'On-chain', txid: tx.txid, blockTime: tx.status?.block_time || null });
     }
   });
 
@@ -869,7 +869,7 @@ export function formatBlockstreamTx(tx, outspends = [], addressMeta = null) {
     const prep = prepareOutput({ tx, txid: tx.txid, output, outputIndex: i, outspends, inputScriptTypes, seenAddresses, isCoinJoin, addressMeta });
     if (prep.opReturn) {
       nodes.push(buildOpReturnNode({ txId: tx.txid, index: i, payload: prep.opReturn }));
-      links.push({ source: txNodeId, target: `op_${tx.txid}_${i}`, value: '0 BTC Data', timestamp: 'Embedded' });
+      links.push({ source: txNodeId, target: `op_${tx.txid}_${i}`, value: '0 BTC Data', timestamp: 'Embedded', txid: tx.txid, blockTime: tx.status?.block_time || null });
       return;
     }
     const { addr, valBtc, outNodeId, scriptStd, cls } = prep;
@@ -879,10 +879,10 @@ export function formatBlockstreamTx(tx, outspends = [], addressMeta = null) {
         ? (tx.status?.block_time ? new Date(tx.status.block_time * 1000).toLocaleDateString() : 'Active unspent funds')
         : cls.kycStatus?.includes('HISTORICAL') ? 'Historical Transfer'
         : cls.kycStatus?.includes('MIXED') ? 'Mixed funds' : 'Transit';
-      nodes.push(buildOutputNode({ outNodeId, addr, valBtc, scriptStd, cls, tx, lastActive }));
+      nodes.push(buildOutputNode({ outNodeId, addr, valBtc, scriptStd, cls, tx, lastActive, outspendSpent: outspends[i]?.spent }));
     }
 
-    links.push({ source: txNodeId, target: outNodeId, value: `${valBtc} BTC`, timestamp: tx.status?.block_time ? new Date(tx.status.block_time*1000).toLocaleDateString() : 'On-chain' });
+    links.push({ source: txNodeId, target: outNodeId, value: `${valBtc} BTC`, timestamp: tx.status?.block_time ? new Date(tx.status.block_time*1000).toLocaleDateString() : 'On-chain', txid: tx.txid, blockTime: tx.status?.block_time || null });
     seenAddresses.add(addr);
   });
 
@@ -913,9 +913,12 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
     if (!nodeIds.has(node.id)) { nodeIds.add(node.id); nodes.push(node); }
   }
   const linkKeys = new Set();
-  function addLink(src, tgt, value, ts) {
+  function addLink(src, tgt, value, ts, tx = null) {
     const k = `${src}->${tgt}::${value}`;
-    if (!linkKeys.has(k)) { linkKeys.add(k); links.push({ source: src, target: tgt, value, timestamp: ts }); }
+    if (!linkKeys.has(k)) {
+      linkKeys.add(k);
+      links.push({ source: src, target: tgt, value, timestamp: ts, txid: tx?.txid || null, blockTime: tx?.status?.block_time || null });
+    }
   }
 
   // BFS queue: array of { txId, depth, parentOutNodeId, parentValue, branchValueSats }
@@ -1100,8 +1103,8 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
         if (cls.heuristics) pendingHeuristics.push(cls.heuristics);
 
         const lastActive = cls.kycStatus?.includes('UNSPENT') ? 'Holds unspent funds' : cls.kycStatus?.includes('MIXED') ? 'Mixed funds' : 'On chain';
-        addNode(buildOutputNode({ outNodeId, addr, valBtc, scriptStd, cls, tx, lastActive }));
-        addLink(txNodeId, outNodeId, `${valBtc} BTC`, tx.status?.block_time ? new Date(tx.status.block_time*1000).toLocaleDateString() : 'On-chain');
+        addNode(buildOutputNode({ outNodeId, addr, valBtc, scriptStd, cls, tx, lastActive, outspendSpent: outspend.spent }));
+        addLink(txNodeId, outNodeId, `${valBtc} BTC`, tx.status?.block_time ? new Date(tx.status.block_time*1000).toLocaleDateString() : 'On-chain', tx);
         seenAddresses.add(addr);
 
         // Queue next hop only if: spent, not dust, not CoinJoin, not self-loop, and under depth

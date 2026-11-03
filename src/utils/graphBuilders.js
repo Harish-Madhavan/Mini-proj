@@ -60,7 +60,7 @@ export function buildInputNode({ addr, scriptStd, satoshis }) {
  * traceEndReceiver — one shape, no drift. Callers pass lastActive since the
  * single-tx formatter dates unspent holders while the tracer uses a static label.
  */
-export function buildOutputNode({ outNodeId, addr, valBtc, scriptStd, cls, tx, lastActive }) {
+export function buildOutputNode({ outNodeId, addr, valBtc, scriptStd, cls, tx, lastActive, outspendSpent = null }) {
   return {
     id: outNodeId,
     label: cls.label,
@@ -80,6 +80,7 @@ export function buildOutputNode({ outNodeId, addr, valBtc, scriptStd, cls, tx, l
       heuristicBreakdown: cls.heuristics?.breakdown,
       blockHeight: tx.status?.block_height || null,
       blockTime: tx.status?.block_time || null,
+      outspendSpent: typeof outspendSpent === 'boolean' ? outspendSpent : null,
       exchangeConf: cls.exchangeConf,
     }
   };

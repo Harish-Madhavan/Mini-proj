@@ -15,6 +15,7 @@ const SyndicateMap = lazy(() => import('./components/SyndicateMap'));
 const RiskAnalyzer = lazy(() => import('./components/RiskAnalyzer'));
 const ReportGenerator = lazy(() => import('./components/ReportGenerator'));
 const WatchlistMonitor = lazy(() => import('./components/WatchlistMonitor'));
+const AssetRecovery = lazy(() => import('./components/AssetRecovery'));
 
 function RouteFallback() {
   return (
@@ -50,7 +51,7 @@ function AppContent() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setIsCommandOpen(prev => !prev);
-      } else if (e.altKey && ['1', '2', '3', '4', '5', '6', '7', '8'].includes(e.key)) {
+      } else if (e.altKey && ['1', '2', '3', '4', '5', '6', '7', '8', '9'].includes(e.key)) {
         e.preventDefault();
         const index = parseInt(e.key, 10) - 1;
         if (NAV_ITEMS[index]) {
@@ -165,6 +166,7 @@ function AppContent() {
               <Route path="/risk" element={<RiskAnalyzer />} />
               <Route path="/watchlist" element={<WatchlistMonitor />} />
               <Route path="/report" element={<ReportGenerator />} />
+              <Route path="/recovery" element={<AssetRecovery />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
           </Suspense>

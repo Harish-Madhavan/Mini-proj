@@ -24,6 +24,7 @@ import { CaseContext } from './CaseContextObject';
 import { safeGetItem, safeSetItem, safeRemoveItem } from '../utils/storage';
 import { downloadJson } from '../utils/download';
 import { satsToBtc } from '../utils/forensicUtils';
+import { transitionRecoveryAction } from '../utils/recoveryLeads';
 
 const MAX_SCENARIOS = 50;
 
@@ -345,6 +346,40 @@ export function CaseProvider({ children }) {
     showToast("Note removed.", "info");
   }, [activeCase?.id, showToast]);
 
+  const updateRecoveryLead = useCallback((leadId, updater) => {
+    setScenarios(prev => prev.map(s => {
+      if (s.id !== activeCase.id) return s;
+      const leads = s.recoveryLeads || [];
+      const exists = leads.some(lead => lead.id === leadId);
+      return {
+        ...s,
+        recoveryLeads: exists
+          ? leads.map(lead => lead.id === leadId ? updater(lead) : lead)
+          : [...leads, updater({ id: leadId, actions: [] })]
+      };
+    }));
+  }, [activeCase?.id]);
+
+  const addRecoveryAction = useCallback((leadId, action) => {
+    updateRecoveryLead(leadId, lead => ({ ...lead, actions: [action, ...(lead.actions || [])] }));
+  }, [updateRecoveryLead]);
+
+  const updateRecoveryAction = useCallback((leadId, actionId, patch) => {
+    updateRecoveryLead(leadId, lead => ({
+      ...lead,
+      actions: (lead.actions || []).map(action => {
+        if (action.id !== actionId) return action;
+        if (!patch.state) return { ...action, ...patch, updatedAt: new Date().toISOString() };
+        const transition = transitionRecoveryAction(action, patch.state, { outcomeEvidence: patch.outcomeEvidence });
+        if (!transition.ok) {
+          showToast(transition.error, 'warning');
+          return action;
+        }
+        return transition.action;
+      })
+    }));
+  }, [showToast, updateRecoveryLead]);
+
   const value = {
     scenarios,
     activeCaseId,
@@ -367,6 +402,8 @@ export function CaseProvider({ children }) {
     handleExpandAddress,
     handleAddCaseNote,
     handleDeleteCaseNote,
+    addRecoveryAction,
+    updateRecoveryAction,
     getGatewayStatus,
     getCacheStats
   };

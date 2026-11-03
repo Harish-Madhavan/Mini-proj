@@ -6,7 +6,8 @@ import {
   Network,
   ShieldAlert,
   Radio,
-  FileText
+  FileText,
+  BriefcaseBusiness
 } from 'lucide-react';
 
 /**
@@ -22,5 +23,6 @@ export const NAV_ITEMS = [
   { id: 'syndicate', path: '/syndicate', label: 'Linked cases', icon: Network },
   { id: 'risk', path: '/risk', label: 'Risk', icon: ShieldAlert },
   { id: 'watchlist', path: '/watchlist', label: 'Watchlist', icon: Radio },
-  { id: 'report', path: '/report', label: 'Report', icon: FileText }
+  { id: 'report', path: '/report', label: 'Report', icon: FileText },
+  { id: 'recovery', path: '/recovery', label: 'Recovery', icon: BriefcaseBusiness }
 ];
