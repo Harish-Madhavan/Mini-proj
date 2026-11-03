@@ -87,7 +87,7 @@ export default function NodeRenderer({
                          (criticalTrail && !isCriticalLink && !isolatedNodeId);
 
         const isHighlighted = isSelectedLink || isPlaybackActive || isPlaybackPast || isCriticalLink;
-        const showValue = isCriticalLink || isPlaybackActive || (showTaintHeatmap && taintVal > 0.35);
+        const showValue = isSelectedLink || isCriticalLink || isPlaybackActive || (showTaintHeatmap && taintVal > 0.35);
 
         // Gentle curve to separate parallel flows without visual noise
         const mx = (startCoords.x + endCoords.x) / 2;
@@ -101,7 +101,7 @@ export default function NodeRenderer({
         const d = `M ${startCoords.x} ${startCoords.y} Q ${cx} ${cy} ${endCoords.x} ${endCoords.y}`;
 
         let linkStroke = '#2b2b31';
-        let linkWidth = 1;
+        let linkWidth = 1.4;
         if (showTaintHeatmap && edgeTaint && taintVal > 0.02) {
           linkStroke = taintColor;
           linkWidth = taintVal >= 0.75 ? 2 : 1.5;
@@ -113,7 +113,7 @@ export default function NodeRenderer({
           linkWidth = 2;
         } else if (isHighlighted) {
           linkStroke = '#52525b';
-          linkWidth = 1.5;
+          linkWidth = 2;
         }
 
         return (
@@ -125,6 +125,8 @@ export default function NodeRenderer({
               d={d}
               stroke={linkStroke}
               strokeWidth={linkWidth}
+              vectorEffect="non-scaling-stroke"
+              markerEnd="url(#flow-arrow)"
               fill="none"
               opacity={isHighlighted || (showTaintHeatmap && taintVal > 0.1) ? 0.9 : 0.55}
               strokeLinecap="round"
@@ -135,8 +137,12 @@ export default function NodeRenderer({
                 y={cy - 5}
                 textAnchor="middle"
                 fill={showTaintHeatmap && taintVal > 0.02 ? taintColor : 'var(--text-secondary)'}
-                fontSize="8.5"
-                fontWeight="500"
+                fontSize="10"
+                fontWeight="600"
+                paintOrder="stroke"
+                stroke="#111318"
+                strokeWidth="3"
+                strokeLinejoin="round"
               >
                 {showTaintHeatmap && taintVal > 0.02 ? `${link.value} · ${Math.round(taintVal * 100)}%` : link.value}
               </text>
@@ -186,7 +192,7 @@ export default function NodeRenderer({
 
         const isReceiverHighlight = highlightReceiver && node.type === 'receiver';
         const isTxHub = node.id.startsWith('tx_');
-        const r = node.type === 'suspect' ? 7 : isTxHub ? 5 : 6;
+        const r = node.type === 'suspect' ? 9 : isTxHub ? 7 : 8;
 
         const handleKeyDown = (e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -257,6 +263,7 @@ export default function NodeRenderer({
                   stroke={isTxHub ? color : isSelected ? '#fafafa' : 'rgba(0,0,0,0.45)'}
                   strokeWidth={isSelected ? 1.5 : 1}
                   opacity={isTxHub ? 1 : 0.92}
+                  vectorEffect="non-scaling-stroke"
                 />
                 {isTxHub && <circle r={1.6} fill={color} opacity={0.9} />}
               </>
@@ -269,7 +276,7 @@ export default function NodeRenderer({
               </text>
             )}
 
-            <text textAnchor="middle" y={isCluster ? 22 : r + 13} fill={isSelected ? 'var(--text-primary)' : 'var(--text-secondary)'} fontSize="8.5" fontWeight={isSelected ? 600 : 500}>
+            <text textAnchor="middle" y={isCluster ? 24 : r + 16} fill={isSelected ? '#f8fafc' : '#d4d4d8'} fontSize="10.5" fontWeight={isSelected ? 700 : 600} paintOrder="stroke" stroke="#111318" strokeWidth="3.5" strokeLinejoin="round">
               {shortLabel(node)}
             </text>
             {showTaintHeatmap && nodeTaint > 0.35 && (

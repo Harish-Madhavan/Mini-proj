@@ -1,19 +1,49 @@
 /* Print media styling for Forensic Evidence Report */
 @media print {
+  @page {
+    margin: 16mm;
+  }
+
   body {
-    background-color: white !important;
-    color: black !important;
+    min-width: 0 !important;
+    background: #fff !important;
+    color: #000 !important;
   }
-  #root > header, #root > nav, #root > footer, button, .glass-panel:not(#printable-area) {
-    display: none !important;
+
+  body * {
+    visibility: hidden !important;
   }
+
+  #printable-area,
+  #printable-area * {
+    visibility: visible !important;
+  }
+
   #printable-area {
-    border: none !important;
-    box-shadow: none !important;
-    background: white !important;
-    color: black !important;
+    position: absolute !important;
+    inset: 0 auto auto 0 !important;
     width: 100% !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #111 !important;
     margin: 0 !important;
     padding: 0 !important;
+  }
+
+  #printable-area button {
+    display: none !important;
+  }
+
+  #printable-area tr,
+  #printable-area section,
+  #printable-area h1,
+  #printable-area h2,
+  #printable-area h3 {
+    break-inside: avoid;
   }
 }

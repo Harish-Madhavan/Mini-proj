@@ -3,7 +3,7 @@ export function isValidCaseShape(obj) {
   if (!obj || typeof obj.id !== 'string' || !obj.id.trim() || !Array.isArray(obj.nodes) || !Array.isArray(obj.links) || obj.nodes.length === 0) return false;
   const nodeIds = new Set();
   for (const node of obj.nodes) {
-    if (!node || typeof node.id !== 'string' || !node.id.trim() || nodeIds.has(node.id)) return false;
+    if (!node || typeof node !== 'object' || Array.isArray(node) || typeof node.id !== 'string' || !node.id.trim() || nodeIds.has(node.id)) return false;
     nodeIds.add(node.id);
   }
   return obj.links.every(link => {

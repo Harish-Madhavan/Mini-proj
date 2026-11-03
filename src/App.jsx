@@ -83,7 +83,7 @@ function AppContent() {
       <CommandPalette isOpen={isCommandOpen} onClose={() => setIsCommandOpen(false)} />
 
       {/* Skip link for keyboard users */}
-      <a href="#main-content" className="skip-link" style={{ position: 'absolute', left: '-9999px', top: 'auto', width: '1px', height: '1px', overflow: 'hidden' }} onFocus={(e) => { e.target.style.left = '12px'; e.target.style.top = '12px'; e.target.style.width = 'auto'; e.target.style.height = 'auto'; e.target.style.background = '#fff'; e.target.style.color = '#000'; e.target.style.padding = '6px 12px'; e.target.style.zIndex = '10000'; }} onBlur={(e) => { e.target.style.left = '-9999px'; e.target.style.width = '1px'; e.target.style.height = '1px'; }}>Skip to main content</a>
+      <a href="#main-content" className="skip-link">Skip to main content</a>
 
       {/* Top Banner Header */}
       <header className="header-banner" role="banner">

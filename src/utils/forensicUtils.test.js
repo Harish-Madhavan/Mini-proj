@@ -15,6 +15,14 @@ describe('forensicUtils', () => {
       expect(res.type).toContain('Taproot');
     });
 
+    it('verifies Bech32 checksums, accepts all-uppercase form, and rejects mixed case', () => {
+      const valid = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+      expect(validateBtcAddress(valid.toUpperCase()).isValid).toBe(true);
+      expect(validateBtcAddress(`${valid.slice(0, -1)}q`).isValid).toBe(false);
+      expect(validateBtcAddress(`bC${valid.slice(2)}`).error).toContain('Mixed');
+      expect(validateBtcAddress(valid.replace('bc1', 'tb1')).isValid).toBe(false);
+    });
+
     it('validates Legacy P2PKH address', () => {
       const res = validateBtcAddress('1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa');
       expect(res.isValid).toBe(true);

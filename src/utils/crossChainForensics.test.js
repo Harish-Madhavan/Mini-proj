@@ -150,6 +150,26 @@ describe('crossChainForensics Engine', () => {
     expect(validateMultiChainAddress('invalid_address').isValid).toBe(false);
   });
 
+  it('rejects unsupported network names instead of silently accepting any valid chain address', () => {
+    const address = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
+    expect(validateMultiChainAddress(address, 'ETHEREUM').isValid).toBe(true);
+    expect(validateMultiChainAddress(address, 'ETH-LIKE').isValid).toBe(false);
+    expect(validateMultiChainAddress(address, 7).isValid).toBe(false);
+    expect(validateMultiChainAddress('   ').isValid).toBe(false);
+  });
+
+  it('returns a validation failure for non-string asset lookup inputs without throwing', async () => {
+    await expect(fetchMultiChainAssetDetails(null, 'AUTO', false)).resolves.toMatchObject({
+      success: false,
+      network: 'UNKNOWN'
+    });
+  });
+
+  it('requires a Solana address to decode to exactly 32 bytes', () => {
+    expect(validateMultiChainAddress('11111111111111111111111111111111', 'SOLANA').isValid).toBe(true);
+    expect(validateMultiChainAddress('22222222222222222222222222222222', 'SOLANA').isValid).toBe(false);
+  });
+
   it('retrieves multi-chain USDT token contract and asset tracking details', async () => {
     const ethRes = await fetchMultiChainAssetDetails('0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045', 'Ethereum', false);
     expect(ethRes.success).toBe(true);

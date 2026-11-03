@@ -404,24 +404,45 @@ export const KNOWN_STABLECOIN_CONTRACTS = {
 export function validateMultiChainAddress(address, network = 'AUTO') {
   if (!address || typeof address !== 'string') return { isValid: false, network: 'UNKNOWN' };
   const clean = address.trim();
+  if (!clean) return { isValid: false, network: 'UNKNOWN' };
+  const requestedNetwork = typeof network === 'string' ? network.trim().toUpperCase() : 'UNKNOWN';
 
   const isEth = /^0x[0-9a-fA-F]{40}$/.test(clean);
   const isTron = /^T[1-9A-HJ-NP-za-km-z]{33}$/.test(clean);
-  const isSol = /^[1-9A-HJ-NP-za-km-z]{32,44}$/.test(clean);
+  const isSol = isSolanaPublicKey(clean);
 
-  if (network === 'AUTO' || !network) {
+  if (requestedNetwork === 'AUTO' || requestedNetwork === '') {
     if (isEth) return { isValid: true, network: 'Ethereum', standard: 'ERC-20' };
     if (isTron) return { isValid: true, network: 'Tron', standard: 'TRC-20' };
     if (isSol) return { isValid: true, network: 'Solana', standard: 'SPL' };
     return { isValid: false, network: 'UNKNOWN' };
   }
 
-  const netUpper = network.toUpperCase();
-  if (netUpper.includes('ETH') || netUpper.includes('EVM')) return { isValid: isEth, network: 'Ethereum', standard: 'ERC-20' };
-  if (netUpper.includes('TRX') || netUpper.includes('TRON')) return { isValid: isTron, network: 'Tron', standard: 'TRC-20' };
-  if (netUpper.includes('SOL')) return { isValid: isSol, network: 'Solana', standard: 'SPL' };
+  if (['ETH', 'ETHEREUM', 'EVM'].includes(requestedNetwork)) return { isValid: isEth, network: 'Ethereum', standard: 'ERC-20' };
+  if (['TRX', 'TRON', 'TRC20', 'TRC-20'].includes(requestedNetwork)) return { isValid: isTron, network: 'Tron', standard: 'TRC-20' };
+  if (['SOL', 'SOLANA', 'SPL'].includes(requestedNetwork)) return { isValid: isSol, network: 'Solana', standard: 'SPL' };
+  return { isValid: false, network: 'UNKNOWN' };
+}
 
-  return { isValid: isEth || isTron || isSol, network: 'Cross-Chain', standard: 'Token' };
+function isSolanaPublicKey(address) {
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) return false;
+  const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  let value = 0n;
+  for (const char of address) {
+    const digit = alphabet.indexOf(char);
+    if (digit < 0) return false;
+    value = value * 58n + BigInt(digit);
+  }
+  let byteLength = 0;
+  while (value > 0n) {
+    byteLength++;
+    value >>= 8n;
+  }
+  for (const char of address) {
+    if (char !== '1') break;
+    byteLength++;
+  }
+  return byteLength === 32;
 }
 
 /**
@@ -429,7 +450,7 @@ export function validateMultiChainAddress(address, network = 'AUTO') {
  */
 export async function fetchMultiChainAssetDetails(address, network = 'AUTO', isLive = true) {
   const validation = validateMultiChainAddress(address, network);
-  const cleanAddr = address.trim();
+  const cleanAddr = typeof address === 'string' ? address.trim() : '';
 
   if (!validation.isValid) {
     return {

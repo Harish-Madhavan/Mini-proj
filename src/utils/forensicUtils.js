@@ -9,6 +9,76 @@ import { downloadBlob } from './download';
 export const BTC_USD_BENCHMARK = 95000;
 export const USD_INR_BENCHMARK = 86.5;
 
+const BECH32_CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+
+function bech32Polymod(values) {
+  const generators = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
+  let checksum = 1;
+  for (const value of values) {
+    const top = checksum >>> 25;
+    checksum = ((checksum & 0x1ffffff) << 5) ^ value;
+    for (let i = 0; i < generators.length; i++) {
+      if ((top >>> i) & 1) checksum ^= generators[i];
+    }
+  }
+  return checksum >>> 0;
+}
+
+function convertWitnessProgram(data) {
+  let accumulator = 0;
+  let bits = 0;
+  const bytes = [];
+  for (const value of data) {
+    accumulator = (accumulator << 5) | value;
+    bits += 5;
+    while (bits >= 8) {
+      bits -= 8;
+      bytes.push((accumulator >>> bits) & 0xff);
+    }
+  }
+  if (bits >= 5 || ((accumulator << (8 - bits)) & 0xff) !== 0) return null;
+  return bytes;
+}
+
+function validateSegwitAddress(address) {
+  if (address.length > 90) return { isValid: false, type: 'SegWit', error: 'Address exceeds the Bech32 length limit' };
+  if (address !== address.toLowerCase() && address !== address.toUpperCase()) {
+    return { isValid: false, type: 'Address', error: 'Mixed upper/lower case not allowed' };
+  }
+  const normalized = address.toLowerCase();
+  const separator = normalized.lastIndexOf('1');
+  if (separator < 1 || normalized.slice(0, separator) !== 'bc' || normalized.length - separator < 7) {
+    return { isValid: false, type: 'SegWit', error: 'Invalid Bitcoin mainnet Bech32 structure' };
+  }
+  const encoded = normalized.slice(separator + 1);
+  const values = [];
+  for (const char of encoded) {
+    const value = BECH32_CHARSET.indexOf(char);
+    if (value < 0) return { isValid: false, type: 'SegWit', error: 'Invalid Bech32 character' };
+    values.push(value);
+  }
+  const hrpExpand = [98 >> 5, 99 >> 5, 0, 98 & 31, 99 & 31];
+  const checksum = bech32Polymod([...hrpExpand, ...values]);
+  const witnessVersion = values[0];
+  if (witnessVersion > 16) return { isValid: false, type: 'SegWit', error: 'Invalid witness version' };
+  const program = convertWitnessProgram(values.slice(1, -6));
+  if (!program || program.length < 2 || program.length > 40) {
+    return { isValid: false, type: 'SegWit', error: 'Invalid witness program length or padding' };
+  }
+  if (witnessVersion === 0 && checksum !== 1) return { isValid: false, type: 'SegWit', error: 'Invalid Bech32 checksum for witness version 0' };
+  if (witnessVersion !== 0 && checksum !== 0x2bc830a3) return { isValid: false, type: 'SegWit', error: 'Invalid Bech32m checksum' };
+  if (witnessVersion === 0 && ![20, 32].includes(program.length)) {
+    return { isValid: false, type: 'SegWit', error: 'Version 0 witness programs must be 20 or 32 bytes' };
+  }
+  if (witnessVersion === 1 && program.length !== 32) {
+    return { isValid: false, type: 'Taproot', error: 'Taproot witness programs must be 32 bytes' };
+  }
+  if (witnessVersion === 1) return { isValid: true, type: 'Taproot (P2TR)' };
+  if (witnessVersion === 0 && program.length === 32) return { isValid: true, type: 'SegWit Script (P2WSH)' };
+  if (witnessVersion === 0) return { isValid: true, type: 'Native SegWit (P2WPKH)' };
+  return { isValid: true, type: `SegWit v${witnessVersion}` };
+}
+
 /**
  * Validate Bitcoin address format (Legacy P2PKH, P2SH, SegWit Bech32, Taproot Bech32m).
  * @param {string} address 
@@ -20,33 +90,9 @@ export function validateBtcAddress(address) {
   }
 
   const trimmed = address.trim();
+  if (!trimmed) return { isValid: false, type: 'Unknown', error: 'Address is empty' };
 
-  // SegWit (Bech32) & Taproot (Bech32m) - validate charset (BIP173 excludes 1 b i o) and length
-  if (trimmed.startsWith('bc1')) {
-    // Bech32 charset is qp z r y 9 x 8 g f 2 t v d w 0 s 3 j n 5 4 k h c e 6 m u a 7 l (no 1 b i o)
-    const bech32Charset = /^[qpzry9x8gf2tvdw0s3jn54khce6mua7l]+$/;
-    const lower = trimmed.toLowerCase();
-    if (lower !== trimmed && trimmed !== trimmed.toUpperCase()) {
-      return { isValid: false, type: 'Address', error: 'Mixed upper/lower case not allowed' };
-    }
-    if (trimmed.startsWith('bc1p')) {
-      if (trimmed.length === 62 && bech32Charset.test(trimmed.slice(4))) {
-        return { isValid: true, type: 'Taproot (P2TR)' };
-      }
-      return { isValid: false, type: 'Taproot', error: 'Invalid Taproot format or length' };
-    }
-    if (trimmed.startsWith('bc1q')) {
-      const dataPart = trimmed.slice(4);
-      if ((trimmed.length === 42 || trimmed.length === 62) && bech32Charset.test(dataPart)) {
-        return { isValid: true, type: trimmed.length === 62 ? 'SegWit Script (P2WSH)' : 'Native SegWit (P2WPKH)' };
-      }
-      return { isValid: false, type: 'SegWit', error: 'Invalid SegWit format or length' };
-    }
-    if (/^bc1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{25,90}$/.test(lower)) {
-      return { isValid: true, type: 'SegWit address' };
-    }
-    return { isValid: false, type: 'Address', error: 'Invalid characters or length' };
-  }
+  if (/^bc1/i.test(trimmed)) return validateSegwitAddress(trimmed);
 
   // Legacy addresses (starts with 1)
   if (trimmed.startsWith('1')) {

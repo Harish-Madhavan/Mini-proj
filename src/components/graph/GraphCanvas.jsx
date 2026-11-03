@@ -131,9 +131,20 @@ export default function GraphCanvas({
 
   const handleCenterFit = () => {
     if (!activeCase?.nodes?.length) return;
-    setZoom(1.05);
-    setPanOffset({ x: 0, y: 0 });
-    showToast("Graph centered.", "info");
+    const points = activeCase.nodes.map(node => getNodeCoords(node.id));
+    const minX = Math.min(...points.map(point => point.x));
+    const maxX = Math.max(...points.map(point => point.x));
+    const minY = Math.min(...points.map(point => point.y));
+    const maxY = Math.max(...points.map(point => point.y));
+    const spanX = Math.max(maxX - minX, 120);
+    const spanY = Math.max(maxY - minY, 100);
+    const fitZoom = Math.min(720 / spanX, 340 / spanY, 1.5);
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    setZoom(Math.max(0.5, fitZoom));
+    setPanOffset({ x: (400 - centerX) * fitZoom, y: (210 - centerY) * fitZoom });
+    showToast("Graph fitted to view.", "info");
   };
 
   // Keyboard shortcuts for canvas ergonomics (+, -, 0, Space, ESC)
@@ -468,7 +479,7 @@ export default function GraphCanvas({
         border: '1px solid var(--border-soft)', 
         overflow: 'hidden',
         position: 'relative',
-        minHeight: isFullscreen ? 'calc(100vh - 140px)' : '460px',
+        minHeight: isFullscreen ? 'calc(100vh - 140px)' : '520px',
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center'
@@ -556,7 +567,7 @@ export default function GraphCanvas({
               ref={svgRef}
               width="100%" 
               height="100%" 
-              viewBox="0 0 800 360" 
+              viewBox="0 0 800 420"
               style={{ display: 'block', cursor: draggingNodeId ? 'grabbing' : isPanning ? 'grabbing' : 'grab' }}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
@@ -569,8 +580,11 @@ export default function GraphCanvas({
                 <pattern id="dot-grid" width="28" height="28" patternUnits="userSpaceOnUse">
                   <circle cx="1" cy="1" r="1" fill="#1c1c21" />
                 </pattern>
+                <marker id="flow-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+                  <path d="M 0 0 L 8 4 L 0 8 z" fill="#71717a" />
+                </marker>
               </defs>
-              <rect id="bg-panner" width="100%" height="100%" fill="url(#dot-grid)" />
+            <rect id="bg-panner" width="100%" height="100%" fill="url(#dot-grid)" />
               <rect width="100%" height="100%" fill="transparent" />
 
               {/* Transform group for panning and zooming */}

@@ -659,17 +659,38 @@ body {
 
 /* Accessibility */
 .skip-link:focus {
-  left: 12px !important;
-  top: 12px !important;
-  width: auto !important;
-  height: auto !important;
-  overflow: visible !important;
-  clip: auto !important;
+  transform: translateY(0);
+}
+
+.skip-link {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 10001;
+  padding: 0.6rem 0.85rem;
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: #09090b;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+  transform: translateY(calc(-100% - 1rem));
+  transition: transform 0.15s ease;
 }
 
 *:focus-visible {
-  outline: 2px solid #52525b;
+  outline: 2px solid #93c5fd;
   outline-offset: 2px;
+}
+
+.btn:disabled,
+.btn-quiet:disabled,
+.icon-btn:disabled,
+.input-field:disabled,
+.select-field:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

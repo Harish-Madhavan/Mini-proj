@@ -95,10 +95,13 @@ export default function GraphExplorer() {
     return () => clearInterval(interval);
   }, [isPlaying, displayLinks]);
 
-  if (!activeCase) return <div style={{ color: 'var(--text-secondary)' }}>No case selected.</div>;
-
   // Precompute layered layout
-  const computedLayout = computeLayeredGraphLayout(displayNodes, displayLinks);
+  const computedLayout = useMemo(
+    () => computeLayeredGraphLayout(displayNodes, displayLinks, { width: 800, height: 420 }),
+    [displayNodes, displayLinks]
+  );
+
+  if (!activeCase) return <div style={{ color: 'var(--text-secondary)' }}>No case selected.</div>;
 
   // Dynamic layout generator with custom drag coordinates support
   const getNodeCoords = (nodeId) => {
