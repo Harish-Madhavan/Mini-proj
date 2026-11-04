@@ -15,7 +15,9 @@ import {
   EXCHANGES, 
   EXCHANGE_DIRECTORY,
   ZONAL_UNITS, 
-  generateSection67NoticeText,
+  REQUEST_TYPES,
+  getRequestDraftReadiness,
+  generateRequestWorksheetText,
   generateComplianceEmailTemplate
 } from '../constants/legalConstants';
 
@@ -47,12 +49,23 @@ export default function OSINTIntegrator() {
 
   const [noticeForm, setNoticeForm] = useState({
     selectedExchange: EXCHANGES[0],
+    recipientEntity: EXCHANGE_DIRECTORY[EXCHANGES[0]].entity,
+    recipientEmail: '',
+    contactVerified: false,
+    contactSourceReference: '',
+    contactVerifiedAt: '',
     firNumber: '',
     zonalUnit: ZONAL_UNITS[0].value,
     officerRank: '',
-    officerBadge: ''
+    officerBadge: '',
+    requestType: REQUEST_TYPES.PRESERVATION,
+    recordsScope: '',
+    periodStart: '',
+    periodEnd: '',
+    legalBasisReference: ''
   });
   const updateNotice = (key, val) => setNoticeForm(prev => ({ ...prev, [key]: val }));
+  const [selectedEndpointId, setSelectedEndpointId] = useState('');
 
   // Script Inspector state
   const [scriptInput, setScriptInput] = useState('');
@@ -61,14 +74,33 @@ export default function OSINTIntegrator() {
 
   if (!activeCase) return <div style={{ color: 'var(--text-secondary)' }}>Select a case first.</div>;
 
-  const receiverNode = activeCase.nodes.find(n => n.type === 'receiver');
+  const receiverNodes = activeCase.nodes.filter(n => n.type === 'receiver');
+  const receiverNode = receiverNodes.find(n => n.id === selectedEndpointId) || receiverNodes[0] || null;
   const suspectNode = activeCase.nodes.find(n => n.type === 'suspect');
-  const exchangeInfo = EXCHANGE_DIRECTORY[noticeForm.selectedExchange] || {
-    entity: 'Exchange Compliance Liaison',
-    email: 'compliance@exchange.com',
-    sla: '48 Hours',
-    jurisdiction: 'Standard Compliance'
-  };
+  const endpointAddress = receiverNode?.details?.address || receiverNode?.id || '';
+  const endpointEvidence = receiverNode
+    ? (activeCase.links || [])
+      .filter(link => (typeof link.target === 'object' ? link.target.id : link.target) === receiverNode.id)
+      .map(link => {
+        const txid = link.txid || link.transactionId || link.details?.txid;
+        const outputIndex = Number.isInteger(link.outputIndex) ? ` output ${link.outputIndex}` : '';
+        return txid ? `${txid}${outputIndex}${link.value ? ` (${link.value})` : ''}` : null;
+      })
+      .filter(Boolean)
+    : [];
+  const requestReadiness = getRequestDraftReadiness({
+    recipientEntity: noticeForm.recipientEntity,
+    endpointAddress,
+    requestType: noticeForm.requestType,
+    recordsScope: noticeForm.recordsScope,
+    periodStart: noticeForm.periodStart,
+    periodEnd: noticeForm.periodEnd,
+    legalBasisReference: noticeForm.legalBasisReference,
+    recipientEmail: noticeForm.recipientEmail,
+    contactVerified: noticeForm.contactVerified,
+    contactSourceReference: noticeForm.contactSourceReference,
+    contactVerifiedAt: noticeForm.contactVerifiedAt
+  });
 
   const handleInspectScript = (inputVal) => {
     const val = inputVal !== undefined ? inputVal : scriptInput;
@@ -89,54 +121,75 @@ export default function OSINTIntegrator() {
     receiverNode && { role: 'Endpoint', node: receiverNode },
   ].filter(Boolean);
 
-  const getSubpoenaText = () => {
+  const getWorksheetText = () => {
     if (!receiverNode) return "";
-    return generateSection67NoticeText({
+    return generateRequestWorksheetText({
+      requestType: noticeForm.requestType,
       zonalUnit: noticeForm.zonalUnit,
       firNumber: noticeForm.firNumber,
-      selectedExchange: noticeForm.selectedExchange,
+      selectedExchange: noticeForm.recipientEntity,
+      recipientEmail: noticeForm.recipientEmail,
       caseTitle: activeCase.title,
-      depositAddress: receiverNode.details?.address || receiverNode.id || 'N/A',
+      endpointAddress,
       currency: activeCase.currency,
       balance: receiverNode.balance || '0 BTC',
+      legalBasisReference: noticeForm.legalBasisReference,
+      recordsScope: noticeForm.recordsScope,
+      periodStart: noticeForm.periodStart,
+      periodEnd: noticeForm.periodEnd,
+      contactSourceReference: noticeForm.contactSourceReference,
+      contactVerifiedAt: noticeForm.contactVerified ? noticeForm.contactVerifiedAt : '',
+      evidenceReferences: endpointEvidence,
       officerRank: [noticeForm.officerRank, noticeForm.officerBadge].filter(Boolean).join(' / '),
     });
   };
 
-  const handleCopySubpoena = () => {
-    const text = getSubpoenaText();
+  const handleCopyWorksheet = async () => {
+    const text = getWorksheetText();
     if (!text) {
-      showToast("No end receiver is recorded in this case.", "warning");
+      showToast("Select a case endpoint before creating a worksheet.", "warning");
       return;
     }
-    navigator.clipboard.writeText(text);
-    showToast("Draft worksheet copied.", "success");
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast("Draft worksheet copied.", "success");
+    } catch (error) {
+      console.warn('Could not copy request worksheet:', error);
+      showToast("Clipboard access failed. Download the worksheet instead.", "error");
+    }
   };
 
-  const handleDownloadSubpoena = () => {
-    const text = getSubpoenaText();
+  const handleDownloadWorksheet = () => {
+    const text = getWorksheetText();
     if (!text) {
-      showToast("No end receiver is recorded in this case.", "warning");
+      showToast("Select a case endpoint before creating a worksheet.", "warning");
       return;
     }
-    downloadText(text, `request-draft-${activeCase.id}.txt`);
+    downloadText(text, `request-worksheet-${activeCase.id}.txt`);
     showToast("Draft worksheet downloaded.", "success");
   };
 
   const handleSendEmail = () => {
-    if (!receiverNode) {
-      showToast("No end receiver in this case.", "warning");
+    if (!requestReadiness.readyForEmailDraft) {
+      showToast([...requestReadiness.missing, ...requestReadiness.emailMissing].join(' '), "warning");
       return;
     }
     const mailto = generateComplianceEmailTemplate({
-      selectedExchange: noticeForm.selectedExchange,
+      recipientEmail: noticeForm.recipientEmail,
+      selectedExchange: noticeForm.recipientEntity,
       firNumber: noticeForm.firNumber,
-      depositAddress: receiverNode.details?.address || receiverNode.id || 'N/A',
-      balance: receiverNode.balance || '0 BTC',
-      officerRank: [noticeForm.officerRank, noticeForm.officerBadge].filter(Boolean).join(' / ')
+      depositAddress: endpointAddress,
+      requestType: noticeForm.requestType,
+      recordsScope: noticeForm.recordsScope,
+      periodStart: noticeForm.periodStart,
+      periodEnd: noticeForm.periodEnd,
+      legalBasisReference: noticeForm.legalBasisReference,
+      evidenceReferences: endpointEvidence
     });
-    window.open(mailto, '_blank');
-    showToast("Opened email draft.", "info");
+    const composer = window.open(mailto, '_blank', 'noopener');
+    showToast(composer
+      ? "Email composer opened. Review the recipient and draft before sending."
+      : "Email composer was blocked. Download the worksheet instead.", composer ? "info" : "warning");
   };
 
   return (
@@ -146,19 +199,37 @@ export default function OSINTIntegrator() {
       <div className="glass-panel" style={{ padding: '1.75rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
         <div>
           <h3 style={{ fontSize: '0.95rem', fontWeight: 600 }}>
-            Attribution & request worksheet
+            Request preparation worksheet
           </h3>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: '0.2rem' }}>Inspect endpoint evidence and prepare an unapproved draft for authorized review.</p>
         </div>
 
         <div role="note" style={{ padding: '0.7rem', border: '1px solid rgba(245,158,11,0.3)', borderRadius: '8px', color: 'var(--text-secondary)', fontSize: '0.78rem' }}>
-          Draft only. A trace does not establish address ownership, current funds, or legal authority. Verify facts, recipient contacts, and applicable process independently before preparing or issuing a request.
+          Internal worksheet only. It cannot issue or serve a subpoena, statutory notice, preservation demand, or records request. A trace does not establish address ownership, current funds, or legal authority. Verify facts, recipient contacts, and applicable process independently.
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <h4 style={{ fontSize: '0.78rem', fontWeight: 500, color: 'var(--text-muted)', paddingBottom: '0.25rem' }}>
-            Case endpoints
+            Case endpoints and trace context
           </h4>
+          {receiverNodes.length > 1 && (
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>
+              Endpoint under review
+              <select
+                aria-label="Endpoint under review"
+                value={receiverNode?.id || ''}
+                onChange={event => setSelectedEndpointId(event.target.value)}
+                className="select-field"
+                style={{ width: '100%', display: 'block', marginTop: '0.25rem' }}
+              >
+                {receiverNodes.map(node => (
+                  <option key={node.id} value={node.id}>
+                    {node.entityName || node.label} — {node.details?.address || node.id}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {endpointRows.length === 0 ? (
             <div style={{ padding: '0.75rem 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
               No origin or endpoint nodes yet.
@@ -179,7 +250,7 @@ export default function OSINTIntegrator() {
             <div style={{ display: 'flex', gap: '0.25rem' }}>
               {receiverNode && (
                 <button
-                  onClick={() => { setScriptInput(receiverNode.details.address); handleInspectScript(receiverNode.details.address); }}
+                  onClick={() => { setScriptInput(endpointAddress); handleInspectScript(endpointAddress); }}
                   className="btn-quiet"
                   style={{ fontSize: '0.76rem' }}
                 >
@@ -256,17 +327,66 @@ export default function OSINTIntegrator() {
           )}
         </div>
 
-        {/* Target Exchange Compliance Directory Card */}
+        {/* Recipient/contact details are investigator-entered; the static entity directory does not verify service channels. */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-soft)' }}>
-          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-            Exchange contact
-          </span>
-
-          <div style={{ fontSize: '0.84rem', fontWeight: 600 }}>{exchangeInfo.entity}</div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-            <span className="mono-addr">{exchangeInfo.email}</span>
-            <span>Replies: {exchangeInfo.sla}</span>
-          </div>
+          <strong style={{ fontSize: '0.82rem' }}>Proposed recipient and contact review</strong>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.73rem' }}>
+            Directory entries are suggestions only. No email address or service channel is verified by this application.
+          </p>
+          <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            Entity / organization
+            <input
+              aria-label="Recipient entity"
+              type="text"
+              value={noticeForm.recipientEntity}
+              onChange={event => updateNotice('recipientEntity', event.target.value)}
+              className="input-field"
+              style={{ width: '100%', marginTop: '0.2rem' }}
+            />
+          </label>
+          <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            Recipient address (enter only after independent verification)
+            <input
+              aria-label="Recipient email"
+              type="email"
+              value={noticeForm.recipientEmail}
+              onChange={event => updateNotice('recipientEmail', event.target.value)}
+              className="input-field"
+              style={{ width: '100%', marginTop: '0.2rem' }}
+              placeholder="Official service channel"
+            />
+          </label>
+          <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            Verification source / reference
+            <input
+              aria-label="Contact verification source"
+              type="text"
+              value={noticeForm.contactSourceReference}
+              onChange={event => updateNotice('contactSourceReference', event.target.value)}
+              className="input-field"
+              style={{ width: '100%', marginTop: '0.2rem' }}
+              placeholder="Official directory URL or reviewed reference"
+            />
+          </label>
+          <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            Contact checked on
+            <input
+              aria-label="Contact verification date"
+              type="date"
+              value={noticeForm.contactVerifiedAt}
+              onChange={event => updateNotice('contactVerifiedAt', event.target.value)}
+              className="input-field"
+              style={{ width: '100%', marginTop: '0.2rem' }}
+            />
+          </label>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.45rem', color: 'var(--text-secondary)', fontSize: '0.75rem', marginTop: '0.25rem' }}>
+            <input
+              type="checkbox"
+              checked={noticeForm.contactVerified}
+              onChange={event => updateNotice('contactVerified', event.target.checked)}
+            />
+            I independently verified the selected contact channel for this request.
+          </label>
         </div>
 
         {/* Request worksheet details; statutory authority is supplied only after review. */}
@@ -276,10 +396,14 @@ export default function OSINTIntegrator() {
           </h4>
 
           <div>
-            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Exchange:</label>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>Suggested entity:</label>
             <select
               value={noticeForm.selectedExchange}
-              onChange={(e) => updateNotice('selectedExchange', e.target.value)}
+            onChange={(e) => setNoticeForm(prev => ({
+              ...prev,
+              selectedExchange: e.target.value,
+              recipientEntity: EXCHANGE_DIRECTORY[e.target.value]?.entity || e.target.value
+            }))}
               className="select-field"
               style={{ width: '100%' }}
             >
@@ -287,6 +411,64 @@ export default function OSINTIntegrator() {
                 <option key={idx} value={ex}>{ex}</option>
               ))}
             </select>
+          </div>
+
+          <div>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>
+              Intended request type
+            </label>
+            <select
+              aria-label="Intended request type"
+              value={noticeForm.requestType}
+              onChange={event => updateNotice('requestType', event.target.value)}
+              className="select-field"
+              style={{ width: '100%' }}
+            >
+              <option value={REQUEST_TYPES.PRESERVATION}>Preservation request only</option>
+              <option value={REQUEST_TYPES.DISCLOSURE}>Disclosure request (approved process required)</option>
+              <option value={REQUEST_TYPES.PRESERVATION_AND_DISCLOSURE}>Preservation and disclosure (approved process required for disclosure)</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>
+              Reviewer-approved legal process / authority reference
+            </label>
+            <input
+              aria-label="Legal process reference"
+              type="text"
+              value={noticeForm.legalBasisReference}
+              onChange={event => updateNotice('legalBasisReference', event.target.value)}
+              className="input-field"
+              style={{ width: '100%' }}
+              placeholder="Record the approved instrument/reference; do not rely on a suggested template"
+            />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              Records period start
+              <input aria-label="Records period start" type="date" value={noticeForm.periodStart} onChange={event => updateNotice('periodStart', event.target.value)} className="input-field" style={{ width: '100%', marginTop: '0.2rem' }} />
+            </label>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+              Records period end
+              <input aria-label="Records period end" type="date" value={noticeForm.periodEnd} onChange={event => updateNotice('periodEnd', event.target.value)} className="input-field" style={{ width: '100%', marginTop: '0.2rem' }} />
+            </label>
+          </div>
+
+          <div>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.2rem' }}>
+              Records sought (reviewer-defined, specific scope)
+            </label>
+            <textarea
+              aria-label="Records sought"
+              value={noticeForm.recordsScope}
+              onChange={event => updateNotice('recordsScope', event.target.value)}
+              className="input-field"
+              rows={3}
+              style={{ width: '100%', resize: 'vertical' }}
+              placeholder="Describe the specific records for legal review; avoid unnecessary data."
+            />
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
@@ -351,32 +533,54 @@ export default function OSINTIntegrator() {
               onClick={handleSendEmail}
               className="btn-quiet"
               style={{ fontSize: '0.8rem' }}
-              title="Open an email draft for review; this does not send it"
+              disabled={!requestReadiness.readyForEmailDraft}
+              title={requestReadiness.readyForEmailDraft
+                ? 'Open a reviewer-prepared email draft; this does not send it'
+                : [...requestReadiness.missing, ...requestReadiness.emailMissing].join(' ')}
             >
               <Mail size={13} /> Email draft
             </button>
             <button
-              onClick={handleCopySubpoena}
+              onClick={handleCopyWorksheet}
               className="btn-quiet"
               style={{ fontSize: '0.8rem' }}
+              disabled={!receiverNode}
             >
-              <Clipboard size={13} /> Copy
+              <Clipboard size={13} /> Copy worksheet
             </button>
             <button
-              onClick={handleDownloadSubpoena}
+              onClick={handleDownloadWorksheet}
               className="btn btn-primary"
               style={{ fontSize: '0.8rem' }}
+              disabled={!receiverNode}
             >
-              <Download size={13} /> .txt
+              <Download size={13} /> Download
             </button>
           </div>
+        </div>
+
+        <div role="status" style={{ padding: '0.75rem', border: `1px solid ${requestReadiness.readyForReview ? 'rgba(84,223,194,0.35)' : 'rgba(255,203,116,0.35)'}`, borderRadius: 8, fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+          <strong style={{ color: requestReadiness.readyForReview ? 'var(--color-success, #54dfc2)' : 'var(--color-warning, #ffcb74)' }}>
+            {requestReadiness.readyForReview ? 'Worksheet has the basic review fields' : 'Incomplete draft — review fields missing'}
+          </strong>
+          {requestReadiness.missing.length > 0 && (
+            <ul style={{ margin: '0.4rem 0 0', paddingLeft: '1.1rem' }}>
+              {requestReadiness.missing.map(item => <li key={item}>{item}</li>)}
+            </ul>
+          )}
+          {!requestReadiness.readyForEmailDraft && (
+            <p style={{ margin: '0.4rem 0 0' }}>
+              Email draft remains disabled until required worksheet fields and reviewer-recorded contact verification are present. This is a workflow check, not legal approval.
+            </p>
+          )}
         </div>
 
         {receiverNode ? (
           <textarea
             readOnly
-            value={getSubpoenaText()}
-            rows={22}
+            aria-label="Request worksheet preview"
+            value={getWorksheetText()}
+            rows={27}
             style={{
               width: '100%',
               backgroundColor: 'transparent',
@@ -392,7 +596,7 @@ export default function OSINTIntegrator() {
           />
         ) : (
           <div style={{ padding: '1rem 0', color: 'var(--text-muted)', fontSize: '0.84rem' }}>
-            No end receiver in this case yet.
+            No receiver endpoint is recorded in this case. Add or select a trace with receiver outputs before creating a request worksheet.
           </div>
         )}
       </div>

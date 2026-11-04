@@ -431,49 +431,112 @@ Investigators cannot afford to wait 60 minutes for 6 blockchain confirmations wh
 
 ---
 
-<!-- 
+<!--
 ===================================================================
-SLIDE 12: LIVE WALKTHROUGH — CASE STUDY: OPERATION DARK MIRAGE
-Duration: 2.5 mins
-=================================================================== 
+SLIDE 12: LIVE DEMO INPUTS — TRACING & WATCHLIST
+Duration: 2.0 mins
+===================================================================
 -->
 
-## 🎯 Case Study Walkthrough: Operation Dark Mirage
+## 🧭 Live Demo Inputs: Trace & Watchlist
 
-A simulated real-world narcotics takedown demonstrating AegisTrace in action:
+### A. Trace a historical transaction
+1. Open **Dashboard** and paste this Bitcoin transaction ID:
+
+   `f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e9831e9e16`
+2. Set **Trace depth** to `2`, then click **Trace**.
+3. In the graph, inspect the transaction outputs, output indexes, followed spend edges, and candidate payment/change labels.
+
+This is a historic Satoshi-to-Hal transaction used as a payment/change example. It is not an illicit transaction. The trace is fetched live, so provider availability can affect the demonstration.
+
+### B. Add an address to the watchlist
+In **Watchlist**, enter:
+
+| Field | Example input |
+|---|---|
+| Bitcoin address | `1HB5XMLmzFVj8ALj6mfBsbifRoD4miY36v` |
+| Label | `Presentation demo — public reference` |
+| Group | `AegisTrace walkthrough` |
+| Risk tier | `Unassessed` |
+
+Click **Add**, then run the manual check for the address. It is a public donation-address reference, not a suspect label. A quiet or unavailable result is a valid demo outcome; do not promise an alert.
+
+> ⚠️ **Privacy:** A live mempool check sends the entered address to the public provider. Use only a public example for this presentation.
+
+---
+
+<!--
+===================================================================
+SLIDE 13: LIVE DEMO INPUTS — RECOVERY & EVIDENCE REVIEW
+Duration: 2.0 mins
+===================================================================
+-->
+
+## 🧾 Live Demo Inputs: Recovery & Evidence Review
+
+### C. Create a recovery follow-up
+1. Select the built-in case **BTC Transaction Trace: 4b9a8f2e...** and open **Recovery**.
+2. Inspect the terminal lead and its value, transaction-reference coverage, destination evidence, and unknowns.
+3. Add a follow-up action:
+
+| Field | Example input |
+|---|---|
+| Action type | `Prepare preservation request` |
+| Evidence reference or case note | `Presentation exercise only — no request prepared or submitted` |
+| Follow-up due date | `2026-11-11` (or choose a future date for your presentation) |
+
+Leave the action **planned** or move it to **preparing**. The built-in case is synthetic, its graph edges do not include transaction IDs, and its displayed amounts are illustrative—not real trace evidence. Do not mark recovery confirmed.
+
+### D. Review an evidence claim
+Open **Evidence review** for the same case and add:
+
+| Field | Example input |
+|---|---|
+| Claim classification | `Attribution hypothesis` |
+| Claim or finding | `The terminal node may represent a service deposit; the owner is not established.` |
+| Source / evidence reference | `Presentation exercise — no independent attribution source supplied` |
+| Reviewer note | `Exercise only; source not independently checked; no identity conclusion.` |
+| Review state | `Reviewed by investigator` |
+
+The note is required before changing the review state. Also point out that the ledger keeps graph/on-chain references separate from investigator-entered hypotheses. A review state documents workflow; it does not authenticate the source or prove ownership.
+
+---
+
+<!--
+===================================================================
+SLIDE 14: LIVE WALKTHROUGH — SYNTHETIC TRACE CASE
+Duration: 2.5 mins
+===================================================================
+-->
+
+## 🎯 Walkthrough: Built-In Synthetic Trace Case
+
+Use the built-in case **BTC Transaction Trace: 4b9a8f2e...**. This is a fabricated graph for demonstrating the workflow; it is not a real transaction or a real investigation.
 
 ```
-[Genesis Seizure: Darknet Vendor "HydraPhantom"]
-  └─ Tx: 4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b
-     │
-     ├─ Hop 1: 8-Factor Classifier identifies 0.25 BTC payment vs 4.75 BTC change
-     │
-     ├─ Hop 2: Peel chain detection separates transit rollover from vendor payout
-     │
-     ├─ Hop 3: CoinJoin branch detected at Wasabi pool -> branch pruned & flagged
-     │
-     ├─ Hop 4: DSU Clustering combines 4 input wallets into Single Cartel Cluster #12
-     │
-     └─ Hop 5: Terminal Output matched to Exchange Deposit Script (KYC Endpoint)
+[Start wallet]
+  └─ 10.50 BTC → [Step 1]
+                 └─ 9.20 BTC → [Step 2]
+                                └─ 9.05 BTC → [End receiver]
 ```
 
-### Forensic Outcome in AegisTrace:
-1. **Graph Explorer**: Full interactive DAG showing 5 hops with edge taint percentages.
-2. **Cluster Profile**: Cartel cluster identified with 18.4 BTC total received.
-3. **Legal Output**: Draft request worksheets and evidence review aids; any official communication or certificate requires separate authorized preparation and review.
+### What to demonstrate
+1. Select the end receiver and inspect its graph position and recorded flow amount.
+2. Open **Recovery** and review the lead, including unknown transaction-reference coverage.
+3. Open **Evidence review** and explain why the graph record is not an identity claim.
 
 ---
 
 > 🎙️ **Speaker Notes:**  
-> *"Let us walk through a live scenario from our built-in forensic corpus: Operation Dark Mirage. We start with a transaction hash seized from a darknet vendor's encrypted phone. We paste it into AegisTrace: instantly, the forward tracing engine unpacks the outputs. Hop 1 separates the change remainder. Hop 2 follows the peeling chain. At Hop 3, the suspect attempted to run funds through a CoinJoin mixer; our typology engine flags the mixer and protects the investigator from wasting time chasing dead ends. At Hop 5, we identify a terminal deposit output matching an exchange wallet structure. Within 60 seconds, the investigator has the exact deposit hash, the cluster entity, and a generated legal summon notice ready for service."*
+> *"This is the built-in synthetic case. Its displayed flow amounts and node labels are demo data; the graph links do not provide real transaction references. We can show how the product organizes a lead and evidence gaps, but we cannot infer a real owner, service, illicit source, or recoverable balance from this fixture."*
 
 ---
 
-<!-- 
+<!--
 ===================================================================
-SLIDE 13: TECHNICAL RIGOR, TESTING & PERFORMANCE
+SLIDE 15: TECHNICAL RIGOR, TESTING & PERFORMANCE
 Duration: 1.5 mins
-=================================================================== 
+===================================================================
 -->
 
 ## 🧪 Technical Rigor: Engineering & Verification Standards
@@ -505,11 +568,11 @@ A forensic tool must be flawless in its mathematical computations. A single calc
 
 ---
 
-<!-- 
+<!--
 ===================================================================
-SLIDE 14: FUTURE ROADMAP & SCALABILITY
+SLIDE 16: FUTURE ROADMAP & SCALABILITY
 Duration: 1.0 min
-=================================================================== 
+===================================================================
 -->
 
 ## 🚀 Future Roadmap: Expanding the Forensic Frontier
@@ -528,11 +591,11 @@ Duration: 1.0 min
 
 ---
 
-<!-- 
+<!--
 ===================================================================
-SLIDE 15: SUMMARY & VALUE DELIVERED
+SLIDE 17: SUMMARY & VALUE DELIVERED
 Duration: 1.0 min
-=================================================================== 
+===================================================================
 -->
 
 ## 🏁 Summary: Why AegisTrace Wins
@@ -550,11 +613,11 @@ Duration: 1.0 min
 
 ---
 
-<!-- 
+<!--
 ===================================================================
-SLIDE 16: APPENDIX — MENTOR / JURY Q&A CHEATSHEET
+SLIDE 18: APPENDIX — MENTOR / JURY Q&A CHEATSHEET
 Duration: As needed for Q&A
-=================================================================== 
+===================================================================
 -->
 
 ## 💡 Appendix: Anticipated Questions & Defense Answers

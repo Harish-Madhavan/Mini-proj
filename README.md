@@ -50,9 +50,11 @@ trace is computed live from gateway data.
   and received-funds accounting from fetched histories.
 - **Typologies** — batch structuring, consolidation sweeps, bridge/swap
   routers, and cross-case address correlation.
-- **Evidence workflow** — case timelines, notice/report templates, reviewable
-  evidence claims, and a SHA-256 digest of the report payload. These are
-  investigative aids, not a legal-admissibility or identity-verification guarantee.
+- **Evidence workflow** — case timelines, a scoped request-preparation worksheet,
+  reviewable evidence claims, and a SHA-256 digest of the report payload. Recipient
+  contacts are investigator-entered and must be independently verified. These are
+  investigative aids, not legal process, a legal-admissibility guarantee, or
+  identity verification.
 - **Cross-Chain Intelligence** — bridge memo extraction proposes destination
   details from memo text. It does not verify settlement or trace transactions on
   the destination network.
@@ -61,7 +63,7 @@ trace is computed live from gateway data.
 
 ## Layout
 
-- `src/components/` — routes (Dashboard, Tracing, Notices, Clustering,
+- `src/components/` — routes (Dashboard, Tracing, Request prep, Clustering,
   Linked cases, Risk, Watchlist, Report) plus graph canvas/sidebar/timeline.
 - `src/utils/` — chain API, heuristics, taint, clustering, risk, dossiers,
   custody, cross-chain bridge analysis, and narrative modules. Every module has colocated `.test.js`
@@ -76,9 +78,16 @@ fee compare, mempool scan, endpoint profiles). Case portfolios and graphs are
 stored in IndexedDB, with legacy `localStorage` migration and a recovery-copy
 fallback when IndexedDB writes fail. This is browser-managed storage, not
 encryption: case data is not protected at rest. Watchlists and alert settings
-remain in `localStorage`. Live lookups send the requested transaction IDs or
-addresses to Blockstream or Mempool.space, so this is not an air-gapped or
-query-private deployment.
+remain in `localStorage`; watchlist edits report when the browser rejects a
+write, but the storage is still subject to browser quota and is not encrypted.
+Mempool alerts are deduplicated per watched address and transaction, so one
+transaction involving multiple watched addresses can still produce one alert
+for each address.
+Recovery action status changes, supporting-evidence edits, and follow-up
+deadline edits are recorded in the case action history. This is an application
+audit trail, not a tamper-proof or externally authenticated record.
+Live lookups send the requested transaction IDs or addresses to Blockstream or
+Mempool.space, so this is not an air-gapped or query-private deployment.
 
 ## Measuring accuracy & test suite
 
@@ -142,7 +151,7 @@ A technical evaluation identified key strategic vectors for the project's evolut
 
 3. **Graph Ergonomics & Visualization (Priority 3 - Completed)**:
    - **Cluster Node Collapsing**: Interactive graph grouping that automatically condenses multi-input fan-ins (CIOH co-spending) into single consolidated badges with total BTC volume and address count. Includes one-click toolbar toggle, uncollapse controls, and sub-node trace forward actions.
-   - **Mempool WebSocket Feed**: Real-time bidirectional WebSocket client (`wss://mempool.space/api/v1/ws`) with automatic reconnect and live 0-confirmation surveillance alerts for watched wallets.
+   - **Mempool WebSocket Feed**: Real-time WebSocket client (`wss://mempool.space/api/v1/ws`) with automatic reconnect after unexpected disconnects; explicit shutdown stops pending retries when monitoring is disabled or closed.
    - **Batch CSV Address Importer**: Modal tray that ingests CSV dumps of seized device addresses, validates formats, maps risk tiers and tags, and batch-populates surveillance watchlists or auto-generates consolidated investigation cases.
 
 4. **Advanced Forensics & Real-Time Monitoring (Priority 4 - Completed)**:

@@ -24,7 +24,7 @@ import { CaseContext } from './CaseContextObject';
 import { loadCaseState, saveCaseState } from '../utils/caseStorage';
 import { downloadJson } from '../utils/download';
 import { satsToBtc } from '../utils/forensicUtils';
-import { transitionRecoveryAction } from '../features/recovery/recoveryLeads';
+import { updateRecoveryActionRecord } from '../features/recovery/recoveryLeads';
 import { isValidCaseShape } from '../utils/caseValidation';
 
 const MAX_SCENARIOS = 50;
@@ -418,13 +418,12 @@ export function CaseProvider({ children }) {
       ...lead,
       actions: (lead.actions || []).map(action => {
         if (action.id !== actionId) return action;
-        if (!patch.state) return { ...action, ...patch, updatedAt: new Date().toISOString() };
-        const transition = transitionRecoveryAction(action, patch.state, { outcomeEvidence: patch.outcomeEvidence });
-        if (!transition.ok) {
-          showToast(transition.error, 'warning');
+        const update = updateRecoveryActionRecord(action, patch);
+        if (!update.ok) {
+          showToast(update.error, 'warning');
           return action;
         }
-        return transition.action;
+        return update.action;
       })
     }));
   }, [showToast, updateRecoveryLead]);

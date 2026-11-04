@@ -303,6 +303,50 @@ export function transitionRecoveryAction(action, nextState, { outcomeEvidence } 
   };
 }
 
+export function updateRecoveryActionRecord(action, patch) {
+  if (patch?.state !== undefined) {
+    if (!patch.state) return { ok: false, error: 'Recovery action status cannot be empty.' };
+    return transitionRecoveryAction(action, patch.state, { outcomeEvidence: patch.outcomeEvidence });
+  }
+
+  const editableFields = ['evidence', 'nextFollowUpAt', 'outcomeEvidence'];
+  const changes = editableFields.filter(field =>
+    Object.prototype.hasOwnProperty.call(patch || {}, field) && patch[field] !== action?.[field]
+  );
+  if (Object.keys(patch || {}).some(field => !editableFields.includes(field))) {
+    return { ok: false, error: 'Recovery action update contains unsupported fields.' };
+  }
+  if (!changes.length) return { ok: true, action };
+  if (changes.includes('evidence') && typeof patch.evidence !== 'string') {
+    return { ok: false, error: 'Action evidence must be text.' };
+  }
+  if (changes.includes('outcomeEvidence') && typeof patch.outcomeEvidence !== 'string') {
+    return { ok: false, error: 'Recovery outcome evidence must be text.' };
+  }
+  if (changes.includes('nextFollowUpAt') &&
+      patch.nextFollowUpAt !== null &&
+      (typeof patch.nextFollowUpAt !== 'string' || !Number.isFinite(Date.parse(patch.nextFollowUpAt)))) {
+    return { ok: false, error: 'Follow-up date must be a valid date or empty.' };
+  }
+
+  const timestamp = new Date().toISOString();
+  return {
+    ok: true,
+    action: {
+      ...action,
+      ...Object.fromEntries(changes.map(field => [field, patch[field]])),
+      updatedAt: timestamp,
+      history: [...(Array.isArray(action?.history) ? action.history : []), {
+        event: 'details_updated',
+        state: action?.state || RECOVERY_ACTION_STATES.PLANNED,
+        timestamp,
+        changes,
+        evidence: changes.includes('evidence') ? patch.evidence : action?.evidence || null,
+      }],
+    },
+  };
+}
+
 export function formatLeadAmount(sats, currency = 'BTC') {
   return `${(sats / 1e8).toFixed(4)} ${currency}`;
 }

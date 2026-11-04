@@ -26,4 +26,18 @@ describe('application smoke test', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Go to Tracing' }));
     expect(await screen.findByRole('heading', { name: 'Fund flow' })).toBeTruthy();
   });
+
+  it('opens the request-preparation worksheet without trusting a preset contact', async () => {
+    vi.stubGlobal('indexedDB', undefined);
+    window.history.replaceState({}, '', '/dashboard');
+
+    render(<App />);
+    expect(await screen.findByRole('form', { name: 'Blockchain trace search' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go to Request prep' }));
+    expect(await screen.findByRole('heading', { name: 'Request preparation worksheet' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Recipient email' }).value).toBe('');
+    expect(screen.getByRole('button', { name: 'Email draft' }).disabled).toBe(true);
+    expect(screen.getByRole('textbox', { name: 'Request worksheet preview' }).value).toContain('NOT A SUBPOENA');
+  });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   getWatchlist,
   addToWatchlist,
@@ -9,7 +9,10 @@ import {
   getWebSocketStatus,
   onMempoolAlert,
   emitMempoolAlert,
-  getMempoolAlerts
+  getMempoolAlerts,
+  mergeMempoolAlerts,
+  initMempoolWebSocket,
+  closeMempoolWebSocket,
 } from './watchlistManager';
 
 
@@ -65,8 +68,25 @@ describe('watchlistManager', () => {
     expect(addRes.success).toBe(true);
     expect(getWatchlist().some(w => w.address === newTarget.address)).toBe(true);
 
-    const updated = removeFromWatchlist(newTarget.address);
-    expect(updated.some(w => w.address === newTarget.address)).toBe(false);
+    const result = removeFromWatchlist(newTarget.address);
+    expect(result.success).toBe(true);
+    expect(result.watchlist.some(w => w.address === newTarget.address)).toBe(false);
+  });
+
+  it('does not report a watchlist change as successful when storage writes fail', () => {
+    global.localStorage.setItem = () => { throw new DOMException('storage full', 'QuotaExceededError'); };
+
+    const added = addToWatchlist({ address: 'bc1qstoragefailuretarget' });
+    expect(added).toMatchObject({
+      success: false,
+      message: 'Could not save the watchlist in browser storage.',
+    });
+
+    const removed = removeFromWatchlist('bc1qstoragefailuretarget');
+    expect(removed).toMatchObject({
+      success: false,
+      message: 'Could not save the updated watchlist in browser storage.',
+    });
   });
 
   it('preserves an explicitly empty saved watchlist', () => {
@@ -92,6 +112,7 @@ describe('watchlistManager', () => {
     global.fetch = async () => ({ ok: true, json: async () => [] });
     try {
       const status = await checkAddressMempoolStatus('bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', true);
+      expect(status.status).toBe('clear');
       expect(status.hasMempoolTx).toBe(false);
       expect(status.txid).toBeUndefined();
     } finally {
@@ -102,7 +123,7 @@ describe('watchlistManager', () => {
   it('counts only the watched address flow in a live transaction', async () => {
     const originalFetch = global.fetch;
     global.fetch = async () => ({ ok: true, json: async () => [{
-      txid: 'live-tx',
+      txid: 'a'.repeat(64),
       vin: [],
       vout: [
         { scriptpubkey_address: 'bc1qotheraddress', value: 90000000 },
@@ -111,8 +132,44 @@ describe('watchlistManager', () => {
     }] });
     try {
       const status = await checkAddressMempoolStatus('bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', true);
+      expect(status.status).toBe('activity');
       expect(status.hasMempoolTx).toBe(true);
       expect(status.amount).toContain('0.2500 BTC');
+      expect(status.feeRate).toBeNull();
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('does not present malformed live responses as quiet or fabricate a fee rate', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = async () => ({
+      ok: true,
+      json: async () => [{
+        txid: 'invalid-txid',
+        vin: [],
+        vout: [{ scriptpubkey_address: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', value: 25000000 }],
+      }],
+    });
+    try {
+      const status = await checkAddressMempoolStatus('bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', true);
+      expect(status).toMatchObject({
+        status: 'unavailable',
+        hasMempoolTx: false,
+        message: 'Data source returned an invalid response.',
+      });
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('returns an unavailable result on live lookup failures', async () => {
+    const originalFetch = global.fetch;
+    global.fetch = async () => { throw new Error('network down'); };
+    try {
+      const status = await checkAddressMempoolStatus('bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', true);
+      expect(status.status).toBe('unavailable');
+      expect(status.hasMempoolTx).toBe(false);
     } finally {
       global.fetch = originalFetch;
     }
@@ -145,5 +202,99 @@ describe('watchlistManager', () => {
 
     unsubscribe();
   });
-});
 
+  it('deduplicates alerts per watched address and transaction, not transaction alone', () => {
+    const first = {
+      id: 'alert-first',
+      address: 'bc1qfirst',
+      txid: 'a'.repeat(64),
+      amount: '0.1 BTC',
+    };
+    const secondAddressSameTx = {
+      id: 'alert-second',
+      address: 'bc1qsecond',
+      txid: 'a'.repeat(64),
+      amount: '0.2 BTC',
+    };
+
+    expect(emitMempoolAlert(first)).toBe(true);
+    expect(emitMempoolAlert(secondAddressSameTx)).toBe(true);
+    expect(emitMempoolAlert({ ...first, id: 'duplicate-first' })).toBe(false);
+    expect(getMempoolAlerts().map(alert => alert.address)).toEqual(['bc1qsecond', 'bc1qfirst']);
+    expect(mergeMempoolAlerts([first], [secondAddressSameTx])).toHaveLength(2);
+  });
+
+  it('ignores malformed saved alert collections', () => {
+    mockStore.aegistrace_mempool_alerts = JSON.stringify({ txid: 'not-an-alert-list' });
+    expect(getMempoolAlerts()).toEqual([]);
+    mockStore.aegistrace_mempool_alerts = JSON.stringify([null, 'invalid', { id: 'legacy-alert' }]);
+    expect(getMempoolAlerts()).toEqual([{ id: 'legacy-alert' }]);
+  });
+
+  it('does not reconnect after an intentional WebSocket close', () => {
+    const OriginalWebSocket = window.WebSocket;
+    const instances = [];
+    class MockWebSocket {
+      static OPEN = 1;
+      static CONNECTING = 0;
+      readyState = MockWebSocket.CONNECTING;
+      send = vi.fn();
+      constructor() {
+        instances.push(this);
+      }
+      close() {
+        this.readyState = 3;
+        this.onclose?.();
+      }
+    }
+
+    vi.useFakeTimers();
+    window.WebSocket = MockWebSocket;
+    try {
+      const socket = initMempoolWebSocket();
+      socket.readyState = 3;
+      socket.onclose();
+      closeMempoolWebSocket();
+      vi.advanceTimersByTime(5000);
+      expect(instances).toHaveLength(1);
+      expect(getWebSocketStatus()).toBe('DISCONNECTED');
+    } finally {
+      closeMempoolWebSocket();
+      window.WebSocket = OriginalWebSocket;
+      vi.useRealTimers();
+    }
+  });
+
+  it('reconnects after an unexpected WebSocket disconnect', () => {
+    const OriginalWebSocket = window.WebSocket;
+    const instances = [];
+    class MockWebSocket {
+      static OPEN = 1;
+      static CONNECTING = 0;
+      readyState = MockWebSocket.CONNECTING;
+      send = vi.fn();
+      constructor() {
+        instances.push(this);
+      }
+      close() {
+        this.readyState = 3;
+        this.onclose?.();
+      }
+    }
+
+    vi.useFakeTimers();
+    window.WebSocket = MockWebSocket;
+    try {
+      const socket = initMempoolWebSocket();
+      socket.readyState = 3;
+      socket.onclose();
+      vi.advanceTimersByTime(5000);
+      expect(instances).toHaveLength(2);
+      expect(getWebSocketStatus()).toBe('CONNECTING');
+    } finally {
+      closeMempoolWebSocket();
+      window.WebSocket = OriginalWebSocket;
+      vi.useRealTimers();
+    }
+  });
+});

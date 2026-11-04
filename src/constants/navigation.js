@@ -19,7 +19,7 @@ import {
 export const NAV_ITEMS = [
   { id: 'dashboard', path: '/dashboard', label: 'Dashboard', icon: Shield },
   { id: 'trace', path: '/trace', label: 'Tracing', icon: Layers },
-  { id: 'osint', path: '/osint', label: 'Notices', icon: Globe },
+  { id: 'osint', path: '/osint', label: 'Request prep', icon: Globe },
   { id: 'clustering', path: '/clustering', label: 'Clustering', icon: GitMerge },
   { id: 'syndicate', path: '/syndicate', label: 'Linked cases', icon: Network },
   { id: 'risk', path: '/risk', label: 'Risk', icon: ShieldAlert },

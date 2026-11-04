@@ -66,7 +66,7 @@ export function getWatchlist() {
 }
 
 export function saveWatchlist(items) {
-  safeSetItem(WATCHLIST_STORAGE_KEY, items);
+  return safeSetItem(WATCHLIST_STORAGE_KEY, normalizeWatchlist(items));
 }
 
 export function addToWatchlist(item) {
@@ -90,7 +90,9 @@ export function addToWatchlist(item) {
     }),
     ...current
   ];
-  saveWatchlist(updated);
+  if (!saveWatchlist(updated)) {
+    return { success: false, message: 'Could not save the watchlist in browser storage.' };
+  }
   return { success: true, watchlist: updated };
 }
 
@@ -98,16 +100,41 @@ export function removeFromWatchlist(address) {
   const current = getWatchlist();
   const needle = typeof address === 'string' ? address.toLowerCase() : '';
   const updated = current.filter(w => typeof w.address !== 'string' || w.address.toLowerCase() !== needle);
-  saveWatchlist(updated);
-  return updated;
+  if (!saveWatchlist(updated)) {
+    return { success: false, message: 'Could not save the updated watchlist in browser storage.' };
+  }
+  return { success: true, watchlist: updated };
 }
 
 export function getMempoolAlerts() {
-  return safeGetItem(ALERTS_STORAGE_KEY, []);
+  const saved = safeGetItem(ALERTS_STORAGE_KEY, []);
+  return Array.isArray(saved)
+    ? saved.filter(alert => alert && typeof alert === 'object' && alertIdentity(alert))
+    : [];
 }
 
 export function saveMempoolAlerts(alerts) {
-  safeSetItem(ALERTS_STORAGE_KEY, alerts);
+  return safeSetItem(ALERTS_STORAGE_KEY, mergeMempoolAlerts(alerts, [], 50));
+}
+
+function alertIdentity(alert) {
+  if (typeof alert?.address === 'string' && typeof alert?.txid === 'string') {
+    return `${alert.address.toLowerCase()}:${alert.txid.toLowerCase()}`;
+  }
+  return typeof alert?.id === 'string' ? `id:${alert.id}` : null;
+}
+
+export function mergeMempoolAlerts(incoming, existing = [], limit = 50) {
+  const merged = [];
+  const seen = new Set();
+  for (const alert of [...(Array.isArray(incoming) ? incoming : []), ...(Array.isArray(existing) ? existing : [])]) {
+    const identity = alertIdentity(alert);
+    if (!identity || seen.has(identity)) continue;
+    seen.add(identity);
+    merged.push(alert);
+    if (merged.length >= limit) break;
+  }
+  return merged;
 }
 
 /**
@@ -116,11 +143,11 @@ export function saveMempoolAlerts(alerts) {
  */
 export async function checkAddressMempoolStatus(address, isLive = true) {
   if (typeof address !== 'string' || address.length === 0 || address.length > 100) {
-    return { hasMempoolTx: false, message: 'Invalid address format.' };
+    return { status: 'unavailable', hasMempoolTx: false, message: 'Invalid address format.' };
   }
   const isBitcoinAddress = validateBtcAddress(address).isValid;
   if (isLive && !isBitcoinAddress) {
-    return { hasMempoolTx: false, message: 'Live mempool checks support Bitcoin addresses only.' };
+    return { status: 'unavailable', hasMempoolTx: false, message: 'Live mempool checks support Bitcoin addresses only.' };
   }
   if (isLive) {
     const controller = new AbortController();
@@ -129,36 +156,43 @@ export async function checkAddressMempoolStatus(address, isLive = true) {
       const res = await fetch(`${API_CONFIG.FALLBACK_BASE_URL}/address/${address}/txs/mempool`, { signal: controller.signal });
       if (res.ok) {
         const data = await res.json();
-        if (!Array.isArray(data)) {
-          return { hasMempoolTx: false, message: 'Data source returned an invalid response.' };
+        if (!Array.isArray(data) || !data.every(isValidMempoolTransaction)) {
+          return { status: 'unavailable', hasMempoolTx: false, message: 'Data source returned an invalid response.' };
         }
         const matching = data.map(tx => ({ tx, flow: getAddressFlow(tx, address) })).find(item => item.flow.amountSats > 0);
         if (matching) {
           const { tx: first, flow } = matching;
-          const feeRate = first.fee && first.weight ? Math.round(first.fee / (first.weight / 4)) : 25;
+          const feeRate = Number.isFinite(first.fee) && Number.isFinite(first.weight) && first.weight > 0
+            ? Math.round(first.fee / (first.weight / 4))
+            : null;
           return {
+            status: 'activity',
             hasMempoolTx: true,
             txid: first.txid,
-            feeRate: `${feeRate} satoshis per byte`,
+            feeRate: feeRate === null ? null : `${feeRate} satoshis per byte`,
             amount: `${(flow.amountSats / 1e8).toFixed(4)} BTC`,
             direction: flow.direction,
             type: 'Unconfirmed',
             timestamp: 'Just seen waiting for confirmation'
           };
         }
-        return { hasMempoolTx: false, message: 'No unconfirmed transactions involving this address.' };
+        return { status: 'clear', hasMempoolTx: false, message: 'No unconfirmed transactions involving this address.' };
       } else if (res.status === 429) {
-        return { hasMempoolTx: false, message: 'Data source is busy (rate limit). Try again shortly.' };
+        return { status: 'unavailable', hasMempoolTx: false, message: 'Data source is busy (rate limit). Try again shortly.' };
       }
     } catch (e) {
       if (e.name !== 'AbortError') console.warn("Mempool fetch note:", e.message);
-      return { hasMempoolTx: false, message: e.name === 'AbortError' ? 'Live mempool lookup timed out.' : 'Live mempool lookup is unavailable.' };
+      return {
+        status: 'unavailable',
+        hasMempoolTx: false,
+        message: e.name === 'AbortError' ? 'Live mempool lookup timed out.' : 'Live mempool lookup is unavailable.',
+      };
     } finally {
       clearTimeout(timeoutId);
     }
   }
 
-  if (isLive) return { hasMempoolTx: false, message: 'Live mempool lookup is unavailable.' };
+  if (isLive) return { status: 'unavailable', hasMempoolTx: false, message: 'Live mempool lookup is unavailable.' };
 
   // Sandbox simulation, seeded per address AND per day so the demo feed
   // rotates instead of permanently flagging (or never flagging) an address.
@@ -169,6 +203,7 @@ export async function checkAddressMempoolStatus(address, isLive = true) {
     const btcVal = (((hash + daySeed) % 100) / 20 + 0.05).toFixed(4);
     const feeRate = (20 + ((hash + daySeed) % 40));
     return {
+      status: 'activity',
       hasMempoolTx: true,
       txid: `sim_${(hash + daySeed).toString(16)}009a23fc`,
       feeRate: `${feeRate} satoshis per byte`,
@@ -179,9 +214,32 @@ export async function checkAddressMempoolStatus(address, isLive = true) {
   }
 
   return {
+    status: 'clear',
     hasMempoolTx: false,
     message: 'No unconfirmed transactions. Nothing moved.'
   };
+}
+
+function isValidMempoolTransaction(tx) {
+  if (!tx || typeof tx !== 'object' ||
+      typeof tx.txid !== 'string' || !/^[0-9a-f]{64}$/i.test(tx.txid) ||
+      !Array.isArray(tx.vin) || !Array.isArray(tx.vout)) return false;
+  if (tx.fee !== undefined && (!Number.isSafeInteger(tx.fee) || tx.fee < 0)) return false;
+  if (tx.weight !== undefined && (!Number.isSafeInteger(tx.weight) || tx.weight <= 0)) return false;
+  const validValue = value => Number.isSafeInteger(value) && value >= 0;
+  return tx.vout.every(output =>
+    output && typeof output === 'object' &&
+    validValue(output.value) &&
+    (output.scriptpubkey_address === undefined || output.scriptpubkey_address === null ||
+      typeof output.scriptpubkey_address === 'string')
+  ) && tx.vin.every(input =>
+    input && typeof input === 'object' &&
+    (input.prevout === undefined || input.prevout === null ||
+      (typeof input.prevout === 'object' &&
+        (input.prevout.value === undefined || validValue(input.prevout.value)) &&
+        (input.prevout.scriptpubkey_address === undefined || input.prevout.scriptpubkey_address === null ||
+          typeof input.prevout.scriptpubkey_address === 'string')))
+  );
 }
 
 function getAddressFlow(tx, address) {
@@ -199,6 +257,8 @@ function getAddressFlow(tx, address) {
 let activeWs = null;
 let wsStatus = 'DISCONNECTED';
 let reconnectTimer = null;
+let reconnectEnabled = false;
+let connectionGeneration = 0;
 const alertListeners = new Set();
 const statusListeners = new Set();
 
@@ -232,8 +292,10 @@ function setWsStatus(status) {
 
 export function emitMempoolAlert(alert) {
   const currentAlerts = getMempoolAlerts();
-  if (currentAlerts.some(existing => existing.txid === alert.txid)) return false;
-  const updated = [alert, ...currentAlerts.filter(a => a.txid !== alert.txid)].slice(0, 50);
+  const identity = alertIdentity(alert);
+  if (!identity) return false;
+  if (currentAlerts.some(existing => alertIdentity(existing) === identity)) return false;
+  const updated = mergeMempoolAlerts([alert], currentAlerts, 50);
   saveMempoolAlerts(updated);
 
   alertListeners.forEach(fn => {
@@ -266,6 +328,7 @@ export function initMempoolWebSocket({ wsUrl = 'wss://mempool.space/api/v1/ws', 
     return null;
   }
 
+  reconnectEnabled = true;
   if (activeWs && (activeWs.readyState === window.WebSocket.OPEN || activeWs.readyState === window.WebSocket.CONNECTING)) {
     refreshMempoolAddressTracking();
     return activeWs;
@@ -279,14 +342,17 @@ export function initMempoolWebSocket({ wsUrl = 'wss://mempool.space/api/v1/ws', 
 
   try {
     const ws = new window.WebSocket(wsUrl);
+    const generation = ++connectionGeneration;
     activeWs = ws;
 
     ws.onopen = () => {
+      if (activeWs !== ws || generation !== connectionGeneration) return;
       setWsStatus('CONNECTED');
       refreshMempoolAddressTracking();
     };
 
     ws.onmessage = (event) => {
+      if (activeWs !== ws || generation !== connectionGeneration) return;
       try {
         const message = JSON.parse(event.data);
         const watched = getWatchlist()
@@ -304,7 +370,7 @@ export function initMempoolWebSocket({ wsUrl = 'wss://mempool.space/api/v1/ws', 
         }
 
         for (const { tx, hintedAddress } of observed) {
-          if (!tx?.txid || tx.status?.confirmed === true) continue;
+          if (!isValidMempoolTransaction(tx) || tx.status?.confirmed === true) continue;
           const candidates = hintedAddress ? [hintedAddress] : watched;
           const address = candidates.find(candidate => getAddressFlow(tx, candidate).amountSats > 0);
           if (!address) continue;
@@ -321,32 +387,48 @@ export function initMempoolWebSocket({ wsUrl = 'wss://mempool.space/api/v1/ws', 
             timestamp: new Date().toISOString(),
           });
         }
-      } catch {}
+      } catch (error) {
+        console.warn('Ignoring malformed mempool WebSocket message:', error);
+      }
     };
 
-    ws.onerror = () => setWsStatus('ERROR');
+    ws.onerror = () => {
+      if (activeWs === ws && generation === connectionGeneration) setWsStatus('ERROR');
+    };
     ws.onclose = () => {
+      if (activeWs !== ws || generation !== connectionGeneration) return;
       setWsStatus('DISCONNECTED');
       activeWs = null;
-      if (autoReconnect) {
-        reconnectTimer = setTimeout(() => initMempoolWebSocket({ wsUrl, autoReconnect }), 5000);
+      if (autoReconnect && reconnectEnabled) {
+        const closedGeneration = generation;
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          if (reconnectEnabled && connectionGeneration === closedGeneration) {
+            initMempoolWebSocket({ wsUrl, autoReconnect });
+          }
+        }, 5000);
       }
     };
     return ws;
-  } catch {
+  } catch (error) {
     setWsStatus('ERROR');
+    console.warn('Could not initialize mempool WebSocket:', error);
     return null;
   }
 }
 export function closeMempoolWebSocket() {
+  reconnectEnabled = false;
+  connectionGeneration++;
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
   if (activeWs) {
-    try { activeWs.close(); } catch {}
+    const ws = activeWs;
     activeWs = null;
+    try { ws.close(); } catch (error) {
+      console.warn('Could not close mempool WebSocket:', error);
+    }
   }
   setWsStatus('DISCONNECTED');
 }
-

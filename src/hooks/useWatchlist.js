@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { safeGetItem, safeSetItem } from '../utils/storage';
 import { isJoinableAddress } from '../utils/syndicateAnalysis';
 import { makeWatchEntry, normalizeWatchlist, MAX_WATCHLIST } from '../utils/watchlistManager';
@@ -9,10 +9,6 @@ const entryAddress = (entry) => (typeof entry === 'string' ? entry : entry?.addr
 
 export function useWatchlist() {
   const [watchlist, setWatchlist] = useState(() => normalizeWatchlist(safeGetItem(STORAGE_KEY, [])));
-
-  useEffect(() => {
-    safeSetItem(STORAGE_KEY, watchlist);
-  }, [watchlist]);
 
   const isWatched = useCallback((address) => {
     if (!address) return false;
@@ -26,15 +22,15 @@ export function useWatchlist() {
     if (!isJoinableAddress(address)) return 'invalid';
     const trimmed = address.trim();
     if (watchlist.some(entry => entryAddress(entry) === trimmed)) {
-      setWatchlist(prev => prev.filter(entry => entryAddress(entry) !== trimmed));
+      const updated = watchlist.filter(entry => entryAddress(entry) !== trimmed);
+      if (!safeSetItem(STORAGE_KEY, updated)) return 'storage_error';
+      setWatchlist(updated);
       return 'removed';
     }
     if (watchlist.length >= MAX_WATCHLIST) return 'full';
-    setWatchlist(prev => (
-      prev.some(entry => entryAddress(entry) === trimmed)
-        ? prev
-        : [...prev, makeWatchEntry(trimmed, { notes: 'Added from graph.' })]
-    ));
+    const updated = [...watchlist, makeWatchEntry(trimmed, { notes: 'Added from graph.' })];
+    if (!safeSetItem(STORAGE_KEY, updated)) return 'storage_error';
+    setWatchlist(updated);
     return 'added';
   }, [watchlist]);
 
@@ -42,15 +38,18 @@ export function useWatchlist() {
     if (!isJoinableAddress(address)) return false;
     const t = address.trim();
     if (watchlist.some(entry => entryAddress(entry) === t) || watchlist.length >= MAX_WATCHLIST) return false;
-    setWatchlist(prev => (
-      prev.some(entry => entryAddress(entry) === t) ? prev : [...prev, makeWatchEntry(t)]
-    ));
+    const updated = [...watchlist, makeWatchEntry(t)];
+    if (!safeSetItem(STORAGE_KEY, updated)) return false;
+    setWatchlist(updated);
     return true;
   }, [watchlist]);
 
   const remove = useCallback((address) => {
-    setWatchlist(prev => prev.filter(entry => entryAddress(entry) !== address));
-  }, []);
+    const updated = watchlist.filter(entry => entryAddress(entry) !== address);
+    if (!safeSetItem(STORAGE_KEY, updated)) return false;
+    setWatchlist(updated);
+    return true;
+  }, [watchlist]);
 
   return { watchlist, isWatched, toggle, add, remove, count: watchlist.length };
 }

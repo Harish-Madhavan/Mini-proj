@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>AegisTrace | Presentation & Demo Guide</title>
+  <style>
+    :root {
+      --bg: #07101d;
+      --panel: #101d2d;
+      --panel-2: #142438;
+      --line: #28415c;
+      --text: #eef5ff;
+      --muted: #a4b5c8;
+      --blue: #66b9ff;
+      --teal: #54dfc2;
+      --amber: #ffcb74;
+      --red: #ff8585;
+      --green: #84e2a5;
+      font-family: Inter, "Segoe UI", Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
+    body { overflow: hidden; }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .deck { min-height: 100vh; display: grid; place-items: center; padding: 28px 28px 84px; }
+    .slide {
+      display: none; position: relative; width: min(1200px, 100%); height: min(675px, calc(100vh - 112px));
+      min-height: 490px; overflow: auto; padding: 48px 58px 42px; border: 1px solid var(--line);
+      border-radius: 22px; background:
+        radial-gradient(ellipse at 86% 0%, rgba(39, 111, 168, .18), transparent 38%),
+        linear-gradient(145deg, #0d1a2a 0%, #091321 75%);
+      box-shadow: 0 24px 80px rgba(0,0,0,.38);
+    }
+    .slide.active { display: flex; flex-direction: column; animation: appear .24s ease-out; }
+    @keyframes appear { from { opacity: .35; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    .eyebrow { color: var(--teal); font-size: .73rem; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; }
+    h1 { font-size: clamp(2.6rem, 6vw, 5.2rem); line-height: .98; letter-spacing: -.055em; margin: 20px 0; }
+    h2 { font-size: clamp(1.75rem, 4vw, 3rem); line-height: 1.05; letter-spacing: -.035em; margin: 12px 0 18px; }
+    h3 { margin: 0 0 10px; font-size: 1.02rem; }
+    p { margin: 0 0 12px; color: var(--muted); line-height: 1.55; }
+    ul, ol { margin: 8px 0 0; padding-left: 1.15rem; color: var(--muted); line-height: 1.52; }
+    li { margin: 5px 0; }
+    .subtitle { max-width: 760px; font-size: 1.25rem; }
+    .hero-tag { display: inline-flex; gap: 9px; align-items: center; padding: 9px 13px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: .82rem; }
+    .hero-tag i { width: 8px; height: 8px; background: var(--teal); border-radius: 50%; box-shadow: 0 0 14px var(--teal); }
+    .spacer { flex: 1; min-height: 20px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card { padding: 17px 18px; border: 1px solid var(--line); border-radius: 14px; background: rgba(16,29,45,.84); }
+    .card p:last-child, .card ul:last-child { margin-bottom: 0; }
+    .card .kicker { display: block; color: var(--blue); font-size: .72rem; text-transform: uppercase; letter-spacing: .12em; font-weight: 800; margin-bottom: 8px; }
+    .demo { border-left: 3px solid var(--teal); background: rgba(84,223,194,.075); padding: 12px 15px; border-radius: 0 10px 10px 0; margin-top: 15px; color: var(--muted); font-size: .91rem; line-height: 1.5; }
+    .demo strong { color: var(--teal); }
+    .warning { border-left-color: var(--amber); background: rgba(255,203,116,.08); }
+    .warning strong { color: var(--amber); }
+    .danger { border-left-color: var(--red); background: rgba(255,133,133,.08); }
+    .danger strong { color: var(--red); }
+    .pill { display: inline-block; padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: .74rem; margin: 3px 4px 3px 0; }
+    .pill.blue { color: var(--blue); border-color: rgba(102,185,255,.35); }
+    .pill.green { color: var(--green); border-color: rgba(132,226,165,.35); }
+    .pill.amber { color: var(--amber); border-color: rgba(255,203,116,.35); }
+    .pill.red { color: var(--red); border-color: rgba(255,133,133,.35); }
+    .mono { font-family: "Cascadia Code", Consolas, monospace; overflow-wrap: anywhere; color: #d7eaff; font-size: .87rem; }
+    .metric { font-size: 1.48rem; font-weight: 800; color: var(--text); margin: 7px 0; }
+    .flow { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 22px 0; }
+    .flow .node { min-width: 135px; text-align: center; padding: 13px 15px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); }
+    .flow .arrow { color: var(--teal); font-size: 1.35rem; }
+    .small { font-size: .78rem; }
+    .source { color: #8299b2; font-size: .7rem; }
+    .footer { margin-top: auto; padding-top: 17px; display: flex; justify-content: space-between; gap: 12px; color: #8299b2; font-size: .7rem; border-top: 1px solid rgba(40,65,92,.6); }
+    .controls { position: fixed; left: 0; right: 0; bottom: 0; height: 68px; display: flex; align-items: center; justify-content: center; gap: 14px; background: rgba(5,12,22,.95); border-top: 1px solid var(--line); z-index: 4; }
+    .controls button { border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 9px 14px; border-radius: 9px; cursor: pointer; font: inherit; }
+    .controls button:hover { border-color: var(--blue); }
+    .controls button:disabled { opacity: .38; cursor: default; }
+    .counter { min-width: 75px; text-align: center; color: var(--muted); font-size: .84rem; }
+    .progress { position: fixed; z-index: 5; bottom: 67px; left: 0; height: 3px; background: var(--teal); transition: width .2s ease; }
+    .speaker { margin-top: 13px; padding: 10px 13px; border: 1px dashed #385370; border-radius: 10px; color: #92a9c1; font-size: .78rem; line-height: 1.4; }
+    .speaker b { color: var(--blue); }
+    .cols { display: grid; grid-template-columns: 1.1fr .9fr; gap: 16px; }
+    .table { width: 100%; border-collapse: collapse; font-size: .8rem; color: var(--muted); }
+    .table th, .table td { border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: left; vertical-align: top; }
+    .table th { color: var(--text); font-weight: 700; }
+    @media (max-width: 780px) {
+      body { overflow: auto; }
+      .deck { padding: 10px 10px 78px; display: block; }
+      .slide { height: calc(100vh - 94px); min-height: 560px; padding: 29px 24px; border-radius: 14px; }
+      .grid, .grid.three, .cols { grid-template-columns: 1fr; }
+      .flow { align-items: stretch; flex-direction: column; }
+      .flow .arrow { transform: rotate(90deg); text-align: center; }
+    }
+    @media print {
+      @page { size: 13.333in 7.5in; margin: 0; }
+      html, body { background: white; overflow: visible; }
+      .deck { display: block; padding: 0; }
+      .slide, .slide.active { display: flex !important; width: 13.333in; height: 7.5in; min-height: 0; border: 0; border-radius: 0; box-shadow: none; page-break-after: always; padding: .55in .65in .45in; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .controls, .progress { display: none; }
+      a { color: var(--blue); }
+    }
+  </style>
+</head>
+<body>
+  <main class="deck" aria-live="polite">
+    <section class="slide active">
+      <span class="eyebrow">Bitcoin investigation workflow</span>
+      <h1>AegisTrace</h1>
+      <p class="subtitle">From on-chain movement to reviewable, prioritized investigative leads.</p>
+      <div style="display:flex;gap:9px;flex-wrap:wrap;margin:15px 0 26px">
+        <span class="hero-tag"><i></i> Analyst-guided</span>
+        <span class="hero-tag">Evidence-aware</span>
+        <span class="hero-tag">Mainnet trace + case workflow</span>
+      </div>
+      <div class="grid three">
+        <div class="card"><span class="kicker">Observe</span><h3>Trace transaction outputs</h3><p>Build a value-flow graph from public explorer data.</p></div>
+        <div class="card"><span class="kicker">Assess</span><h3>Compare evidence</h3><p>Review heuristics, taint models, risk signals, and source records.</p></div>
+        <div class="card"><span class="kicker">Act</span><h3>Prioritize follow-up</h3><p>Record evidence-backed leads and investigator actions.</p></div>
+      </div>
+      <div class="spacer"></div>
+      <div class="speaker"><b>Opening:</b> “This is an investigative aid—not an attribution oracle. I’ll show the flow from a public transaction to a documented lead, and call out what the data can and cannot prove.”</div>
+      <div class="footer"><span>Presentation + live-demo guide</span><span>Use ← / → to navigate · F for fullscreen · Print to export PDF</span></div>
+    </section>
+
+    <section class="slide">
+      <span class="eyebrow">01 · The workflow</span><h2>One case, from signal to follow-up</h2>
+      <div class="flow">
+        <div class="node"><b>Dashboard</b><div class="small">Open / create case</div></div><span class="arrow">→</span>
+        <div class="node"><b>Trace</b><div class="small">Explore outputs</div></div><span class="arrow">→</span>
+        <div class="node"><b>Review</b><div class="small">Evidence + risk</div></div><span class="arrow">→</span>
+        <div class="node"><b>Recovery</b><div class="small">Prioritize actions</div></div>
+      </div>
+      <div class="grid">
+        <div class="card"><span class="kicker">Investigator tasks</span><ol><li>Start with a transaction ID or address.</li><li>Inspect branches and output-level details.</li><li>Assess alternate explanations and evidence gaps.</li><li>Document lawful, sourced follow-up actions.</li></ol></div>
+        <div class="card"><span class="kicker">What the app contributes</span><ul><li>Gateway failover and response validation.</li><li>Graph, heuristics, taint views, and case persistence.</li><li>Review workflows with explicit limitations.</li><li>Draft notices/reports; no automatic sending or certification.</li></ul></div>
+      </div>
+      <div class="demo"><strong>Live demo setup:</strong> From the project folder run <span class="mono">npm run dev</span>, open the local app, and use the Dashboard to start. Network features need internet access and may be rate-limited by public gateways.</div>
+      <div class="speaker"><b>Say:</b> “The tool narrows and organizes investigative work. The analyst remains responsible for validating each material claim.”</div>
+      <div class="footer"><span>AegisTrace</span><span>Workflow overview</span></div>
+    </section>
+
+    <section class="slide">
+      <span class="eyebrow">02 · Evidence vocabulary</span><h2>Keep facts, hypotheses, and outcomes separate</h2>
+      <div class="grid three">
+        <div class="card"><span class="pill blue">ON-CHAIN RECORD</span><h3 style="margin-top:12px">What a provider reports</h3><p>Transaction IDs, outputs, values, timestamps, spend status, and graph links.</p><p class="small">Check the provider and preserve its raw response where needed.</p></div>
+        <div class="card"><span class="pill amber">ANALYTICAL HYPOTHESIS</span><h3 style="margin-top:12px">What patterns suggest</h3><p>Change/payment candidates, ownership clusters, taint proportions, and risk scores.</p><p class="small">Confidence is not a probability of ownership or wrongdoing.</p></div>
+        <div class="card"><span class="pill green">REPORTED OUTCOME</span><h3 style="margin-top:12px">What an investigator records</h3><p>Request submitted, response received, or recovery reported with supporting reference.</p><p class="small">The application does not independently confirm recovery.</p></div>
+      </div>
+      <div class="demo warning"><strong>Important:</strong> A verified flag means a record is marked verified in case data; it does not mean AegisTrace authenticated the source or proved who controls an address.</div>
+      <div class="speaker"><b>Transition:</b> “These labels are the guardrails for every feature we’ll see next.”</div>
+      <div class="footer"><span>AegisTrace</span><span>Evidence model</span></div>
+    </section>
+
+    <section class="slide">
+      <span class="eyebrow">03 · Dashboard & case management</span><h2>Make the investigation the unit of work</h2>
+      <div class="cols">
+        <div class="card"><span class="kicker">On screen</span><ol><li>Create or select an investigation case.</li><li>Paste a Bitcoin transaction ID or address into search.</li><li>Open the trace and keep related records in the case portfolio.</li><li>Use case notes to record source, scope, and assumptions.</li></ol></div>
+        <div class="card"><span class="kicker">Example trace input</span><p><b>Transaction ID</b></p><p class="mono">f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e9831e9e16</p><p><b>Trace depth:</b> 2</p><p><a href="https://blockstream.info/tx/f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e9831e9e16" target="_blank" rel="noopener">Open transaction in Blockstream</a></p><p class="small">Historic Satoshi-to-Hal payment/change example; not illicit. Live lookup depends on provider availability.</p></div>
+      </div>
+      <div class="demo"><strong>Show:</strong> Dashboard → create/select a case → paste the transaction ID → start tracing. Narrate that the app queries public data providers when the user requests a lookup.</div>
+      <div class="speaker"><b>Presenter cue:</b> Mention browser storage is not encrypted, and live queries disclose the searched transaction/address to the public provider.</div>
+      <div class="footer"><span>AegisTrace</span><span>Dashboard · local case portfolio</span></div>
+    </section>
+
+    <section class="slide">
+      <span class="eyebrow">04 · Trace graph</span><h2>Follow outputs—not just addresses</h2>
+      <div class="flow">
+        <div class="node"><b>Transaction</b><div class="small">input / outputs</div></div><span class="arrow">→</span>
+        <div class="node"><b>Output (UTXO)</b><div class="small">value + script</div></div><span class="arrow">→</span>
+        <div class="node"><b>Spending transaction</b><div class="small">input outpoint</div></div><span class="arrow">→</span>
+        <div class="node"><b>Next outputs</b><div class="small">branches</div></div>
+      </div>
+      <div class="grid">
+        <div class="card"><span class="kicker">Graph safeguards</span><ul><li>Repeated-address outputs remain distinct UTXOs.</li><li>Multiple inputs spending a transaction retain their own edges.</li><li>Branch pruning, depth, and mixer halts limit what can be followed.</li><li>Missing data should be treated as a trace boundary.</li></ul></div>
+        <div class="card"><span class="kicker">Example: first person-to-person transaction</span><p><b>10 BTC output:</b> source-corroborated payment label.</p><p><b>40 BTC output:</b> source-corroborated change label.</p><p class="source">The app can reproduce this curated case; one historic case is not an accuracy estimate.</p></div>
+      </div>
+      <div class="demo"><strong>Enter:</strong> Paste the transaction ID from the Dashboard example and set trace depth to 2. <strong>Show:</strong> Tracing → select a node → inspect output index, transaction reference, spend status, and adjacent graph links. Zoom/pan and select a branch.</div>
+      <div class="footer"><span>AegisTrace</span><span>Tracing</span></div>
+    </section>
+
+    <section class="slide">
+      <span class="eyebrow">05 · Payment/change analysis</span><h2>Explain why an output is a candidate</h2>
+      <div class="grid">
+        <div class="card"><span class="kicker">Inputs to the heuristic</span><ul><li>Script and address reuse.</li><li>Output amount / relative share.</li><li>Transaction structure and timing.</li><li>Available fee and chain context.</li></ul><p class="small">Some signals may be unavailable; ambiguous outputs should remain uncertain.</p></div>
+        <div class="card"><span class="kicker">Example: historic split</span><p>In the curated transaction above, the corpus labels the 10 BTC output “payment” and 40 BTC output “change.” The tracer can be exercised against mocked explorer data as a regression fixture.</p><p><span class="pill amber">Candidate, not identity</span><span class="pill">Confidence ≠ probability</span></p></div>
+      </div>
+      <div class="demo"><strong>Show:</strong> Select both outputs in the graph and compare their classification, heuristic factors, and confidence. Open transaction details to show exact output indices.</div>
+      <div class="demo warning"><strong>Say:</strong> “Payment candidate does not prove a payee’s identity. Fresh addresses and sole outputs can still be change, self-transfer, or another pattern.”</div>
+      <div class="footer"><span>AegisTrace</span><span>Trace heuristics</span></div>
+    </section>
+
+    <section class="slide">
+      <span class="eyebrow">06 · Taint analysis</span><h2>Compare accounting assumptions</h2>
+      <div class="grid three">
+        <div class="card"><span class="pill blue">PROPORTIONATE / HAIRCUT</span><p style="margin-top:10px">Carries a proportional taint share through mixed value.</p></div>
+        <div class="card"><span class="pill amber">FIFO</span><p style="margin-top:10px">Allocates value by an assumed first-in-first-out ordering.</p></div>
+        <div class="card"><span class="pill red">POISON</span><p style="margin-top:10px">Marks all output value contaminated if any tainted input contributes.</p></div>
+      </div>
+      <div class="card" style="margin-top:14px"><span class="kicker">Illustrative arithmetic—not a real case</span><p>Suppose 1 BTC of a 2 BTC input is marked tainted and the transaction pays 1.5 BTC to an output. A proportionate model would estimate 0.75 BTC tainted there. FIFO or poison can produce different allocations based on their assumptions.</p></div>
+      <div class="demo"><strong>Show:</strong> Tracing → taint controls/heatmap → switch accounting model. Point out that totals are model-dependent and not proof that specific satoshis can be identified on-chain.</div>
+      <div class="speaker"><b>Presenter cue:</b> Never report the illustrative 0.75 BTC as a recovered or legally attributable amount.</div>
+      <div class="footer"><span>AegisTrace</span><span>Taint analysis</span></div>
+    </section>
+
+    <section class="slide">
+      <span class="eyebrow">07 · Clustering & typologies</span><h2>Surface patterns for review</h2>
+      <div class="grid">
+        <div class="card"><span class="kicker">Clustering</span><p>Co-spending and graph relationships can suggest that addresses may be connected.</p><p><span class="pill amber">Shared input ≠ proven common owner</span></p></div>
+        <div class="card"><span class="kicker">Transaction shapes</span><p>Batch fan-out, consolidation, peel-like splits, and mixing patterns can help triage structure.</p><p><span class="pill amber">Pattern ≠ criminal intent</span></p></div>
+      </div>
+      <div class="demo"><strong>Show:</strong> Clustering → enter a transaction ID or address → inspect a co-spending group or peel pattern. Example local corpus candidate for fan-out exercise: <span class="mono">4f11f4965a2e5a61407c4f9a68db803b8e8d5bb3ffb85f6de17a61159176d042</span>.</div>
+      <div class="demo warning"><strong>Important:</strong> The transaction is a software test/reference example, not independently reviewed ground truth for intent or ownership.</div>
+      <div class="footer"><span>AegisTrace</span><span>Clustering · typologies</span></div>
+    </section>
+
+    <section class="slide">
+      <span class="eyebrow">08 · Linked cases</span><h2>Find overlap—don’t overstate identity</h2>
+      <div class="cols">
+        <div class="card"><span class="kicker">How to demonstrate</span><ol><li>Open Linked cases.</li><li>Load/select at least two investigation cases with an overlapping address.</li><li>Inspect the shared-address relationship and its source graph.</li><li>Record whether the overlap is meaningful or an alternative explanation.</li></ol></div>
+        <div class="card"><span class="kicker">Interpretation</span><p>A shared address may reflect a service, shared custody, a deposit point, or unrelated circumstances. A network edge or score ranks a lead for review; it does not prove one operator or criminal association.</p><p><span class="pill amber">Candidate linkage</span></p></div>
+      </div>
+      <div class="demo"><strong>Show:</strong> Linked cases → select cases → click a linkage → open the underlying address/transactions. If no comparable cases are loaded, explain that the feature needs multiple case graphs to demonstrate.</div>
+      <div class="footer"><span>AegisTrace</span><span>Cross-case correlation</span></div>
+    </section>
+
+    <section class="slide">
+      <span class="eyebrow">09 · Risk triage</span><h2>Prioritize review, not conclusions</h2>
+      <div class="grid">
+        <div class="card"><span class="kicker">Demonstrate</span><ol><li>Open Risk.</li><li>Select a case or candidate.</li><li>Inspect each dimension and contributing factors.</li><li>Change a weight only to show how assumptions affect ordering.</li></ol></div>
+        <div class="card"><span class="kicker">Explain</span><p>Risk scores are configurable analytical prioritization. They are not statutory thresholds, a finding of wrongdoing, or calibrated probabilities of criminality.</p><p>Present the underlying evidence and counter-explanations beside any score.</p></div>
+      </div>
+      <div class="demo"><strong>Use this phrase:</strong> “This score tells us what to inspect next under these assumptions—not what a court or investigator should conclude.”</div>
+      <div class="footer"><span>AegisTrace</span><span>Risk analysis</span></div>
+    </section>
+
+    <section class="slide">
+      <span class="eyebrow">10 · Watchlist & mempool</span><h2>Monitor confirmed targets for new activity</h2>
+      <div class="grid">
+        <div class="card"><span class="kicker">Demo steps</span><ol><li>Open Watchlist.</li><li>Add an address you are authorized to monitor.</li><li>Run a manual mempool check or enable live mode.</li><li>Show activity alert, quiet result, or unavailable/retry state.</li></ol></div>
+        <div class="card"><span class="kicker">Example watchlist inputs</span><p><b>Bitcoin address</b></p><p class="mono">1HB5XMLmzFVj8ALj6mfBsbifRoD4miY36v</p><p><b>Label:</b> Presentation demo — public reference</p><p><b>Group:</b> AegisTrace walkthrough</p><p><b>Risk tier:</b> Unassessed</p><p><a href="https://mempool.space/address/1HB5XMLmzFVj8ALj6mfBsbifRoD4miY36v" target="_blank" rel="noopener">Open in Mempool.space</a></p><p class="small">Public donation-address reference; not a suspect label.</p></div>
+      </div>
+      <div class="demo warning"><strong>After Add:</strong> Run the manual check. Quiet or unavailable is a valid outcome; do not promise an alert. <strong>Privacy:</strong> Live checks send the searched address to Mempool.space. A “quiet” result means no matching unconfirmed transaction was returned at check time—not no activity ever.</div>
+      <div class="footer"><span>AegisTrace</span><span>Watchlist · mempool</span></div>
+    </section>
+
+    <section class="slide">
+      <span class="eyebrow">11 · Cross-chain signals</span><h2>Extract a lead; don’t imply a completed trace</h2>
+      <div class="flow">
+        <div class="node"><b>Bitcoin transaction</b><div class="small">memo / script text</div></div><span class="arrow">→</span>
+        <div class="node"><b>Parser</b><div class="small">candidate destination</div></div><span class="arrow">→</span>
+        <div class="node"><b>External explorer</b><div class="small">separate investigation</div></div>
+      </div>
+      <div class="grid">
+        <div class="card"><span class="kicker">What can be shown</span><p>Script/bridge memo parsing and supported destination address formats provide a cross-chain investigative lead.</p></div>
+        <div class="card"><span class="kicker">What it does not show</span><p>It does not verify that a swap settled, identify the recipient, or trace funds on the other network automatically.</p></div>
+      </div>
+      <div class="demo"><strong>Show:</strong> In Tracing, select a node that includes an embedded message/bridge memo if available, then inspect the decoded fields and external-explorer link. If the chosen case has none, use the parser’s supported examples and label them illustrative.</div>
+      <div class="footer"><span>AegisTrace</span><span>Cross-chain intelligence</span></div>
+    </section>
+
+    <section class="slide">
+      <span class="eyebrow">12 · Notices & reports</span><h2>Prepare drafts for qualified human review</h2>
+      <div class="grid">
+        <div class="card"><span class="kicker">Request prep</span><p>Show how the application prepares a scoped internal request worksheet from recorded case details. It is not sent automatically.</p><p><span class="pill amber">Draft only</span></p></div>
+        <div class="card"><span class="kicker">Reports</span><p>Generate a report with sources, case facts, and a SHA-256 digest of selected payload data.</p><p><span class="pill amber">Digest ≠ signature or proof of source</span></p></div>
+      </div>
+      <div class="demo"><strong>Show:</strong> Request prep → fill sample case fields → review the generated worksheet; then Report → inspect limitations and digest. Use fictional names and do not send the sample.</div>
+      <div class="demo danger"><strong>Do not claim:</strong> The system issues legal process, authenticates evidence, creates a certificate-backed signature, or guarantees admissibility.</div>
+      <div class="footer"><span>AegisTrace</span><span>Notices · reports</span></div>
+    </section>
+
+    <section class="slide">
+      <span class="eyebrow">13 · Evidence review & custody</span><h2>Make gaps visible and preserve context</h2>
+      <div class="grid">
+        <div class="card"><span class="kicker">Evidence review</span><ul><li>Review derived transaction references separately from investigator-entered claims.</li><li>Inspect alternative paths and unresolved evidence gaps.</li><li>Record review status and rationale.</li></ul></div>
+        <div class="card"><span class="kicker">Integrity tools</span><ul><li>Case history and source-manifest context.</li><li>Hash-chained event records and report digest.</li><li>Explicit warning: these are not signed, externally anchored seals.</li></ul></div>
+      </div>
+      <div class="demo"><strong>Enter a claim:</strong> Classification: <span class="mono">Attribution hypothesis</span> · Statement: <span class="mono">The terminal node may represent a service deposit; the owner is not established.</span> · Source: <span class="mono">Presentation exercise — no independent attribution source supplied</span>. Add reviewer note <span class="mono">Exercise only; source not independently checked; no identity conclusion.</span>, then choose “Reviewed by investigator.”</div>
+      <div class="demo"><strong>Show:</strong> Evidence review → distinguish graph/on-chain references from the entered hypothesis → review the checklist for missing source/time/contact evidence. Review status documents workflow; it does not authenticate the source or prove ownership.</div>
+      <div class="footer"><span>AegisTrace</span><span>Evidence review · integrity</span></div>
+    </section>
+
+    <section class="slide">
+      <span class="eyebrow">14 · Asset recovery</span><h2>Turn trace context into a prioritized follow-up queue</h2>
+      <div class="grid">
+        <div class="card"><span class="kicker">Lead information</span><ul><li>Attributed taint estimate and gross moved value.</li><li>Last observed transaction and destination type only when recorded evidence supports them.</li><li>Unspent/available amount only when chain or case data supports it.</li><li>Priority combines value, recency, evidence, and verified-contact records.</li></ul></div>
+        <div class="card"><span class="kicker">Action workflow</span><ol><li>Add a preservation or lawful information-request action.</li><li>Attach a reference and follow-up date.</li><li>Move through allowed action states.</li><li>Record an outcome reference before marking recovery confirmed.</li></ol></div>
+      </div>
+      <div class="demo"><strong>Select:</strong> Built-in case <span class="mono">BTC Transaction Trace: 4b9a8f2e...</span> → Recovery. Inspect its terminal lead and transaction-reference coverage. Add action type <span class="mono">Prepare preservation request</span>, note <span class="mono">Presentation exercise only — no request prepared or submitted</span>, and a future follow-up date (example: <span class="mono">2026-11-11</span>). Keep it planned or move to preparing.</div>
+      <div class="demo warning"><strong>Demo data:</strong> This built-in case is synthetic, and its graph edges have no transaction IDs. Amounts are illustrative, not real trace evidence. Do not mark recovery confirmed.</div>
+      <div class="demo warning"><strong>Important:</strong> Taint is an analytical estimate. “Verified contact” is a case record for independent review. An investigator-reported recovery outcome is not independently validated by the software.</div>
+      <div class="footer"><span>AegisTrace</span><span>Recovery</span></div>
+    </section>
+
+    <section class="slide">
+      <span class="eyebrow">15 · Demo transaction examples</span><h2>Choose examples carefully</h2>
+      <table class="table">
+        <thead><tr><th>Purpose</th><th>Example</th><th>Safe description</th></tr></thead>
+        <tbody>
+          <tr><td>Payment + change</td><td class="mono">f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e9831e9e16</td><td>Historic source-corroborated 10 BTC payment / 40 BTC change regression case.</td></tr>
+          <tr><td>Aggregation / sweep pattern</td><td class="mono">35e5d5fe8c8128cfa6884f56be5817e4138c58c91b79d78d3e78a8d365b9d8a7</td><td>Unverified candidate corpus example; call it a suspicious-pattern demo, not confirmed ransomware.</td></tr>
+          <tr><td>Batch fan-out structure</td><td class="mono">4f11f4965a2e5a61407c4f9a68db803b8e8d5bb3ffb85f6de17a61159176d042</td><td>Candidate structure/capacity example; intent and attribution are not established.</td></tr>
+        </tbody>
+      </table>
+      <div class="demo"><strong>Explorer links:</strong> <a href="https://blockstream.info/tx/f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e9831e9e16" target="_blank" rel="noopener">historic payment</a> · <a href="https://blockstream.info/tx/35e5d5fe8c8128cfa6884f56be5817e4138c58c91b79d78d3e78a8d365b9d8a7" target="_blank" rel="noopener">sweep candidate</a> · <a href="https://blockstream.info/tx/4f11f4965a2e5a61407c4f9a68db803b8e8d5bb3ffb85f6de17a61159176d042" target="_blank" rel="noopener">fan-out candidate</a></div>
+      <div class="footer"><span>AegisTrace</span><span>Example inputs from the project corpus</span></div>
+    </section>
+
+    <section class="slide">
+      <span class="eyebrow">16 · Operational limits</span><h2>What the demo should not promise</h2>
+      <div class="grid">
+        <div class="card"><span class="pill red">NOT PROVEN BY THE APP</span><ul><li>Address ownership or real-world identity.</li><li>Criminal intent from transaction shape.</li><li>Legal admissibility or source authenticity.</li><li>Accuracy on unseen cases from one historic fixture.</li></ul></div>
+        <div class="card"><span class="pill amber">REQUIRES INVESTIGATOR REVIEW</span><ul><li>Alternative explanations and path completeness.</li><li>Provider response/source and attribution evidence.</li><li>Legal authority and service contact validity.</li><li>Recovery status and outcome documentation.</li></ul></div>
+      </div>
+      <div class="demo"><strong>One-line caveat:</strong> “AegisTrace organizes public-chain observations and investigative hypotheses; it does not independently establish identity, intent, or legal conclusions.”</div>
+      <div class="footer"><span>AegisTrace</span><span>Responsible interpretation</span></div>
+    </section>
+
+    <section class="slide">
+      <span class="eyebrow">17 · Suggested 8-minute walkthrough</span><h2>Keep the demo moving</h2>
+      <table class="table">
+        <thead><tr><th>Time</th><th>Action</th><th>Takeaway</th></tr></thead>
+        <tbody>
+          <tr><td>0:00–0:45</td><td>Dashboard + choose case</td><td>Case-based workflow</td></tr>
+          <tr><td>0:45–2:15</td><td>Trace historic txid; inspect both outputs</td><td>Output-level graph + candidate roles</td></tr>
+          <tr><td>2:15–3:15</td><td>Taint models / clustering</td><td>Different assumptions, useful patterns</td></tr>
+          <tr><td>3:15–4:15</td><td>Risk + linked cases</td><td>Prioritize review; overlap is not ownership</td></tr>
+          <tr><td>4:15–5:00</td><td>Watchlist status</td><td>Live monitoring with unavailable/quiet distinction</td></tr>
+          <tr><td>5:00–6:00</td><td>Evidence review</td><td>Sources, hypotheses, gaps</td></tr>
+          <tr><td>6:00–7:15</td><td>Recovery action</td><td>Prioritized lead → auditable follow-up</td></tr>
+          <tr><td>7:15–8:00</td><td>Report / limitations</td><td>Draft and digest, not certification</td></tr>
+        </tbody>
+      </table>
+      <div class="speaker"><b>Offline backup:</b> If gateways rate-limit or the network is unavailable, show the historic regression case and explain that the integrated tests validate software behavior—not general real-world accuracy.</div>
+      <div class="footer"><span>AegisTrace</span><span>Presenter run sheet</span></div>
+    </section>
+
+    <section class="slide">
+      <span class="eyebrow">Closing</span><h2>From trace to responsible action</h2>
+      <div class="flow">
+        <div class="node"><b>Trace</b><div class="small">preserve references</div></div><span class="arrow">→</span>
+        <div class="node"><b>Review</b><div class="small">test hypotheses</div></div><span class="arrow">→</span>
+        <div class="node"><b>Prioritize</b><div class="small">use evidence + recency</div></div><span class="arrow">→</span>
+        <div class="node"><b>Document</b><div class="small">lawful follow-up</div></div>
+      </div>
+      <p class="subtitle">The value is not a claim of certainty. It is a clearer, more reviewable path from blockchain data to investigator decisions.</p>
+      <div class="spacer"></div>
+      <div class="hero-tag"><i></i> AegisTrace · Evidence-aware Bitcoin investigations</div>
+      <div class="footer"><span>Thank you</span><span>Questions</span></div>
+    </section>
+  </main>
+  <div class="progress" id="progress"></div>
+  <nav class="controls" aria-label="Presentation controls">
+    <button id="prev" type="button" aria-label="Previous slide">← Back</button>
+    <span class="counter" id="counter"></span>
+    <button id="next" type="button" aria-label="Next slide">Next →</button>
+    <button id="full" type="button" aria-label="Toggle fullscreen">Fullscreen</button>
+    <button id="print" type="button" aria-label="Print or export PDF">Print / PDF</button>
+  </nav>
+  <script>
+    (() => {
+      const slides = [...document.querySelectorAll('.slide')];
+      const counter = document.getElementById('counter');
+      const progress = document.getElementById('progress');
+      const prev = document.getElementById('prev');
+      const next = document.getElementById('next');
+      let index = 0;
+      function showSlide(nextIndex) {
+        index = Math.max(0, Math.min(slides.length - 1, nextIndex));
+        slides.forEach((slide, i) => {
+          slide.classList.toggle('active', i === index);
+          slide.setAttribute('aria-hidden', i === index ? 'false' : 'true');
+        });
+        counter.textContent = `${index + 1} / ${slides.length}`;
+        progress.style.width = `${((index + 1) / slides.length) * 100}%`;
+        prev.disabled = index === 0;
+        next.disabled = index === slides.length - 1;
+        history.replaceState(null, '', `#slide-${index + 1}`);
+      }
+      prev.addEventListener('click', () => showSlide(index - 1));
+      next.addEventListener('click', () => showSlide(index + 1));
+      document.getElementById('full').addEventListener('click', async () => {
+        if (!document.fullscreenElement) await document.documentElement.requestFullscreen?.();
+        else await document.exitFullscreen?.();
+      });
+      document.getElementById('print').addEventListener('click', () => window.print());
+      document.addEventListener('keydown', event => {
+        if (['ArrowRight', 'PageDown', ' '].includes(event.key)) { event.preventDefault(); showSlide(index + 1); }
+        else if (['ArrowLeft', 'PageUp'].includes(event.key)) { event.preventDefault(); showSlide(index - 1); }
+        else if (event.key.toLowerCase() === 'f') document.getElementById('full').click();
+        else if (event.key === 'Home') showSlide(0);
+        else if (event.key === 'End') showSlide(slides.length - 1);
+      });
+      const initial = Number(location.hash.match(/slide-(\d+)/)?.[1]);
+      showSlide(Number.isInteger(initial) && initial > 0 ? initial - 1 : 0);
+    })();
+  </script>
+</body>
+</html>

@@ -282,7 +282,10 @@ export default function Dashboard() {
                   <span className="mono-addr" style={{ color: 'var(--text-secondary)' }} title={addr}>{addr.slice(0, 12)}…{addr.slice(-6)}</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                     <button onClick={() => handleSearch(addr)} className="btn-quiet" style={{ fontSize: '0.79rem' }} aria-label={`Trace ${addr}`}>Trace</button>
-                    <button onClick={() => { remove(addr); showToast('Removed from watchlist','info'); }} aria-label="Remove" className="icon-btn"><X size={13} /></button>
+                    <button onClick={() => {
+                      if (remove(addr)) showToast('Removed from watchlist', 'info');
+                      else showToast('Could not save the updated watchlist in browser storage.', 'error');
+                    }} aria-label="Remove" className="icon-btn"><X size={13} /></button>
                   </div>
                 </div>
               );

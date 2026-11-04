@@ -18,6 +18,7 @@ import {
   removeFromWatchlist, 
   getMempoolAlerts, 
   saveMempoolAlerts, 
+  mergeMempoolAlerts,
   checkAddressMempoolStatus,
   initMempoolWebSocket,
   refreshMempoolAddressTracking,
@@ -53,7 +54,7 @@ export default function WatchlistMonitor() {
     }
 
     const unsubAlert = onMempoolAlert((newAlert) => {
-      setAlerts(prev => [newAlert, ...prev.filter(a => a.txid !== newAlert.txid)].slice(0, 30));
+      setAlerts(prev => mergeMempoolAlerts([newAlert], prev, 30));
       showToast(`⚡ 0-Conf Alert: ${newAlert.amount} broadcast for watched wallet!`, 'warning', 5000);
     });
 
@@ -102,8 +103,13 @@ export default function WatchlistMonitor() {
   };
 
   const handleRemove = (address) => {
-    setWatchlist(removeFromWatchlist(address));
-    showToast("Address removed.", "info");
+    const result = removeFromWatchlist(address);
+    if (result.success) {
+      setWatchlist(result.watchlist);
+      showToast("Address removed.", "info");
+    } else {
+      showToast(result.message, "error");
+    }
   };
 
   const handleImportCaseSuspects = () => {
@@ -114,6 +120,7 @@ export default function WatchlistMonitor() {
 
     const suspects = activeCase.nodes.filter(n => n.type === 'suspect' || n.type === 'hop');
     let addedCount = 0;
+    let failedCount = 0;
 
     suspects.forEach(node => {
       const addr = node.details?.address;
@@ -126,11 +133,17 @@ export default function WatchlistMonitor() {
           notes: `Imported from Case: ${activeCase.id}`
         });
         if (res.success) addedCount++;
+        else if (res.message?.includes('browser storage')) failedCount++;
       }
     });
 
     setWatchlist(getWatchlist());
-    showToast(`Imported ${addedCount} addresses from the open case.`, "success");
+    showToast(
+      failedCount > 0
+        ? `Imported ${addedCount} addresses; ${failedCount} could not be saved to browser storage.`
+        : `Imported ${addedCount} addresses from the open case.`,
+      failedCount > 0 ? 'error' : 'success'
+    );
   };
 
   const handleCheckAddress = async (address) => {
@@ -149,12 +162,14 @@ export default function WatchlistMonitor() {
         timestamp: 'Just now',
         status: 'Unconfirmed'
       };
-      const updatedAlerts = [newAlert, ...alerts.slice(0, 25)];
+      const updatedAlerts = mergeMempoolAlerts([newAlert], alerts, 30);
       setAlerts(updatedAlerts);
       saveMempoolAlerts(updatedAlerts);
       showToast(`Unconfirmed activity for ${address.slice(0, 8)}.`, "warning");
-    } else {
+    } else if (status.status === 'clear') {
       showToast("No unconfirmed activity.", "info");
+    } else {
+      showToast(status.message || 'Mempool check is unavailable.', "error");
     }
   };
 
@@ -166,6 +181,7 @@ export default function WatchlistMonitor() {
     const queue = [...watchlist];
     const results = {};
     const hits = [];
+    let failedChecks = 0;
 
     while (queue.length > 0) {
       const chunk = queue.splice(0, CONCURRENCY);
@@ -174,14 +190,17 @@ export default function WatchlistMonitor() {
       );
       settled.forEach((res, i) => {
         const item = chunk[i];
-        const status = res.status === 'fulfilled' ? res.value : { hasMempoolTx: false, message: 'Check failed.' };
+        const status = res.status === 'fulfilled'
+          ? res.value
+          : { status: 'unavailable', hasMempoolTx: false, message: 'Check failed.' };
         results[item.address] = status;
         if (status.hasMempoolTx) hits.push({ item, status });
+        if (status.status === 'unavailable') failedChecks++;
       });
       setMempoolResults(prev => ({ ...prev, ...results }));
     }
 
-    const newAlertList = hits.map(({ item, status }) => ({
+    const newAlerts = hits.map(({ item, status }) => ({
       id: `alert_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       address: item.address,
       txid: status.txid,
@@ -190,13 +209,19 @@ export default function WatchlistMonitor() {
       type: status.type,
       timestamp: 'Just now',
       status: 'Unconfirmed'
-    })).concat(alerts).slice(0, 30);
+    }));
+    const newAlertList = mergeMempoolAlerts(newAlerts, alerts, 30);
 
     setAlerts(newAlertList);
     saveMempoolAlerts(newAlertList);
     setIsCheckingAll(false);
 
-    showToast(hits.length > 0 ? `Scan complete: ${hits.length} active transaction(s).` : "Scan complete: nothing pending.", hits.length > 0 ? "warning" : "success");
+    const summary = failedChecks > 0
+      ? `Scan incomplete: ${failedChecks} address(es) could not be checked${hits.length ? `; ${hits.length} active transaction(s) found` : ''}.`
+      : hits.length > 0
+        ? `Scan complete: ${hits.length} active transaction(s).`
+        : 'Scan complete: nothing pending.';
+    showToast(summary, failedChecks > 0 ? 'error' : hits.length > 0 ? 'warning' : 'success');
   };
 
   const handleClearAlerts = () => {
@@ -354,8 +379,18 @@ export default function WatchlistMonitor() {
                       {memRes ? (
                         memRes.hasMempoolTx ? (
                           <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                            {memRes.amount} · {memRes.feeRate}
+                            {memRes.amount}{memRes.feeRate ? ` · ${memRes.feeRate}` : ''}
                           </span>
+                        ) : memRes.status === 'unavailable' ? (
+                          <button
+                            onClick={() => handleCheckAddress(item.address)}
+                            className="btn-quiet"
+                            type="button"
+                            title={memRes.message}
+                            style={{ fontSize: '0.78rem', color: 'var(--color-danger, #ef4444)' }}
+                          >
+                            Check unavailable · Retry
+                          </button>
                         ) : (
                           <span style={{ color: 'var(--text-muted)' }}>
                             Quiet
@@ -419,7 +454,9 @@ export default function WatchlistMonitor() {
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                   <strong style={{ fontSize: '0.86rem' }}>{alert.amount}</strong>
-                  <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>{alert.feeRate} · {alert.timestamp}</span>
+                  <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                    {alert.feeRate ? `${alert.feeRate} · ` : ''}{alert.timestamp}
+                  </span>
                 </div>
 
                 <div className="mono-addr" style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>

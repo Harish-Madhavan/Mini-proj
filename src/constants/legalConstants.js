@@ -1,38 +1,26 @@
 export const EXCHANGE_DIRECTORY = {
   'WazirX (Zanmai Labs Pvt Ltd)': {
     entity: 'Zanmai Labs Private Limited',
-    email: 'lawenforcement@wazirx.com',
-    sla: '24 - 48 Hours',
     jurisdiction: 'India (registered)'
   },
   'CoinDCX (Neblio Technologies Pvt Ltd)': {
     entity: 'Neblio Technologies Private Limited',
-    email: 'compliance@coindcx.com',
-    sla: '24 - 48 Hours',
     jurisdiction: 'India (registered)'
   },
   'Binance Holdings Ltd (Global compliance)': {
     entity: 'Binance Holdings Limited (Portal: Kodex)',
-    email: 'case-response@binance.com',
-    sla: '48 - 72 Hours',
     jurisdiction: 'International'
   },
   'Coinswitch Kuber (Bitcipher Labs LLP)': {
     entity: 'Bitcipher Labs LLP',
-    email: 'le-support@coinswitch.co',
-    sla: '24 - 48 Hours',
     jurisdiction: 'India (registered)'
   },
   'ZebPay (Awlencan Innovations India Ltd)': {
     entity: 'Awlencan Innovations India Limited',
-    email: 'lawenforcement@zebpay.com',
-    sla: '24 - 48 Hours',
     jurisdiction: 'India (registered)'
   },
   'KuCoin (Requests)': {
     entity: 'KuCoin Liaison',
-    email: 'le-compliance@kucoin.com',
-    sla: '48 - 72 Hours',
     jurisdiction: 'International / Seychelles'
   }
 };
@@ -55,62 +43,155 @@ export const WATERMARK_OPTIONS = [
 export const DEFAULT_OFFICER_TITLE = '';
 export const DEFAULT_FIR_NUMBER = '';
 
-export function generateSection67NoticeText({
+export const REQUEST_TYPES = Object.freeze({
+  PRESERVATION: 'preservation',
+  DISCLOSURE: 'disclosure',
+  PRESERVATION_AND_DISCLOSURE: 'preservation_and_disclosure'
+});
+
+export function getRequestDraftReadiness({
+  recipientEntity,
+  endpointAddress,
+  requestType,
+  recordsScope,
+  periodStart,
+  periodEnd,
+  legalBasisReference,
+  recipientEmail,
+  contactVerified,
+  contactSourceReference,
+  contactVerifiedAt
+}) {
+  const missing = [];
+  if (!String(recipientEntity || '').trim()) missing.push('Enter the proposed recipient entity.');
+  if (!Object.values(REQUEST_TYPES).includes(requestType)) missing.push('Select an intended request type.');
+  if (!endpointAddress) missing.push('Select a case endpoint.');
+  if (!String(recordsScope || '').trim()) missing.push('Describe the records sought.');
+  if (!String(legalBasisReference || '').trim()) missing.push('Record the reviewer-approved legal process reference.');
+  if (!periodStart || !periodEnd || periodEnd < periodStart) {
+    missing.push('Provide a valid records period.');
+  }
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(recipientEmail || '').trim());
+  const contactValid = contactVerified === true &&
+    String(contactSourceReference || '').trim().length > 0 &&
+    Boolean(contactVerifiedAt) &&
+    Number.isFinite(Date.parse(contactVerifiedAt)) &&
+    Date.parse(contactVerifiedAt) <= Date.now();
+  const emailMissing = [];
+  if (!emailValid) emailMissing.push('Enter a valid recipient email address.');
+  if (!contactValid) emailMissing.push('Independently verify the contact channel and record its source and date.');
+  return {
+    readyForReview: missing.length === 0,
+    readyForEmailDraft: missing.length === 0 && emailMissing.length === 0,
+    missing,
+    emailMissing,
+    requestType: Object.values(REQUEST_TYPES).includes(requestType) ? requestType : null
+  };
+}
+
+export function generateRequestWorksheetText({
+  requestType,
   zonalUnit,
   firNumber,
   selectedExchange,
+  recipientEmail,
   caseTitle,
-  depositAddress,
+  endpointAddress,
   currency,
   balance,
-  officerRank,
+  legalBasisReference,
+  recordsScope,
+  periodStart,
+  periodEnd,
+  contactSourceReference,
+  contactVerifiedAt,
+  evidenceReferences,
+  officerRank
 }) {
-  return `DRAFT REQUEST WORKSHEET - FOR AUTHORIZED AND LEGAL REVIEW ONLY
-NOT A STATUTORY NOTICE, ORDER, CERTIFICATE, OR APPROVED COMMUNICATION
+  const requestLabels = {
+    [REQUEST_TYPES.PRESERVATION]: 'Preservation only',
+    [REQUEST_TYPES.DISCLOSURE]: 'Disclosure request (requires approved lawful process)',
+    [REQUEST_TYPES.PRESERVATION_AND_DISCLOSURE]: 'Preservation and disclosure (disclosure requires approved lawful process)'
+  };
+  const preservationNote = requestType === REQUEST_TYPES.PRESERVATION
+    ? 'A preservation request asks that potentially relevant records be retained; it does not itself compel disclosure.'
+    : 'Any disclosure request must be supported by process approved by the competent authority and legal counsel.';
+  return `INTERNAL WORKSHEET — DRAFT FOR AUTHORIZED AND LEGAL REVIEW
+NOT A SUBPOENA, STATUTORY NOTICE, COURT ORDER, OR APPROVED COMMUNICATION
 
 Prepared: ${new Date().toISOString().split('T')[0]}
 Proposed issuing unit: ${zonalUnit || 'Not supplied'}
 Case reference: ${firNumber || 'Not supplied'}
 Case title: ${caseTitle || 'Not supplied'}
-Proposed recipient: ${selectedExchange || 'Not supplied'}
+Proposed recipient entity: ${selectedExchange || 'Not supplied'}
+Proposed recipient email: ${recipientEmail || 'Not supplied'}
+Intended request type: ${requestLabels[requestType] || 'Not selected'}
 
-Address under review: ${depositAddress || 'Not supplied'}
+ADDRESS AND TRACE CONTEXT
+Address under review: ${endpointAddress || 'Not selected'}
 Asset recorded in case: ${currency || 'Not supplied'}
 Recorded graph amount: ${balance || 'Not supplied'}
 
-These values are copied from application case data. A transaction trace does not establish that this address belongs to the proposed recipient, that funds are currently available, or that any person or service is involved.
+PROPOSED RECORDS SCOPE
+Reviewer-entered scope: ${recordsScope || 'Not supplied'}
+Relevant period: ${periodStart || 'Not supplied'} to ${periodEnd || 'Not supplied'}
+Reviewer-approved process / authority reference: ${legalBasisReference || 'Not supplied'}
+Related transaction/output references:
+${Array.isArray(evidenceReferences) && evidenceReferences.length ? evidenceReferences.map(reference => `- ${reference}`).join('\n') : 'Not recorded in the selected case graph'}
 
-Before preparing or issuing a communication, an authorized reviewer must independently verify the source records, destination attribution, case authority, jurisdiction, requested records, applicable legal basis, and approved contact channel.
+CONTACT REVIEW
+Contact marked independently verified by reviewer: ${contactVerifiedAt ? `Yes — ${contactVerifiedAt}` : 'No'}
+Contact verification source/reference: ${contactSourceReference || 'Not supplied'}
 
-Reviewer-supplied legal basis and approved request text: [complete after legal review]
-Reviewer: ${officerRank || 'Not supplied'}
-Digital signature or certificate: Not provided by this application
+Officer / reviewer: ${officerRank || 'Not supplied'}
 
-This worksheet has no legal effect and must not be represented as an issued notice.`;
+${preservationNote}
+
+All addresses, amounts, contacts, and references above are copied from case data or investigator input. A transaction trace does not establish address ownership, current control, an account relationship with the proposed recipient, or legal authority. The application does not authenticate contact details, determine the correct legal process, or submit this worksheet.
+
+An authorized reviewer must verify the underlying source records, address-to-entity attribution, recipient and service channel, jurisdiction, scope, necessity, legal basis, and any required approvals before preparing or sending any request.
+
+This worksheet has no legal effect and must not be represented as issued or served process.`;
 }
 
 export function generateComplianceEmailTemplate({
+  recipientEmail,
   selectedExchange,
   firNumber,
   depositAddress,
-  balance,
-  officerRank
+  recordsScope,
+  requestType,
+  periodStart,
+  periodEnd,
+  legalBasisReference,
+  evidenceReferences = []
 }) {
-  const exInfo = EXCHANGE_DIRECTORY[selectedExchange] || { email: 'compliance@example.invalid' };
-  const subject = encodeURIComponent(`[DRAFT FOR REVIEW] Cryptocurrency transaction lead${firNumber ? ` - Ref: ${firNumber}` : ''}`);
+  const cleanEmail = String(recipientEmail || '').trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    throw new Error('A reviewer-verified recipient email address is required.');
+  }
+  const subject = encodeURIComponent(`[DRAFT FOR REVIEW] Records inquiry${firNumber ? ` - Ref: ${firNumber}` : ''}`);
+  const requestLabels = {
+    [REQUEST_TYPES.PRESERVATION]: 'Preservation only',
+    [REQUEST_TYPES.DISCLOSURE]: 'Disclosure request (approved process required)',
+    [REQUEST_TYPES.PRESERVATION_AND_DISCLOSURE]: 'Preservation and disclosure (approved process required for disclosure)'
+  };
   const body = encodeURIComponent(`To ${selectedExchange || 'recipient'},
 
-This is an unapproved draft for internal and legal review. It is not a statutory notice or a verified attribution.
+This is an unapproved draft for internal and legal review. It is not a statutory notice or legal process.
 
 Case reference: ${firNumber || 'Not supplied'}
-Reviewer: ${officerRank || 'Not supplied'}
 Address under review: ${depositAddress || 'Not supplied'}
-Amount recorded in case: ${balance || 'Not supplied'}
+Intended request type: ${requestLabels[requestType] || 'Not selected'}
+Requested records: ${recordsScope || 'Not supplied'}
+Relevant period: ${periodStart || 'Not supplied'} to ${periodEnd || 'Not supplied'}
+Reviewer-approved process reference: ${legalBasisReference || 'Not supplied'}
+Related transaction/output references: ${evidenceReferences.length ? evidenceReferences.join('; ') : 'Not recorded'}
 
-The application has not verified that this address belongs to your organization. This draft makes no records request. Independently verify the facts, authority, and contact channel before preparing any communication.
+The application has not verified that this address belongs to your organization. Independently verify the facts, authority, jurisdiction, scope, and contact channel before preparing or sending any communication. This email draft does not itself request, compel, or transmit records.
 
 Draft prepared from AegisTrace case data.`);
-  return `mailto:${exInfo.email}?subject=${subject}&body=${body}`;
+  return `mailto:${cleanEmail}?subject=${subject}&body=${body}`;
 }
 export function generateEvidenceWorksheetText({
   caseId,
@@ -154,4 +235,3 @@ Reviewer determination and supporting references: ______________________________
 
 No oath, officer authority, workstation condition, chain-of-custody certification, exchange identity, seizure, or statutory compliance is asserted by this worksheet.`;
 }
-

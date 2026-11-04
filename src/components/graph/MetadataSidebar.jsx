@@ -321,6 +321,7 @@ export default function MetadataSidebar({
                     if (result === 'added') showToast('Address added to watchlist.', 'success');
                     else if (result === 'removed') showToast('Address removed.', 'info');
                     else if (result === 'full') showToast('Watchlist is full (100).', 'warning');
+                    else if (result === 'storage_error') showToast('Could not save the watchlist in browser storage.', 'error');
                     else showToast('Only Bitcoin addresses can be watched.', 'warning');
                   }}
                   className="btn"

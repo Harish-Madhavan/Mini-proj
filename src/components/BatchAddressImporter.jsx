@@ -76,7 +76,12 @@ export default function BatchAddressImporter({ isOpen, onClose, onImportComplete
         });
         if (res.success) added++;
       });
-      showToast(`Added ${added} address(es) to real-time watchlist.`, 'success');
+      showToast(
+        added === validEntries.length
+          ? `Added ${added} address(es) to real-time watchlist.`
+          : `Added ${added} of ${validEntries.length} address(es). Check for duplicates, capacity, or browser storage errors.`,
+        added === validEntries.length ? 'success' : 'warning'
+      );
     } else if (activeAction === 'case') {
       // Create multi-target case
       const nodes = [
