@@ -454,7 +454,7 @@ ${investigatorNotes}
                   </p>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <p style={{ fontSize: '0.76rem', color: '#888' }}>{getRefCode()}-{activeCase.id.toUpperCase()}</p>
+                  <p style={{ fontSize: '0.76rem', color: '#888' }}>AEGIS-DRAFT-{activeCase.id.toUpperCase()}</p>
                 </div>
               </div>
 
