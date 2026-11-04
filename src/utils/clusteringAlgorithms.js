@@ -190,7 +190,7 @@ export function computeAddressClusters(addresses = [], transactionHistory = []) 
       .map(v => v.prevout?.scriptpubkey_address || v.address)
       .filter(Boolean);
 
-    const relevantInputs = inputAddrs.filter(addr => addressSet.has(addr));
+    const relevantInputs = [...new Set(inputAddrs.filter(addr => addressSet.has(addr)))];
 
     if (relevantInputs.length >= 2) {
       const entropy = calculateCoinJoinEntropy(
@@ -250,7 +250,7 @@ export function computeAddressClusters(addresses = [], transactionHistory = []) 
 
   const heuristicsApplied = [];
   if (coSpentTransactions.length > 0) {
-    heuristicsApplied.push(`Verified: ${coSpentTransactions.length} joint transaction${coSpentTransactions.length === 1 ? '' : 's'}`);
+    heuristicsApplied.push(`Observed: ${coSpentTransactions.length} joint transaction${coSpentTransactions.length === 1 ? '' : 's'} in fetched history`);
     if (isSplit) {
       heuristicsApplied.push(
         `Split into ${clusters.length} groups — largest holds ${largestCluster.length}/${addresses.length} addresses`

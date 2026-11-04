@@ -26,6 +26,7 @@ import { downloadJson } from '../utils/download';
 import { satsToBtc } from '../utils/forensicUtils';
 import { updateRecoveryActionRecord } from '../features/recovery/recoveryLeads';
 import { isValidCaseShape } from '../utils/caseValidation';
+import { recordJointTransactionAcrossCases } from '../utils/jointTransactionLinks';
 
 const MAX_SCENARIOS = 50;
 
@@ -450,6 +451,25 @@ export function CaseProvider({ children }) {
       : item));
   }, [activeCaseId]);
 
+  const handleRecordJointTransaction = useCallback((evidence) => {
+    const result = recordJointTransactionAcrossCases(scenarios, evidence);
+    if (!result.linkedCaseIds.length) {
+      showToast(
+        'The joint transaction inputs are not represented in at least two saved cases. Add addresses from each relevant case to Clustering and run it again.',
+        'warning',
+        7000
+      );
+      return 0;
+    }
+    setScenarios(result.cases);
+    showToast(
+      `Recorded joint-transaction evidence in ${result.linkedCaseIds.length} cases. This is a co-spend link, not proof of common ownership.`,
+      'info',
+      6500
+    );
+    return result.linkedCaseIds.length;
+  }, [scenarios, showToast]);
+
   const value = {
     scenarios,
     activeCaseId,
@@ -478,6 +498,7 @@ export function CaseProvider({ children }) {
     addEvidenceClaim,
     updateEvidenceClaimReview,
     updatePathReview,
+    handleRecordJointTransaction,
     getGatewayStatus,
     getCacheStats
   };

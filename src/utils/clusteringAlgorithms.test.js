@@ -119,6 +119,23 @@ describe('clusteringAlgorithms', () => {
       expect(analysis.skippedCoinJoinTxs).toBe(1);
       expect(analysis.clustersCount).toBe(2);
     });
+
+    it('does not count repeated inputs from one address as a joint transaction', () => {
+      const addresses = ['addr_1', 'addr_2'];
+      const tx = {
+        txid: 'tx-repeated-input',
+        vin: [
+          { prevout: { scriptpubkey_address: 'addr_1' } },
+          { prevout: { scriptpubkey_address: 'addr_1' } },
+          { prevout: { scriptpubkey_address: 'outsider' } },
+        ],
+        vout: [{ value: 1000000 }],
+      };
+
+      const analysis = computeAddressClusters(addresses, [tx]);
+      expect(analysis.coSpentTransactions).toHaveLength(0);
+      expect(analysis.hasEvidence).toBe(false);
+    });
   });
 
   describe('estimatePoolReceived', () => {

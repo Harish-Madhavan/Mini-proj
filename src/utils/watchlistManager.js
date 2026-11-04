@@ -168,49 +168,57 @@ export async function checkAddressMempoolStatus(address, isLive = true) {
     return { status: 'unavailable', hasMempoolTx: false, message: 'Live mempool checks support Bitcoin addresses only.' };
   }
   if (isLive) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
-    try {
-      const res = await fetch(`${API_CONFIG.FALLBACK_BASE_URL}/address/${address}/txs/mempool`, { signal: controller.signal });
-      if (res.ok) {
+    const providers = [API_CONFIG.PRIMARY_BASE_URL, API_CONFIG.FALLBACK_BASE_URL];
+    let lastFailure = 'Public mempool providers could not be reached.';
+
+    for (const baseUrl of providers) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      try {
+        const res = await fetch(`${baseUrl}/address/${address}/txs/mempool`, { signal: controller.signal });
+        if (!res.ok) {
+          lastFailure = res.status === 429
+            ? 'A public provider is rate-limited.'
+            : `A public provider returned HTTP ${res.status}.`;
+          continue;
+        }
+
         const data = await res.json();
         if (!Array.isArray(data) || !data.every(isValidMempoolTransaction)) {
-          return { status: 'unavailable', hasMempoolTx: false, message: 'Data source returned an invalid response.' };
+          lastFailure = 'A public provider returned an invalid response.';
+          continue;
         }
-        const matching = data.map(tx => ({ tx, flow: getAddressFlow(tx, address) })).find(item => item.flow.amountSats > 0);
-        if (matching) {
-          const { tx: first, flow } = matching;
-          const feeRate = Number.isFinite(first.fee) && Number.isFinite(first.weight) && first.weight > 0
-            ? Math.round(first.fee / (first.weight / 4))
-            : null;
-          return {
-            status: 'activity',
-            hasMempoolTx: true,
-            txid: first.txid,
-            feeRate: feeRate === null ? null : `${feeRate} satoshis per byte`,
-            amount: `${(flow.amountSats / 1e8).toFixed(4)} BTC`,
-            direction: flow.direction,
-            type: 'Unconfirmed',
-            timestamp: 'Just seen waiting for confirmation'
-          };
-        }
-        return { status: 'clear', hasMempoolTx: false, message: 'No unconfirmed transactions involving this address.' };
-      } else if (res.status === 429) {
-        return { status: 'unavailable', hasMempoolTx: false, message: 'Data source is busy (rate limit). Try again shortly.' };
-      }
-    } catch (e) {
-      if (e.name !== 'AbortError') console.warn("Mempool fetch note:", e.message);
-      return {
-        status: 'unavailable',
-        hasMempoolTx: false,
-        message: e.name === 'AbortError' ? 'Live mempool lookup timed out.' : 'Live mempool lookup is unavailable.',
-      };
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
 
-  if (isLive) return { status: 'unavailable', hasMempoolTx: false, message: 'Live mempool lookup is unavailable.' };
+        const matching = data.map(tx => ({ tx, flow: getAddressFlow(tx, address) })).find(item => item.flow.amountSats > 0);
+        if (!matching) {
+          return { status: 'clear', hasMempoolTx: false, message: 'No unconfirmed transactions involving this address.' };
+        }
+
+        const { tx: first, flow } = matching;
+        const feeRate = Number.isFinite(first.fee) && Number.isFinite(first.weight) && first.weight > 0
+          ? Math.round(first.fee / (first.weight / 4))
+          : null;
+        return {
+          status: 'activity',
+          hasMempoolTx: true,
+          txid: first.txid,
+          feeRate: feeRate === null ? null : `${feeRate} satoshis per byte`,
+          amount: `${(flow.amountSats / 1e8).toFixed(4)} BTC`,
+          direction: flow.direction,
+          type: 'Unconfirmed',
+          timestamp: 'Just seen waiting for confirmation'
+        };
+      } catch (error) {
+        lastFailure = error.name === 'AbortError'
+          ? 'A public provider timed out.'
+          : 'A public provider could not be reached.';
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
+
+    return { status: 'unavailable', hasMempoolTx: false, message: `Live mempool lookup failed. ${lastFailure} Try again later or check your connection.` };
+  }
 
   // Sandbox simulation, seeded per address AND per day so the demo feed
   // rotates instead of permanently flagging (or never flagging) an address.

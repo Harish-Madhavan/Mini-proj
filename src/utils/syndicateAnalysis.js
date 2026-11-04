@@ -2,12 +2,12 @@
  * AegisTrace Syndicate Correlation Engine (Cross-Case Entity Resolution)
  *
  * Individual cases are investigative silos; syndicates are not. This module
- * resolves shared on-chain infrastructure ACROSS cases — a reused peel hop,
- * a common consolidation wallet, or the same exchange deposit point appearing
- * in two cases is evidence of one operator behind both.
+ * compares on-chain evidence across cases — shared addresses and explicitly
+ * recorded joint-input transactions. Neither relationship proves common
+ * control or identity.
  *
- * Method: extract verifiable payment addresses per case, intersect pairwise,
- * and link cases into syndicate components (Union-Find over shared addresses).
+ * Shared addresses are intersected pairwise; recorded joint-input transactions
+ * link cases only when distinct validated input addresses map to each case.
  * Tx-hub ids, OP_RETURN payloads, pseudo-addresses (P2PK/multisig/script
  * placeholders) and unparseable labels are never used as join keys — only
  * strings that pass Bitcoin address validation.
@@ -69,19 +69,62 @@ export function correlateCases(cases = []) {
     }
   }
 
-  const pairHits = new Map(); // "a<>b" -> { shared: [{address, rolesA, rolesB}] }
+  const pairHits = new Map();
+  const getPair = (caseA, caseB) => {
+    const [a, b] = [caseA, caseB].sort();
+    const key = `${a}<>${b}`;
+    if (!pairHits.has(key)) {
+      pairHits.set(key, { caseA: a, caseB: b, shared: [], sharedTransactions: [] });
+    }
+    return pairHits.get(key);
+  };
+
   for (const [addr, holders] of index) {
     if (holders.length < 2) continue;
     for (let i = 0; i < holders.length; i++) {
       for (let j = i + 1; j < holders.length; j++) {
         const [a, b] = [holders[i], holders[j]].sort();
         dsu.union(a, b);
-        const key = `${a}<>${b}`;
-        if (!pairHits.has(key)) pairHits.set(key, { caseA: a, caseB: b, shared: [] });
-        pairHits.get(key).shared.push({
+        getPair(a, b).shared.push({
           address: addr,
           rolesA: [...(footprints.get(a).get(addr)?.roles || [])],
           rolesB: [...(footprints.get(b).get(addr)?.roles || [])],
+        });
+      }
+    }
+  }
+
+  const jointTxByCase = new Map(valid.map(caseData => {
+    const evidenceByTxid = new Map();
+    (Array.isArray(caseData.jointTransactionEvidence) ? caseData.jointTransactionEvidence : []).forEach(evidence => {
+      if (!/^[0-9a-f]{64}$/i.test(evidence?.txid || '') || !Array.isArray(evidence.inputAddresses)) return;
+      const caseAddressSet = footprints.get(caseData.id);
+      const inputAddresses = [...new Set(evidence.inputAddresses.filter(address =>
+        isJoinableAddress(address) && caseAddressSet.has(address)
+      ))];
+      if (inputAddresses.length) evidenceByTxid.set(evidence.txid.toLowerCase(), inputAddresses);
+    });
+    return [caseData.id, evidenceByTxid];
+  }));
+  for (let i = 0; i < valid.length; i++) {
+    for (let j = i + 1; j < valid.length; j++) {
+      const caseA = valid[i].id;
+      const caseB = valid[j].id;
+      const evidenceA = jointTxByCase.get(caseA);
+      const evidenceB = jointTxByCase.get(caseB);
+      for (const [txid, inputAddressesA] of evidenceA) {
+        const inputAddressesB = evidenceB.get(txid);
+        if (!inputAddressesB?.length) continue;
+        const addressesA = inputAddressesA.filter(address => !inputAddressesB.includes(address));
+        const addressesB = inputAddressesB.filter(address => !inputAddressesA.includes(address));
+        if (!addressesA.length || !addressesB.length) continue;
+        dsu.union(caseA, caseB);
+        getPair(caseA, caseB).sharedTransactions.push({
+          txid,
+          inputAddressesA,
+          inputAddressesB,
+          method: 'common-input co-spend',
+          warning: 'A shared transaction is a reviewable co-spend link only; it does not establish common ownership or control.',
         });
       }
     }
@@ -96,6 +139,7 @@ export function correlateCases(cases = []) {
     return {
       ...p,
       sharedCount: p.shared.length,
+      sharedTransactionCount: p.sharedTransactions.length,
       endpointShares,
       linkScore,
       verdict: linkScore >= 55 ? 'SAME_OPERATOR_LIKELY'

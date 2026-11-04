@@ -67,6 +67,11 @@ trace is computed live from gateway data.
 - **Case comparison** — compare trace reference coverage, review gaps, endpoints,
   and open recovery actions across saved cases without summing potentially
   overlapping flows.
+- **Linked cases and co-spend evidence** — clustering can record an observed
+  joint-input transaction against the saved cases containing its distinct
+  input addresses. Linked Cases then shows that transaction as a weak,
+  reviewable relationship alongside shared-address matches. Co-spending is a
+  heuristic and does not establish common ownership or control.
 - **Investigation timeline** — filter recorded case notes, transaction references,
   evidence reviews, and recovery actions by event type or text. Missing timestamps
   remain explicit; this is not a tamper-proof audit log.

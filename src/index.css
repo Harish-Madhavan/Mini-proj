@@ -240,6 +240,50 @@ body {
   color: var(--text-muted);
 }
 
+.app-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.route-page,
+.route-page > * {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.dashboard-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.35rem;
+  padding-bottom: 1rem;
+}
+
+.dashboard-trace-card,
+.dashboard-cases {
+  padding: 1.35rem;
+}
+
+.dashboard-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.dashboard-stat {
+  min-width: 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+}
+
+.dashboard-stat h3 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---------- Cards: flat, airy, one style ---------- */
 .glass-panel,
 .meter-card,
@@ -790,23 +834,102 @@ body {
 
 @media (max-width: 768px) {
   .app-container {
-    padding: 1rem 1rem 1.25rem;
+    padding: 0.75rem 0.8rem 1rem;
   }
 
   .main-nav {
-    gap: 0.2rem;
-    margin-bottom: 1rem;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.25rem;
+    margin-bottom: 0.85rem;
+    padding-bottom: 0.65rem;
   }
 
   .nav-item,
   .nav-more summary {
-    padding: 0.45rem 0.55rem;
-    font-size: 0.78rem;
+    justify-content: center;
+    min-width: 0;
+    padding: 0.55rem 0.3rem;
+    font-size: 0.76rem;
   }
+
+  .nav-more {
+    grid-column: 1 / -1;
+  }
+
+  .nav-more summary {
+    width: 100%;
+  }
+
+  .nav-more[open] {
+    grid-column: 1 / -1;
+  }
+
+  .nav-more-menu {
+    position: static;
+    width: 100%;
+    max-height: none;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-top: 0.35rem;
+    box-shadow: none;
+  }
+
   .header-banner {
-    flex-direction: column;
-    align-items: flex-start;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+    padding-bottom: 0.75rem;
   }
+
+  .header-banner > div:first-child {
+    min-width: 0;
+  }
+
+  .header-banner > div:first-child > div:last-child {
+    min-width: 0;
+  }
+
+  .dashboard-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.55rem;
+  }
+
+  .dashboard-stat {
+    padding: 0.75rem;
+  }
+
+  .dashboard-stat:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .dashboard-trace-card,
+  .dashboard-cases {
+    padding: 1rem;
+  }
+
+  .dashboard-page {
+    gap: 1rem;
+  }
+
+  .route-page table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .route-page input,
+  .route-page select,
+  .route-page textarea {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .workflow-page {
+    gap: 0.75rem !important;
+    padding: 0.5rem 0 !important;
+  }
+
   .config-slider-panel {
     grid-template-columns: 1fr;
   }

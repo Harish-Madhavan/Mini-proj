@@ -145,10 +145,10 @@ export default function Dashboard() {
   }, [searchVal]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', paddingBottom: '1rem' }}>
+    <div className="dashboard-page">
       
       {/* Search */}
-      <div className="glass-panel" style={{ padding: '1.75rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      <div className="glass-panel dashboard-trace-card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.5rem' }}>
           <h2 style={{ fontSize: '1rem', fontWeight: 600, letterSpacing: '-0.01em' }}>
             Trace
@@ -255,10 +255,10 @@ export default function Dashboard() {
       </div>
 
       {/* Session Metrics */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1.5rem', padding: '0 0.25rem' }}>
+      <div className="dashboard-stats">
         {sessionStats.map((st, i) => {
           return (
-            <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+            <div key={i} className="dashboard-stat" style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
               <p style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>{st.label}</p>
               <h3 style={{ fontSize: '1.25rem', fontWeight: 600, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>{st.value}</h3>
               {st.subValue && <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{st.subValue}</p>}
@@ -295,7 +295,7 @@ export default function Dashboard() {
       )}
 
       {/* Case Investigations List */}
-      <div className="glass-panel" style={{ padding: '1.75rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+      <div className="glass-panel dashboard-cases" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.75rem' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.6rem' }}>
             <h3 style={{ fontSize: '0.95rem', fontWeight: 600 }}>

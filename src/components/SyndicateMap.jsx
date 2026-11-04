@@ -35,7 +35,7 @@ export default function SyndicateMap() {
           <Network size={15} style={{ color: 'var(--text-muted)' }} /> Linked cases
         </h3>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: '0.2rem' }}>
-          Shared addresses can indicate shared infrastructure or case reuse. They do not establish that the same person or group controls the activity.
+          Compare shared addresses and recorded joint-input transactions. These are investigative links only; neither establishes that the same person or group controls the activity.
         </p>
         <div style={{ display: 'flex', gap: '1.5rem', marginTop: '0.9rem', fontSize: '0.82rem' }}>
           <span><strong style={{ fontSize: '1.05rem', fontWeight: 600 }}>{correlation.caseCount}</strong> <span style={{ color: 'var(--text-muted)' }}>cases</span></span>
@@ -51,7 +51,7 @@ export default function SyndicateMap() {
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.5rem' }}>
                 <span className="mono-addr" style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{comp.syndicateId}</span>
                 <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                  {comp.caseIds.length} cases
+                  {comp.caseIds.length} linked cases
                 </span>
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
@@ -78,7 +78,7 @@ export default function SyndicateMap() {
         </h4>
         {correlation.pairs.length === 0 ? (
           <EmptyState icon={<Network size={28} style={{ opacity: 0.6 }} />}>
-            No shared addresses across these {correlation.caseCount} cases. Trace more cases to find links.
+            No shared address or recorded joint-transaction links across these {correlation.caseCount} cases. In Clustering, record co-spend evidence to link the saved cases containing its input addresses.
           </EmptyState>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -97,13 +97,13 @@ export default function SyndicateMap() {
                       {(caseById.get(pair.caseB)?.title || pair.caseB).slice(0, 28)}
                     </button>
                     <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
-                      {pair.sharedCount} shared · {pair.linkScore} · {verdict}
+                      {pair.sharedCount} shared address{pair.sharedCount === 1 ? '' : 'es'} · {pair.sharedTransactionCount} joint transaction{pair.sharedTransactionCount === 1 ? '' : 's'} · {pair.linkScore} · {verdict}
                     </span>
                     <button
                       onClick={() => setExpandedPair(open ? null : key)}
                       className="btn-quiet"
                       aria-expanded={open}
-                      aria-label={open ? 'Hide shared addresses' : 'Show shared addresses'}
+                      aria-label={open ? 'Hide link evidence' : 'Show link evidence'}
                       style={{ fontSize: '0.76rem' }}
                     >
                       {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
@@ -116,6 +116,15 @@ export default function SyndicateMap() {
                         <div key={s.address} className="mono-addr" style={{ fontSize: '0.76rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>
                           {s.address}
                           <span> · {s.rolesA.map(roleLabel).join('/') || '?'} / {s.rolesB.map(roleLabel).join('/') || '?'}</span>
+                        </div>
+                      ))}
+                      {pair.sharedTransactions.map(transaction => (
+                        <div key={transaction.txid} className="mono-addr" style={{ fontSize: '0.76rem', color: 'var(--text-muted)', overflowWrap: 'anywhere' }}>
+                          Joint transaction · {transaction.txid}
+                          <div style={{ fontSize: '0.7rem', marginTop: '0.15rem' }}>
+                            Inputs in case A: {transaction.inputAddressesA.join(', ')} · Inputs in case B: {transaction.inputAddressesB.join(', ')}
+                          </div>
+                          <div style={{ fontSize: '0.68rem', color: '#fbbf24', marginTop: '0.15rem' }}>{transaction.warning}</div>
                         </div>
                       ))}
                     </div>

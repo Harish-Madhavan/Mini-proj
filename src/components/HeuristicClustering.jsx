@@ -61,8 +61,9 @@ function AddressRow({ addr, onRemove }) {
 }
 
 export default function HeuristicClustering() {
-  const { activeCase } = useCase();
+  const { activeCase, scenarios, handleRecordJointTransaction, setActiveTab } = useCase();
   const { showToast } = useToast();
+  const savedCases = Array.isArray(scenarios) ? scenarios : [];
 
   const [suspectAddresses, setSuspectAddresses] = useState([]);
   const [newAddr, setNewAddr] = useState('');
@@ -74,6 +75,8 @@ export default function HeuristicClustering() {
   const [coinJoinTxid, setCoinJoinTxid] = useState('');
   const [coinJoinResult, setCoinJoinResult] = useState(null);
   const [isSolvingCoinJoin, setIsSolvingCoinJoin] = useState(false);
+  const [recordedJointTxIds, setRecordedJointTxIds] = useState([]);
+  const [caseToImportId, setCaseToImportId] = useState('');
 
   const handleCoinJoinAnalysis = async () => {
     const txid = coinJoinTxid.trim();
@@ -139,6 +142,7 @@ export default function HeuristicClustering() {
     }
 
     setSuspectAddresses([...suspectAddresses, trimmed]);
+    setClusteringResult(null);
     setNewAddr('');
     showToast(`Added ${validation.type} address.`, "info");
   };
@@ -158,13 +162,45 @@ export default function HeuristicClustering() {
     const newlyAdded = uniqueAddrs.length - suspectAddresses.length;
 
     setSuspectAddresses(uniqueAddrs);
+    setClusteringResult(null);
     showToast(`Imported ${newlyAdded} addresses from the open case.`, "success");
+  };
+
+  const handleImportFromSavedCase = () => {
+    const sourceCase = savedCases.find(caseData => caseData.id === caseToImportId);
+    if (!sourceCase) {
+      showToast('Choose a saved case to import.', 'warning');
+      return;
+    }
+    const addressesFromCase = [...new Set((sourceCase.nodes || [])
+      .map(node => node.details?.address)
+      .filter(address => typeof address === 'string' && validateBtcAddress(address).isValid))];
+    if (!addressesFromCase.length) {
+      showToast(`No valid Bitcoin addresses found in "${sourceCase.title || sourceCase.id}".`, 'warning');
+      return;
+    }
+    const uniqueAddrs = [...new Set([...suspectAddresses, ...addressesFromCase])];
+    const newlyAdded = uniqueAddrs.length - suspectAddresses.length;
+    setSuspectAddresses(uniqueAddrs);
+    setClusteringResult(null);
+    showToast(`Imported ${newlyAdded} new address(es) from "${sourceCase.title || sourceCase.id}".`, 'success');
   };
 
   const handleRemoveAddress = (index) => {
     const updated = suspectAddresses.filter((_, i) => i !== index);
     setSuspectAddresses(updated);
+    setClusteringResult(null);
     showToast("Address removed.", "info");
+  };
+
+  const handleLinkJointTransaction = (jointTransaction) => {
+    const linkedCaseCount = handleRecordJointTransaction({
+      txid: jointTransaction.txid,
+      inputAddresses: jointTransaction.inputs,
+    });
+    if (linkedCaseCount > 0) {
+      setRecordedJointTxIds(previous => [...new Set([...previous, jointTransaction.txid.toLowerCase()])]);
+    }
   };
 
   const runClustering = async () => {
@@ -278,14 +314,38 @@ export default function HeuristicClustering() {
               <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: '0.2rem' }}>Co-spending is a common-input heuristic. It can suggest a link, but does not prove common control; collaborative transactions can mislead it.</p>
           </div>
 
-          <button
-            onClick={handleImportFromGraph}
-            className="btn-quiet"
-            style={{ fontSize: '0.8rem' }}
-            title="Import all addresses from the open case"
-          >
-            <Upload size={13} /> From graph
-          </button>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+            <button
+              onClick={handleImportFromGraph}
+              className="btn-quiet"
+              style={{ fontSize: '0.8rem' }}
+              title="Import all addresses from the open case"
+            >
+              <Upload size={13} /> Open case
+            </button>
+            <select
+              className="select-field"
+              aria-label="Choose another case to import addresses from"
+              value={caseToImportId}
+              onChange={event => setCaseToImportId(event.target.value)}
+              style={{ maxWidth: '180px', fontSize: '0.76rem' }}
+            >
+              <option value="">Other saved case…</option>
+              {savedCases.filter(caseData => caseData.id !== activeCase?.id).map(caseData => (
+                <option key={caseData.id} value={caseData.id}>{caseData.title || caseData.id}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={handleImportFromSavedCase}
+              className="btn-quiet"
+              disabled={!caseToImportId}
+              style={{ fontSize: '0.8rem' }}
+              title="Add Bitcoin addresses from the selected saved case"
+            >
+              Add case
+            </button>
+          </div>
         </div>
 
         {/* Add Address Form */}
@@ -394,6 +454,36 @@ export default function HeuristicClustering() {
                 </div>
               ))}
             </div>
+
+            {clusteringResult.coSpentTransactions?.length > 0 && (
+              <div style={{ borderTop: '1px solid var(--border-soft)', paddingTop: '0.75rem', display: 'grid', gap: '0.55rem' }}>
+                <strong style={{ fontSize: '0.78rem' }}>Link joint transactions to saved cases</strong>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.72rem', margin: 0 }}>
+                  Records the observed co-spend in cases containing these input addresses so it appears in Linked Cases. This does not imply common ownership.
+                </p>
+                {clusteringResult.coSpentTransactions.map(transaction => {
+                  const txid = transaction.txid || '';
+                  const canRecord = /^[0-9a-f]{64}$/i.test(txid);
+                  const alreadyRecorded = recordedJointTxIds.includes(txid.toLowerCase());
+                  return <div key={txid || transaction.inputs.join('|')} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <span className="mono-addr" style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{txid || 'Transaction reference unavailable'}</span>
+                    {canRecord ? <button
+                        type="button"
+                        className="btn-quiet"
+                        disabled={alreadyRecorded}
+                        onClick={() => handleLinkJointTransaction(transaction)}
+                        title="Record the observed shared transaction in matching saved cases"
+                        style={{ fontSize: '0.74rem' }}
+                      >
+                        {alreadyRecorded ? 'Recorded' : 'Record link evidence'}
+                      </button> : <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Cannot link without a transaction ID.</span>}
+                  </div>;
+                })}
+                <button type="button" className="btn-quiet" onClick={() => setActiveTab('syndicate')} style={{ justifySelf: 'start', fontSize: '0.74rem' }}>
+                  Open Linked Cases
+                </button>
+              </div>
+            )}
 
           </div>
         ) : (

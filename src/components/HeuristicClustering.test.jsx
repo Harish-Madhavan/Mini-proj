@@ -14,6 +14,11 @@ vi.mock('../utils/bitcoinApi', () => ({
 
 describe('HeuristicClustering Component', () => {
   const showToastMock = vi.fn();
+  const importedCase = {
+    id: 'case-import',
+    title: 'Imported Case',
+    nodes: [{ id: 'import-address', details: { address: '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa' } }]
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -26,7 +31,13 @@ describe('HeuristicClustering Component', () => {
           { id: 'addr1', details: { address: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh' } },
           { id: 'tx_abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890' }
         ]
-      }
+      },
+      scenarios: [
+        { id: 'case-test', title: 'Test Case', nodes: [] },
+        importedCase,
+      ],
+      handleRecordJointTransaction: vi.fn(),
+      setActiveTab: vi.fn(),
     });
   });
 
@@ -77,5 +88,19 @@ describe('HeuristicClustering Component', () => {
 
     expect(screen.getByText(ethAddr)).toBeDefined();
     expect(screen.getByText(/EVM address \(cross-chain\)/i)).toBeDefined();
+  });
+
+  it('imports valid Bitcoin addresses from another saved case', () => {
+    render(<HeuristicClustering />);
+    fireEvent.change(screen.getByRole('combobox', { name: /choose another case/i }), {
+      target: { value: 'case-import' }
+    });
+    fireEvent.click(screen.getByRole('button', { name: /add case/i }));
+
+    expect(screen.getByText('1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa')).toBeDefined();
+    expect(showToastMock).toHaveBeenCalledWith(
+      'Imported 1 new address(es) from "Imported Case".',
+      'success'
+    );
   });
 });

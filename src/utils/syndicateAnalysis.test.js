@@ -49,6 +49,39 @@ describe('syndicateAnalysis', () => {
     expect(res.caseCount).toBe(2);
   });
 
+  it('links cases through recorded co-spend evidence without treating it as ownership proof', () => {
+    const txid = 'a'.repeat(64);
+    const caseA = { ...mkCase('case-a', [HOP]), jointTransactionEvidence: [{ txid, inputAddresses: [HOP] }] };
+    const caseB = { ...mkCase('case-b', [DEP]), jointTransactionEvidence: [{ txid, inputAddresses: [DEP] }] };
+    const res = correlateCases([caseA, caseB]);
+
+    expect(res.pairs).toHaveLength(1);
+    expect(res.pairs[0]).toMatchObject({
+      sharedCount: 0,
+      sharedTransactionCount: 1,
+      verdict: 'WEAK_OVERLAP',
+    });
+    expect(res.pairs[0].sharedTransactions[0]).toMatchObject({
+      txid,
+      inputAddressesA: [HOP],
+      inputAddressesB: [DEP],
+    });
+    expect(res.linkedCaseCount).toBe(2);
+    expect(res.components).toHaveLength(1);
+  });
+
+  it('does not link a transaction when both cases only contain the same input address', () => {
+    const txid = 'b'.repeat(64);
+    const sharedEvidence = [{ txid, inputAddresses: [HOP] }];
+    const res = correlateCases([
+      { ...mkCase('case-a', [HOP]), jointTransactionEvidence: sharedEvidence },
+      { ...mkCase('case-b', [HOP]), jointTransactionEvidence: sharedEvidence },
+    ]);
+
+    expect(res.pairs[0].sharedTransactionCount).toBe(0);
+    expect(res.pairs[0].sharedCount).toBe(1);
+  });
+
   it('extracts address footprints with roles', () => {
     const fp = extractCaseAddresses(mkCase('c', [HOP, DEP]));
     expect(fp.has(HOP)).toBe(true);

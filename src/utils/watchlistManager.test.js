@@ -146,6 +146,32 @@ describe('watchlistManager', () => {
     }
   });
 
+  it('falls back to the secondary public provider when the primary is unavailable', async () => {
+    const originalFetch = global.fetch;
+    const urls = [];
+    global.fetch = async (url) => {
+      urls.push(url);
+      if (urls.length === 1) throw new Error('primary provider unavailable');
+      return {
+        ok: true,
+        json: async () => [{
+          txid: 'b'.repeat(64),
+          vin: [],
+          vout: [{ scriptpubkey_address: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', value: 10000000 }]
+        }]
+      };
+    };
+    try {
+      const status = await checkAddressMempoolStatus('bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', true);
+      expect(status).toMatchObject({ status: 'activity', hasMempoolTx: true, amount: '0.1000 BTC' });
+      expect(urls).toHaveLength(2);
+      expect(urls[0]).toContain('https://blockstream.info/api/');
+      expect(urls[1]).toContain('https://mempool.space/api/');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
   it('counts only the watched address flow in a live transaction', async () => {
     const originalFetch = global.fetch;
     global.fetch = async () => ({ ok: true, json: async () => [{
@@ -182,7 +208,7 @@ describe('watchlistManager', () => {
       expect(status).toMatchObject({
         status: 'unavailable',
         hasMempoolTx: false,
-        message: 'Data source returned an invalid response.',
+        message: expect.stringContaining('A public provider returned an invalid response.')
       });
     } finally {
       global.fetch = originalFetch;
@@ -194,8 +220,11 @@ describe('watchlistManager', () => {
     global.fetch = async () => { throw new Error('network down'); };
     try {
       const status = await checkAddressMempoolStatus('bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', true);
-      expect(status.status).toBe('unavailable');
-      expect(status.hasMempoolTx).toBe(false);
+      expect(status).toMatchObject({
+        status: 'unavailable',
+        hasMempoolTx: false,
+        message: expect.stringContaining('Try again later or check your connection.')
+      });
     } finally {
       global.fetch = originalFetch;
     }

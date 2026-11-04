@@ -204,14 +204,16 @@ function AppContent() {
       </nav>
 
       {/* Main Body panels with React Router Routes */}
-      <main style={{ flex: 1 }} id="main-content" tabIndex={-1}>
+      <main className="app-main" id="main-content" tabIndex={-1}>
         <ErrorBoundary>
           <Suspense fallback={<RouteFallback />}>
             <Routes>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
               {NAV_ITEMS.map(({ id, path }) => {
                 const Page = ROUTE_COMPONENTS[id];
-                return Page ? <Route key={id} path={path} element={<Page />} /> : null;
+                return Page ? (
+                  <Route key={id} path={path} element={<div className="route-page"><Page /></div>} />
+                ) : null;
               })}
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
