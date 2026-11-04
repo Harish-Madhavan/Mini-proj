@@ -1,19 +1,56 @@
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ClipboardCheck, GitCompareArrows, Plus, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ClipboardCheck, FileCheck2, GitCompareArrows, Plus, ShieldCheck } from 'lucide-react';
 import { useCase } from '../../hooks/useCase';
 import { buildAlternativePaths, buildEvidenceGapChecklist, deriveEvidenceClaims } from './evidenceReview';
+import { compareTraceSnapshots, verifyTraceSnapshot } from '../../utils/traceSnapshot';
 
 const box = { background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '1rem' };
 const inputStyle = { width: '100%' };
+const MAX_SNAPSHOT_FILE_BYTES = 5 * 1024 * 1024;
 
 export default function EvidenceReview() {
   const { activeCase, addEvidenceClaim, updateEvidenceClaimReview, updatePathReview } = useCase();
   const [draft, setDraft] = useState({ classification: 'Attribution hypothesis', statement: '', sourceReference: '' });
   const [pathDrafts, setPathDrafts] = useState({});
+  const [snapshotFiles, setSnapshotFiles] = useState({ earlier: null, later: null });
+  const [snapshotError, setSnapshotError] = useState('');
   const claims = useMemo(() => deriveEvidenceClaims(activeCase), [activeCase]);
   const paths = useMemo(() => buildAlternativePaths(activeCase), [activeCase]);
   const gaps = useMemo(() => buildEvidenceGapChecklist(activeCase), [activeCase]);
+  const snapshotComparison = useMemo(() => {
+    const earlier = snapshotFiles.earlier;
+    const later = snapshotFiles.later;
+    if (!earlier?.verification?.valid || !later?.verification?.valid) return null;
+    try {
+      return compareTraceSnapshots(earlier.snapshot, later.snapshot);
+    } catch (error) {
+      return { error: error.message };
+    }
+  }, [snapshotFiles]);
   const reviewedClaims = claims.filter(claim => claim.review.status !== 'unreviewed').length;
+
+  async function loadSnapshot(slot, event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setSnapshotError('');
+    if (file.size > MAX_SNAPSHOT_FILE_BYTES) {
+      setSnapshotError('Snapshot file exceeds the 5 MB limit.');
+      return;
+    }
+
+    try {
+      const snapshot = JSON.parse(await file.text());
+      const verification = await verifyTraceSnapshot(snapshot);
+      setSnapshotFiles(previous => ({
+        ...previous,
+        [slot]: { fileName: file.name, snapshot, verification },
+      }));
+    } catch (error) {
+      setSnapshotFiles(previous => ({ ...previous, [slot]: null }));
+      setSnapshotError(`Could not read or verify snapshot: ${error.message}`);
+    }
+  }
 
   function submitClaim(event) {
     event.preventDefault();
@@ -58,6 +95,40 @@ export default function EvidenceReview() {
       <ShieldCheck size={15} color="var(--primary-accent)" style={{ flexShrink: 0 }} />
       On-chain records, attribution hypotheses, external references, and investigator-reported outcomes are kept distinct. A review status records investigator workflow; it does not mean the application authenticated a source or verified an address owner.
     </aside>
+
+    <section className="workflow-section" style={box}>
+      <SectionHeader icon={<FileCheck2 size={16} />} title="Snapshot verification and comparison" subtitle="Verify exported trace integrity, then compare captures of the same case" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.65rem', marginTop: '0.8rem' }}>
+        {[
+          ['earlier', 'Earlier snapshot'],
+          ['later', 'Later snapshot'],
+        ].map(([slot, label]) => {
+          const entry = snapshotFiles[slot];
+          return <div key={slot} style={{ background: 'var(--bg-inset)', border: '1px solid var(--border-color)', borderRadius: 8, padding: '0.75rem', display: 'grid', gap: '0.45rem' }}>
+            <label style={{ fontSize: '0.76rem', fontWeight: 600 }} htmlFor={`snapshot-${slot}`}>{label} JSON (max 5 MB)</label>
+            <input id={`snapshot-${slot}`} type="file" accept=".json,application/json" onChange={event => loadSnapshot(slot, event)} aria-label={`Upload ${label.toLowerCase()} JSON`} />
+            {entry && <>
+              <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', overflowWrap: 'anywhere' }}>{entry.fileName} · case {entry.snapshot.caseData?.id || 'unknown'} · {entry.snapshot.capturedAt}</span>
+              <strong role="status" style={{ fontSize: '0.72rem', color: entry.verification.valid ? 'var(--color-success, #54dfc2)' : '#f87171' }}>
+                {entry.verification.valid ? 'Digest matches the recorded snapshot' : `Not verified — ${entry.verification.reason}`}
+              </strong>
+            </>}
+          </div>;
+        })}
+      </div>
+      {snapshotError && <p role="alert" style={{ color: '#f87171', fontSize: '0.75rem', marginTop: '0.6rem' }}>{snapshotError}</p>}
+      {snapshotComparison?.error && <p role="alert" style={{ color: '#fbbf24', fontSize: '0.75rem', marginTop: '0.6rem' }}>{snapshotComparison.error}</p>}
+      {snapshotComparison && !snapshotComparison.error && <div style={{ marginTop: '0.75rem', padding: '0.75rem', border: '1px solid var(--border-color)', borderRadius: 8, display: 'grid', gap: '0.35rem' }}>
+        <strong style={{ fontSize: '0.78rem' }}>Stored graph comparison · {snapshotComparison.caseId}</strong>
+        <span style={{ color: 'var(--text-secondary)', fontSize: '0.72rem' }}>{snapshotComparison.earlierCapturedAt} → {snapshotComparison.laterCapturedAt}</span>
+        <span style={{ color: 'var(--text-secondary)', fontSize: '0.72rem' }}>Nodes: {snapshotComparison.nodes.earlier} → {snapshotComparison.nodes.later} ({snapshotComparison.nodes.added.length} added, {snapshotComparison.nodes.removed.length} removed, {snapshotComparison.nodes.changed.length} changed) · Links: {snapshotComparison.links.earlier} → {snapshotComparison.links.later} ({snapshotComparison.links.added.length} added, {snapshotComparison.links.removed.length} removed, {snapshotComparison.links.changed.length} changed)</span>
+        <span style={{ color: 'var(--text-secondary)', fontSize: '0.72rem' }}>Transaction references: {snapshotComparison.transactionReferences.earlier} → {snapshotComparison.transactionReferences.later} ({snapshotComparison.transactionReferences.added.length} added, {snapshotComparison.transactionReferences.removed.length} removed) · Source manifest entries: {snapshotComparison.sourceManifest.earlier} → {snapshotComparison.sourceManifest.later} ({snapshotComparison.sourceManifest.added.length} added, {snapshotComparison.sourceManifest.removed.length} removed, {snapshotComparison.sourceManifest.changed.length} changed)</span>
+        <span style={{ color: 'var(--text-secondary)', fontSize: '0.72rem' }}>Warnings: {snapshotComparison.warnings.added.length} added, {snapshotComparison.warnings.cleared.length} cleared, {snapshotComparison.warnings.unchanged.length} unchanged</span>
+        <span style={{ color: 'var(--text-secondary)', fontSize: '0.72rem' }}>Trace coverage — pruned branches: {snapshotComparison.coverage.earlier.prunedBranches} → {snapshotComparison.coverage.later.prunedBranches}; omitted nodes/links: {snapshotComparison.coverage.earlier.omittedNodes}/{snapshotComparison.coverage.earlier.omittedLinks} → {snapshotComparison.coverage.later.omittedNodes}/{snapshotComparison.coverage.later.omittedLinks}; address history complete: {String(snapshotComparison.coverage.earlier.addressHistoryComplete)} → {String(snapshotComparison.coverage.later.addressHistoryComplete)}</span>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.68rem', margin: 0 }}>Comparison describes stored data only; it does not determine why a trace changed or which capture is more accurate.</p>
+      </div>}
+      <p style={{ color: 'var(--text-muted)', fontSize: '0.68rem', margin: '0.6rem 0 0' }}>A valid digest only shows that the snapshot payload matches its recorded digest. It does not authenticate the provider, verify chain facts, or establish attribution.</p>
+    </section>
 
     <section className="workflow-section" style={box}>
       <SectionHeader icon={<ClipboardCheck size={16} />} title="Evidence claim ledger" subtitle={`${reviewedClaims} of ${claims.length} records reviewed in this case`} />

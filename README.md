@@ -55,6 +55,15 @@ trace is computed live from gateway data.
   contacts are investigator-entered and must be independently verified. These are
   investigative aids, not legal process, a legal-admissibility guarantee, or
   identity verification.
+- **Trace snapshots** — download one case with its graph, trace warnings,
+  collection manifest, and capture time as a standalone JSON file with a
+  canonical SHA-256 digest; verify the digest and compare two captures of the
+  same case in Evidence Review. The comparison highlights graph, provider
+  manifest, warning, and coverage changes. The digest detects payload edits; it
+  does not authenticate providers, establish attribution, or prove admissibility.
+- **Trace coverage review** — Evidence Review surfaces pruned branches,
+  omitted graph records, partial address-history scans, and provider or trace
+  warnings as review prompts instead of silently treating the graph as complete.
 - **Case comparison** — compare trace reference coverage, review gaps, endpoints,
   and open recovery actions across saved cases without summing potentially
   overlapping flows.

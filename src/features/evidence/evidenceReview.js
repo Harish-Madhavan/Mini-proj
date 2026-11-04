@@ -199,6 +199,40 @@ export function buildEvidenceGapChecklist(caseData, now = Date.now()) {
   if (!caseData.traceMeta?.confidence) gaps.push({ id: 'trace-method', priority: 'medium', title: 'Trace method metadata is absent', detail: 'The case has no recorded trace confidence/method metadata.', recommendation: 'Document the tracing method, assumptions, and any halted or ambiguous branches.' });
   if (!caseData.traceMeta?.confidence || caseData.traceMeta.confidence < 0.7) gaps.push({ id: 'trace-confidence', priority: 'medium', title: 'Trace attribution needs corroboration', detail: 'Trace confidence is absent or below 70%; taint models remain analytical estimates.', recommendation: 'Review alternative routes and preserve the reasoning for the selected path.' });
 
+  const traceMeta = caseData.traceMeta || {};
+  const traceStats = traceMeta.stats || {};
+  const prunedCount = traceStats.prunedBranches?.length || 0;
+  const omittedCount = (traceStats.omittedNodeCount || 0) + (traceStats.omittedLinkCount || 0);
+  if (prunedCount || omittedCount) {
+    gaps.push({
+      id: 'trace-coverage-limits',
+      priority: 'high',
+      title: 'Trace has unexpanded or omitted branches',
+      detail: `${prunedCount} branch(es) were pruned and ${omittedCount} node/link record(s) were omitted by trace limits.`,
+      recommendation: 'Review the trace warnings and limits before treating this graph as complete; expand important branches or document why they were not followed.'
+    });
+  }
+  const addressHistory = traceMeta.addressHistoryScan;
+  if (addressHistory && addressHistory.complete !== true) {
+    gaps.push({
+      id: 'partial-address-history',
+      priority: 'high',
+      title: 'Address history scan is incomplete',
+      detail: `${addressHistory.transactionsScanned ?? 0} transaction(s) across ${addressHistory.pagesScanned ?? 0} page(s) were checked${addressHistory.incompleteReason ? `; ${addressHistory.incompleteReason}` : '.'}`,
+      recommendation: 'Treat the selected transaction as a scan result, not an exhaustive history conclusion; record the unscanned scope or repeat the review.'
+    });
+  }
+  const traceWarnings = uniqueTraceWarnings(traceMeta.warnings);
+  if (traceWarnings.length) {
+    gaps.push({
+      id: 'trace-warnings',
+      priority: 'medium',
+      title: 'Trace warnings need review',
+      detail: `${traceWarnings.length} warning(s) are recorded: ${traceWarnings.slice(0, 3).join(' · ')}${traceWarnings.length > 3 ? ' · …' : ''}`,
+      recommendation: 'Review the recorded warnings and note whether they affect the investigative question.'
+    });
+  }
+
   receivers.forEach(node => {
     const destinationEvidence = node.details?.destinationEvidence;
     const contact = node.details?.verifiedContact;
@@ -226,4 +260,10 @@ export function buildEvidenceGapChecklist(caseData, now = Date.now()) {
   if (unresolvedDue.length) gaps.push({ id: 'overdue-followups', priority: 'high', title: 'Recovery follow-up is overdue', detail: `${unresolvedDue.length} open follow-up(s) reached their recorded due date.`, recommendation: 'Review the latest response status and update the action record.' });
   const priorityOrder = { high: 0, medium: 1, low: 2 };
   return gaps.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+}
+
+function uniqueTraceWarnings(warnings) {
+  return [...new Set((Array.isArray(warnings) ? warnings : [])
+    .filter(warning => typeof warning === 'string' && warning.trim())
+    .map(warning => warning.trim()))];
 }
