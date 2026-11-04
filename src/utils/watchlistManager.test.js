@@ -28,8 +28,7 @@ describe('watchlistManager', () => {
 
   it('retrieves default watchlist when empty', () => {
     const list = getWatchlist();
-    expect(list.length).toBeGreaterThanOrEqual(2);
-    expect(list[0].address).toBeDefined();
+    expect(list).toEqual([]);
   });
 
   it('migrates legacy string entries to objects', () => {

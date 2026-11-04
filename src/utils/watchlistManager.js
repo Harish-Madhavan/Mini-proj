@@ -5,6 +5,7 @@
 
 import { safeGetItem, safeSetItem } from './storage';
 import { API_CONFIG } from '../constants/config';
+import { validateBtcAddress } from './forensicUtils';
 
 const WATCHLIST_STORAGE_KEY = 'aegistrace_watchlist';
 const ALERTS_STORAGE_KEY = 'aegistrace_mempool_alerts';
@@ -24,7 +25,7 @@ export function makeWatchEntry(address, overrides = {}) {
     address: address.trim(),
     tag: 'Watched wallet',
     syndicate: 'Open case',
-    riskTier: 'HIGH',
+    riskTier: 'UNASSESSED',
     addedDate: new Date().toISOString().split('T')[0],
     notes: 'Added for monitoring.',
     ...clean,
@@ -52,32 +53,8 @@ export function normalizeWatchlist(items) {
   return out.slice(0, MAX_WATCHLIST);
 }
 
-export const DEFAULT_WATCHLIST = [
-  {
-    address: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
-    tag: 'Watched deposit wallet',
-    syndicate: 'Case Alpha',
-    riskTier: 'CRITICAL',
-    addedDate: '2026-03-01',
-    notes: 'Deposit wallet seen in an earlier case.'
-  },
-  {
-    address: 'bc1q7w5pxj2lznq48as923kd8mzklaq02947alkwsj',
-    tag: 'Transit wallet',
-    syndicate: 'Case Alpha',
-    riskTier: 'HIGH',
-    addedDate: '2026-03-02',
-    notes: 'Middle wallet seen forwarding funds.'
-  },
-  {
-    address: '3E8tJ4n...WazirX_Deposit',
-    tag: 'Exchange endpoint',
-    syndicate: 'Case Alpha',
-    riskTier: 'MEDIUM',
-    addedDate: '2026-03-02',
-    notes: 'Notice sent. Waiting for identity records.'
-  }
-];
+// Start empty. Demo or imported addresses must be explicitly added by the user.
+export const DEFAULT_WATCHLIST = [];
 
 export function getWatchlist() {
   const saved = safeGetItem(WATCHLIST_STORAGE_KEY, null);
@@ -141,7 +118,7 @@ export async function checkAddressMempoolStatus(address, isLive = true) {
   if (typeof address !== 'string' || address.length === 0 || address.length > 100) {
     return { hasMempoolTx: false, message: 'Invalid address format.' };
   }
-  const isBitcoinAddress = address.startsWith('bc1') || address.startsWith('1') || address.startsWith('3');
+  const isBitcoinAddress = validateBtcAddress(address).isValid;
   if (isLive && !isBitcoinAddress) {
     return { hasMempoolTx: false, message: 'Live mempool checks support Bitcoin addresses only.' };
   }
@@ -255,17 +232,34 @@ function setWsStatus(status) {
 
 export function emitMempoolAlert(alert) {
   const currentAlerts = getMempoolAlerts();
+  if (currentAlerts.some(existing => existing.txid === alert.txid)) return false;
   const updated = [alert, ...currentAlerts.filter(a => a.txid !== alert.txid)].slice(0, 50);
   saveMempoolAlerts(updated);
 
   alertListeners.forEach(fn => {
     try { fn(alert); } catch {}
   });
+  return true;
 }
 
 /**
  * Initializes real-time WebSocket connection to mempool.space live stream.
  */
+export function refreshMempoolAddressTracking() {
+  if (!activeWs || typeof window === 'undefined' || activeWs.readyState !== window.WebSocket.OPEN) return false;
+  const addresses = [...new Set(getWatchlist()
+    .map(item => item.address)
+    .filter(address => validateBtcAddress(address).isValid))].slice(0, MAX_WATCHLIST);
+  if (!addresses.length) return false;
+  try {
+    activeWs.send(JSON.stringify({ 'track-addresses': addresses }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Subscribe to address-specific mempool events for the current watchlist. */
 export function initMempoolWebSocket({ wsUrl = 'wss://mempool.space/api/v1/ws', autoReconnect = true } = {}) {
   if (typeof window === 'undefined' || typeof window.WebSocket === 'undefined') {
     setWsStatus('UNSUPPORTED');
@@ -273,6 +267,7 @@ export function initMempoolWebSocket({ wsUrl = 'wss://mempool.space/api/v1/ws', 
   }
 
   if (activeWs && (activeWs.readyState === window.WebSocket.OPEN || activeWs.readyState === window.WebSocket.CONNECTING)) {
+    refreshMempoolAddressTracking();
     return activeWs;
   }
 
@@ -280,7 +275,6 @@ export function initMempoolWebSocket({ wsUrl = 'wss://mempool.space/api/v1/ws', 
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
-
   setWsStatus('CONNECTING');
 
   try {
@@ -289,65 +283,61 @@ export function initMempoolWebSocket({ wsUrl = 'wss://mempool.space/api/v1/ws', 
 
     ws.onopen = () => {
       setWsStatus('CONNECTED');
-      try {
-        ws.send(JSON.stringify({ action: 'init' }));
-        ws.send(JSON.stringify({ action: 'want', data: ['blocks', 'mempool-blocks', 'live-2h-chart'] }));
-      } catch {}
+      refreshMempoolAddressTracking();
     };
 
     ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(event.data);
-        const watched = getWatchlist();
+        const message = JSON.parse(event.data);
+        const watched = getWatchlist()
+          .map(item => item.address)
+          .filter(address => validateBtcAddress(address).isValid);
         if (!watched.length) return;
 
-        if (msg.tx) {
-          const tx = msg.tx;
-          const watchedAddrs = new Set(watched.map(w => (w.address || '').toLowerCase()));
-          const outAddrs = (tx.vout || []).map(o => (o.scriptpubkey_address || '').toLowerCase());
-          const inAddrs = (tx.vin || []).map(i => (i.prevout?.scriptpubkey_address || '').toLowerCase());
+        const observed = [];
+        if (Array.isArray(message['address-transactions'])) {
+          observed.push(...message['address-transactions'].map(tx => ({ tx, hintedAddress: null })));
+        }
+        for (const [address, activity] of Object.entries(message['multi-address-transactions'] || {})) {
+          if (!watched.some(item => item.toLowerCase() === address.toLowerCase())) continue;
+          observed.push(...(activity?.mempool || []).map(tx => ({ tx, hintedAddress: address })));
+        }
 
-          const matched = [...outAddrs, ...inAddrs].find(a => a && watchedAddrs.has(a));
-          if (matched) {
-            const flow = getAddressFlow(tx, matched);
-            if (flow.amountSats <= 0) return;
-            const feeRate = tx.fee && tx.weight ? Math.round(tx.fee / (tx.weight / 4)) : 15;
-            emitMempoolAlert({
-              id: `alert_${tx.txid}_${Date.now()}`,
-              address: matched,
-              txid: tx.txid,
-              feeRate: `${feeRate} sat/vB`,
-              amount: `${(flow.amountSats / 1e8).toFixed(4)} BTC`,
-              direction: flow.direction,
-              type: '0-Conf WebSocket Broadcast',
-              timestamp: 'Just now (Live mempool feed)'
-            });
-          }
+        for (const { tx, hintedAddress } of observed) {
+          if (!tx?.txid || tx.status?.confirmed === true) continue;
+          const candidates = hintedAddress ? [hintedAddress] : watched;
+          const address = candidates.find(candidate => getAddressFlow(tx, candidate).amountSats > 0);
+          if (!address) continue;
+          const flow = getAddressFlow(tx, address);
+          const feeRate = tx.fee && tx.weight ? Math.round(tx.fee / (tx.weight / 4)) : null;
+          emitMempoolAlert({
+            id: `alert_${tx.txid}_${Date.now()}`,
+            address,
+            txid: tx.txid,
+            feeRate: feeRate == null ? 'Unavailable' : `${feeRate} sat/vB`,
+            amount: `${(flow.amountSats / 1e8).toFixed(4)} BTC`,
+            direction: flow.direction,
+            type: 'Unconfirmed address transaction (WebSocket)',
+            timestamp: new Date().toISOString(),
+          });
         }
       } catch {}
     };
 
-    ws.onerror = () => {
-      setWsStatus('ERROR');
-    };
-
+    ws.onerror = () => setWsStatus('ERROR');
     ws.onclose = () => {
       setWsStatus('DISCONNECTED');
       activeWs = null;
       if (autoReconnect) {
-        reconnectTimer = setTimeout(() => {
-          initMempoolWebSocket({ wsUrl, autoReconnect });
-        }, 5000);
+        reconnectTimer = setTimeout(() => initMempoolWebSocket({ wsUrl, autoReconnect }), 5000);
       }
     };
-
     return ws;
   } catch {
     setWsStatus('ERROR');
     return null;
   }
 }
-
 export function closeMempoolWebSocket() {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);

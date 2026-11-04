@@ -34,10 +34,10 @@ describe('HeuristicClustering Component', () => {
     cleanup();
   });
 
-  it('renders default suspect addresses and action controls', () => {
+  it('starts with an empty address list and action controls', () => {
     render(<HeuristicClustering />);
     expect(screen.getByText(/Shared spending/i)).toBeDefined();
-    expect(screen.getByText('bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh')).toBeDefined();
+    expect(screen.getByText(/Add 2 or more addresses/i)).toBeDefined();
     expect(screen.getByRole('button', { name: /find groups/i })).toBeDefined();
   });
 
@@ -55,11 +55,14 @@ describe('HeuristicClustering Component', () => {
 
   it('handles address deletion', () => {
     render(<HeuristicClustering />);
+    const input = screen.getByPlaceholderText(/Enter a Bitcoin address/i);
+    fireEvent.change(input, { target: { value: '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa' } });
+    fireEvent.click(screen.getByRole('button', { name: /^add$/i }));
     const removeButtons = screen.getAllByTitle('Remove address');
     const initialCount = removeButtons.length;
 
     fireEvent.click(removeButtons[0]);
-    expect(screen.getAllByTitle('Remove address').length).toBe(initialCount - 1);
+    expect(screen.queryAllByTitle('Remove address').length).toBe(initialCount - 1);
     expect(showToastMock).toHaveBeenCalledWith('Address removed.', 'info');
   });
 

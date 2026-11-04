@@ -41,9 +41,9 @@ trace is computed live from gateway data.
 - **Evidence workflow** — case timelines, notice/report templates, reviewable
   evidence claims, and a SHA-256 digest of the report payload. These are
   investigative aids, not a legal-admissibility or identity-verification guarantee.
-- **Cross-Chain Intelligence** — bridge memo extraction (THORChain, Maya Protocol,
-  SideShift, ChangeNOW) identifying hop destinations to secondary networks
-  (Ethereum, Tron, Solana).
+- **Cross-Chain Intelligence** — bridge memo extraction proposes destination
+  details from memo text. It does not verify settlement or trace transactions on
+  the destination network.
 - **Mathematical Invariants** — continuous value conservation checks, FIFO
   anti-minting audits, and multi-model taint spread verification.
 
@@ -53,7 +53,7 @@ trace is computed live from gateway data.
   Linked cases, Risk, Watchlist, Report) plus graph canvas/sidebar/timeline.
 - `src/utils/` — chain API, heuristics, taint, clustering, risk, dossiers,
   custody, cross-chain bridge analysis, and narrative modules. Every module has colocated `.test.js`
-  tests (41 test files and 271 tests in the latest full-suite run).
+  tests. Run `npm test` for current totals.
 - `src/data/` — `judicialCorpus.js` separates public-case/source leads and
   unverified trace references from the verified benchmark; `forensicCorpus.js`
   contains candidate identifiers, not ground truth, alongside seed scenarios.
@@ -94,8 +94,7 @@ Be precise about what the numbers mean:
 - Historical cases can support regression and confidence assessment, but do
   not prove performance on unseen transactions; that requires held-out,
   representative cases and explicit coverage/error analysis.
-- **Test Suite Status**: 41 test files and 271 tests passed in the latest
-  full-suite run. Run `npm test` for the current result.
+- **Test Suite Status**: Run `npm test` for the current result.
 
 To demonstrate end to end: run `npm run verify` for the offline table, then
 paste any mainnet txid or address on the Dashboard and trace it live.

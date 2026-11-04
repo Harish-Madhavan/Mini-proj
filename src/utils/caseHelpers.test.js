@@ -63,7 +63,7 @@ describe('caseHelpers utilities', () => {
     expect(custom.title).toBe('Special Syndicate Alpha');
     expect(custom.nodes.length).toBe(3);
     expect(custom.links.length).toBe(2);
-    expect(custom.nodes[0].balance).toBe('3.2000 BTC');
+    expect(custom.nodes[0].balance).toBe('3.2000 BTC (user supplied)');
     expect(custom.nodes[0].details.ipLog).toBe('Not supplied');
     expect(custom.nodes[2].details.kycStatus).toContain('UNVERIFIED');
     expect(custom.riskScore).toBeNull();

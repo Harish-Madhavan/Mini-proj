@@ -14,7 +14,7 @@ import { fetchAddressTxs, fetchTx } from '../services/blockchain/gateway';
 import { useCase } from '../hooks/useCase';
 import { useToast } from '../hooks/useToast';
 import { validateBtcAddress, exportToCsv } from '../utils/forensicUtils';
-import { computeAddressClusters, detectPeelingChain, feeFingerprintSimilarity, estimatePoolReceived } from '../utils/clusteringAlgorithms';
+import { computeAddressClusters, detectPeelingChain, feeFingerprintSimilarity, estimatePoolReceived, solveCoinJoinSubsetSum } from '../utils/clusteringAlgorithms';
 import { downloadJson } from '../utils/download';
 import EmptyState from './EmptyState';
 
@@ -64,17 +64,37 @@ export default function HeuristicClustering() {
   const { activeCase } = useCase();
   const { showToast } = useToast();
 
-  const [suspectAddresses, setSuspectAddresses] = useState([
-    "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
-    "bc1q7w5pxj2lznq48as923kd8mzklaq02947alkwsj",
-    "bc1qdf4w9sl2lznq48as923kd8mzklaq02947a11122"
-  ]);
+  const [suspectAddresses, setSuspectAddresses] = useState([]);
   const [newAddr, setNewAddr] = useState('');
   const [clusteringResult, setClusteringResult] = useState(null);
   const [isClustering, setIsClustering] = useState(false);
   const [feeTxs, setFeeTxs] = useState({ a: '', b: '' });
   const [feeResult, setFeeResult] = useState(null);
   const [isComparingFees, setIsComparingFees] = useState(false);
+  const [coinJoinTxid, setCoinJoinTxid] = useState('');
+  const [coinJoinResult, setCoinJoinResult] = useState(null);
+  const [isSolvingCoinJoin, setIsSolvingCoinJoin] = useState(false);
+
+  const handleCoinJoinAnalysis = async () => {
+    const txid = coinJoinTxid.trim();
+    if (!/^[0-9a-fA-F]{64}$/.test(txid)) {
+      showToast('Enter a 64-character transaction ID.', 'warning');
+      return;
+    }
+    setIsSolvingCoinJoin(true);
+    setCoinJoinResult(null);
+    try {
+      const tx = await fetchTx(txid);
+      setCoinJoinResult(solveCoinJoinSubsetSum({
+        inputs: (tx.vin || []).map((input, index) => ({ id: `in_${index}`, valueSats: input.prevout?.value || 0 })),
+        outputs: (tx.vout || []).map((output, index) => ({ id: `out_${index}`, valueSats: output.value || 0 })),
+      }));
+    } catch (error) {
+      showToast(`Transaction analysis failed: ${error.message}`, 'error');
+    } finally {
+      setIsSolvingCoinJoin(false);
+    }
+  };
 
   const updateFeeTx = (field, val) => setFeeTxs(prev => ({ ...prev, [field]: val }));
 
@@ -111,8 +131,11 @@ export default function HeuristicClustering() {
     }
 
     const validation = validateBtcAddress(trimmed);
-    if (!validation.isValid) {
-      showToast(`Address warning: ${validation.error}`, "warning");
+    const isEvm = /^0x[0-9a-fA-F]{40}$/.test(trimmed);
+    const isTron = /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(trimmed);
+    if (!validation.isValid && !isEvm && !isTron) {
+      showToast(`Address not added: ${validation.error}`, "warning");
+      return;
     }
 
     setSuspectAddresses([...suspectAddresses, trimmed]);
@@ -129,7 +152,7 @@ export default function HeuristicClustering() {
     const addressesFromGraph = activeCase.nodes
       .map(n => n.details?.address)
       .filter(Boolean)
-      .filter(addr => !addr.startsWith('0x') && (addr.startsWith('bc1') || addr.startsWith('1') || addr.startsWith('3') || addr.length > 20));
+      .filter(addr => validateBtcAddress(addr).isValid);
 
     const uniqueAddrs = Array.from(new Set([...suspectAddresses, ...addressesFromGraph]));
     const newlyAdded = uniqueAddrs.length - suspectAddresses.length;
@@ -211,19 +234,19 @@ export default function HeuristicClustering() {
         ClusterID: clusteringResult.clusterId,
         Address: addr,
         ScriptFormat: v.type,
-        Confidence: `${clusteringResult.confidenceScore}%`,
-        EstimatedControlBalance: clusteringResult.totalBalance,
+        HeuristicGroupScore: `${clusteringResult.confidenceScore}%`,
+        GrossReceived: clusteringResult.totalBalance,
         ObservedTxs: clusteringResult.observedTxCount ?? 0
       };
     });
 
-    exportToCsv(`NCB-Cluster-${clusteringResult.clusterId}.csv`, rows, [
+    exportToCsv(`AegisTrace-Address-Group-${clusteringResult.clusterId}.csv`, rows, [
       { key: 'Index', header: '#' },
       { key: 'ClusterID', header: 'Group ID' },
       { key: 'Address', header: 'Bitcoin address' },
       { key: 'ScriptFormat', header: 'Address type' },
-      { key: 'Confidence', header: 'Confidence' },
-      { key: 'EstimatedControlBalance', header: 'Received' },
+      { key: 'HeuristicGroupScore', header: 'Heuristic group score' },
+      { key: 'GrossReceived', header: 'Gross received (observed)' },
       { key: 'ObservedTxs', header: 'Transactions checked' }
     ]);
     showToast("Group data downloaded.", "success");
@@ -231,7 +254,7 @@ export default function HeuristicClustering() {
 
   const handleExportJson = () => {
     if (!clusteringResult) return;
-    downloadJson(clusteringResult, `NCB-Cluster-${clusteringResult.clusterId}.json`);
+    downloadJson(clusteringResult, `AegisTrace-Address-Group-${clusteringResult.clusterId}.json`);
     showToast("Group data downloaded (JSON).", "success");
   };
 
@@ -252,7 +275,7 @@ export default function HeuristicClustering() {
               <h3 style={{ fontSize: '0.95rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
                 <GitMerge size={15} style={{ color: 'var(--text-muted)' }} /> Shared spending
               </h3>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: '0.2rem' }}>Addresses that spend together are probably one wallet.</p>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: '0.2rem' }}>Co-spending is a common-input heuristic. It can suggest a link, but does not prove common control; collaborative transactions can mislead it.</p>
           </div>
 
           <button
@@ -347,7 +370,7 @@ export default function HeuristicClustering() {
                   </div>
                 )}
               </div>
-              <div style={{ fontSize: '1.2rem', fontWeight: 600, letterSpacing: '-0.02em' }}>{clusteringResult.confidenceScore}%</div>
+              <div style={{ fontSize: '1.2rem', fontWeight: 600, letterSpacing: '-0.02em' }}>{clusteringResult.confidenceScore}%<div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 400 }}>heuristic group score</div></div>
             </div>
 
             {/* Metrics Breakdown */}
@@ -381,6 +404,21 @@ export default function HeuristicClustering() {
       </div>
     </div>
 
+      <div className="glass-panel" style={{ padding: '1.75rem', display: 'grid', gap: '0.8rem' }}>
+        <div>
+          <h3 style={{ fontSize: '0.95rem', fontWeight: 600 }}>CoinJoin partition candidates</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.25rem' }}>A bounded subset-sum analysis of equal-output transactions. Candidate partitions are not proof of participant identity or deanonymization; at most 16 inputs are searched.</p>
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <input className="mono-addr input-field" aria-label="CoinJoin transaction ID" placeholder="64-character transaction ID" value={coinJoinTxid} onChange={event => setCoinJoinTxid(event.target.value)} style={{ flex: 1 }} />
+          <button className="btn btn-primary" onClick={handleCoinJoinAnalysis} disabled={isSolvingCoinJoin}>{isSolvingCoinJoin ? 'Analyzing…' : 'Analyze'}</button>
+        </div>
+        {coinJoinResult && <div role="status" style={{ color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
+          <p>{coinJoinResult.summary}</p>
+          {coinJoinResult.isSolvable && <><p>Candidate partitions: {coinJoinResult.participantCount}; solver score: {coinJoinResult.confidence}% (heuristic). Searched {coinJoinResult.searchedInputCount}/{coinJoinResult.totalInputCount} inputs and {coinJoinResult.searchedChangeOutputCount}/{coinJoinResult.totalChangeOutputCount} possible change outputs{coinJoinResult.searchTruncated ? ' (search truncated)' : ''}.</p>{coinJoinResult.partitions.map(part => <p key={part.participantIndex}>Candidate {part.participantIndex}: inputs {part.inputIds.join(', ')} → output {part.mixOutput.id}{part.changeOutput ? ` plus candidate change ${part.changeOutput.id}` : ''}; estimated fee {part.estimatedFeeSats} sats.</p>)}</>}
+        </div>}
+      </div>
+
       {/* Fee habits */}
       <div className="glass-panel" style={{ padding: '1.75rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -388,7 +426,7 @@ export default function HeuristicClustering() {
             <Fingerprint size={15} style={{ color: 'var(--text-muted)' }} /> Fee habits
           </h3>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-            Same wallet often pays similar fees.
+            Similar fee-rate patterns are weak supporting evidence; they do not establish identity.
           </p>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '0.5rem', alignItems: 'end' }} className="responsive-split-grid">

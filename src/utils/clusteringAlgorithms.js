@@ -532,7 +532,7 @@ function normalizeSatsEntry(item, index, prefix) {
  * @param {Array} params.outputs - Array of transaction outputs (sats or objects)
  * @param {number} [params.maxFeeSats=35000] - Maximum plausible miner fee per participant
  * @param {number} [params.minFeeSats=100] - Minimum plausible miner fee per participant
- * @returns {Object} Unmixing breakdown with participant partitions and confidence score
+ * @returns {Object} Candidate partition analysis with an uncalibrated heuristic score
  */
 export function solveCoinJoinSubsetSum({
   inputs = [],
@@ -572,7 +572,11 @@ export function solveCoinJoinSubsetSum({
 
   // If no identical mix outputs, check for general 2-party decomposition
   const mixOutputs = normOutputs.filter(o => o.valueSats === mixDenom);
-  const changeOutputs = normOutputs.filter(o => o.valueSats !== mixDenom);
+  const allChangeOutputs = normOutputs.filter(o => o.valueSats !== mixDenom);
+  // Bound candidate enumeration as well as subset enumeration for unusually
+  // large transactions; output order is preserved and truncation is reported.
+  const changeOutputs = allChangeOutputs.slice(0, 32);
+  const outputSearchTruncated = allChangeOutputs.length > changeOutputs.length;
 
   // If no standard equal-value mix denomination found
   if (mixCount < 2) {
@@ -588,7 +592,7 @@ export function solveCoinJoinSubsetSum({
   }
 
   // 2. Subset sum matching
-  // Generate input subsets (bounded up to 20 inputs to prevent 2^N explosion)
+  // Search is capped at 16 inputs to bound the exponential subset enumeration.
   const boundedInputs = normInputs.slice(0, 16);
   const n = boundedInputs.length;
   const numSubsets = 1 << n;
@@ -611,15 +615,21 @@ export function solveCoinJoinSubsetSum({
   // Target: inputSubset.sum - (mixDenom + change.valueSats) in [minFeeSats, maxFeeSats]
   // Or without change (exact mix payment): inputSubset.sum - mixDenom in [minFeeSats, maxFeeSats]
   const candidateMatches = [];
+  const maxCandidateMatches = 5000;
+  let candidateSearchTruncated = false;
 
   // Include a null change candidate (0 sats)
   const changeCandidates = [...changeOutputs, { id: 'no_change', valueSats: 0, isVirtual: true }];
 
-  for (const change of changeCandidates) {
+  candidateSearch: for (const change of changeCandidates) {
     const targetOut = mixDenom + change.valueSats;
     for (const sub of subsetSums) {
       const diff = sub.sum - targetOut;
       if (diff >= minFeeSats && diff <= maxFeeSats) {
+        if (candidateMatches.length >= maxCandidateMatches) {
+          candidateSearchTruncated = true;
+          break candidateSearch;
+        }
         candidateMatches.push({
           change,
           mask: sub.mask,
@@ -677,7 +687,7 @@ export function solveCoinJoinSubsetSum({
       mixOutputCount: mixCount,
       partitions: [],
       confidence: 30,
-      summary: `Identified CoinJoin structure with ${mixCount} equal outputs of ${(mixDenom / 1e8).toFixed(4)} BTC, but input subsets could not be unambiguously decomposed.`
+      summary: `Equal outputs match a possible CoinJoin pattern (${mixCount} outputs at ${(mixDenom / 1e8).toFixed(4)} BTC), but no candidate input partition was found.`
     };
   }
 
@@ -715,8 +725,11 @@ export function solveCoinJoinSubsetSum({
       original: mixCount,
       effective: isUniqueSolution ? 1 : Math.min(mixCount, partitionCount)
     },
-    summary: isUniqueSolution
-      ? `De-anonymized ${formattedPartitions.length} participant sub-clusters with 92% confidence, collapsing anonymity set from ${mixCount} to 1.`
-      : `Partially de-anonymized ${formattedPartitions.length} participant sub-clusters (${partitionCount} possible combinations identified, ~${overallConfidence}% confidence).`
+    searchedInputCount: boundedInputs.length,
+    totalInputCount: normInputs.length,
+    searchedChangeOutputCount: changeOutputs.length,
+    totalChangeOutputCount: allChangeOutputs.length,
+    searchTruncated: normInputs.length > boundedInputs.length || outputSearchTruncated || candidateSearchTruncated,
+    summary: `Found ${formattedPartitions.length} candidate input partition(s) for ${mixCount} equal outputs. This bounded heuristic does not identify participants or prove a CoinJoin.`
   };
 }

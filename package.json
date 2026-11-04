@@ -10,6 +10,7 @@
     "test": "vitest run",
     "verify": "vitest run src/utils/accuracy.test.js",
     "verify:ground-truth": "vitest run src/utils/judicialAccuracy.test.js",
+    "verify:chain-facts": "vitest run src/utils/chainFactEvaluation.test.js",
     "preview": "vite preview"
   },
   "dependencies": {

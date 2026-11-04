@@ -7,13 +7,14 @@ export const API_CONFIG = {
 
 export const APP_METADATA = {
   TITLE: 'AEGISTRACE',
-  SUBTITLE: 'NCB Blockchain Forensics Terminal',
+  SUBTITLE: 'Blockchain Investigation Workstation',
   SYSTEM_VERSION: 'AegisTrace · SIH1675'
 };
 
 export const TRACE_CONFIG = {
   MAX_BRANCHING: 8,
-  MAX_NODES: 120,
+  MAX_NODES: 300,
+  MAX_INPUT_NODES: 120,
   COINJOIN_HALT: true,
   COINJOIN_ANONYMITY_THRESHOLD: 0.85,
   CONFIDENCE_LOW_THRESHOLD: 0.35,

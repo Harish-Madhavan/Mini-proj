@@ -1,11 +1,9 @@
 /**
  * AegisTrace Forensic Reference List — CANDIDATE IDENTIFIERS (UNVERIFIED)
  *
- * The identifiers and typology notes are candidate references; this
- * repository does not include source snapshots or independent verification.
- * Do not treat the labels or expectations as ground truth. Nothing in the
- * application reads this file at runtime; only forensicCorpus.test.js checks
- * that its identifiers are well-formed.
+ * Transaction facts are stored separately in chainFactCorpus.js and checked
+ * independently. Typology, ownership, and intent descriptions here remain
+ * candidate interpretations; they are not validated by matching chain facts.
  *
  * Shape key:
  * - genesis coinbase  → coinbase-input handling, unspendable early-format output

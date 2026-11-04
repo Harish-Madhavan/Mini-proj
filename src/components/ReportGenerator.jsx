@@ -69,7 +69,7 @@ export default function ReportGenerator() {
   const [signatureRevision, setSignatureRevision] = useState(0);
   const [officerName, setOfficerName] = useState('');
   const [officerBadge, setOfficerBadge] = useState('');
-  const [bureauZone, setBureauZone] = useState('NCB Head Office, New Delhi');
+  const [bureauZone, setBureauZone] = useState('');
   const [watermark, setWatermark] = useState(WATERMARK_OPTIONS[0].value);
   const [investigatorNotes, setInvestigatorNotes] = useState('');
 
@@ -225,21 +225,15 @@ export default function ReportGenerator() {
     window.print();
   };
 
-  const getRefCode = () => {
-    if (bureauZone.includes('Head Office')) return 'NCB/HQ/ND';
-    if (bureauZone.includes('Mumbai')) return 'NCB/MZU/MUM';
-    if (bureauZone.includes('Bengaluru')) return 'NCB/BZU/BLR';
-    return 'NCB/CIU/CH';
-  };
-
   const getReportMarkdown = () => {
     const notesList = activeCase.notesList || [];
-    return `# NARCOTICS CONTROL BUREAU (NCB) â€” FORENSIC REPORT
-**Issuing Zonal Unit:** ${bureauZone}  
+    return `# DRAFT FORENSIC CASE REPORT — FOR REVIEW
+**Prepared by:** AegisTrace draft tool (not issued by or on behalf of an agency)  
+**Proposed unit (user supplied):** ${bureauZone || 'Not supplied'}  
 **Classification:** ${watermark}  
 **Trace status:** ${activeCase.traceType === 'SIMULATED_ESTIMATE' ? 'SIMULATED ESTIMATE — NOT ON-CHAIN EVIDENCE' : activeCase.traceType === 'MANUAL_HYPOTHESIS' ? 'USER-SUPPLIED HYPOTHESIS — NOT VERIFIED' : 'Observed trace data; review source provenance and completeness'}<br>
 **Case Title:** ${activeCase.title}  
-**Case Ref:** ${getRefCode()}-${activeCase.id.toUpperCase()}  
+**Application draft reference:** AEGIS-DRAFT-${activeCase.id.toUpperCase()}  
 **Date:** ${new Date().toISOString().split('T')[0]}  
 **Evidence payload SHA-256 digest:** \`${integrityHash}\`
 *This digest covers the complete canonical stored case and report metadata snapshot. It detects changes to that payload; it does not verify source authenticity, attribution, or legal admissibility.*
@@ -307,8 +301,8 @@ ${crossChainReport && crossChainReport.crossChainHops?.length > 0 ? crossChainRe
 ${investigatorNotes}
 
 ---
-**Officer:** ${officerName} [Badge: ${officerBadge}]  
-*Narcotics Control Bureau, Ministry of Home Affairs, Government of India*
+**Reviewer (user supplied):** ${officerName || 'Not supplied'} [Identifier: ${officerBadge || 'Not supplied'}]  
+*Draft analytical aid only. No authority, signature, certification, legal admissibility, or source authenticity is provided by this application.*
 `;
   };
 
@@ -338,7 +332,7 @@ ${investigatorNotes}
     const text = isEvidence ? getEvidenceWorksheetText() : getReportMarkdown();
     const filename = isEvidence
       ? `AegisTrace-Evidence-Worksheet-${activeCase.id.toUpperCase()}.txt`
-      : `NCB-Forensic-Report-${activeCase.id.toUpperCase()}.md`;
+      : `AegisTrace-Draft-Report-${activeCase.id.toUpperCase()}.md`;
     downloadText(text, filename);
     showToast(isEvidence ? "Evidence worksheet downloaded." : "Report downloaded.", "success");
   };
@@ -612,7 +606,7 @@ ${investigatorNotes}
               {custody.eventCount > 0 && (
                 <div style={{ position: 'relative', zIndex: 1 }}>
                   <h4 style={{ fontSize: '0.82rem', fontWeight: 600, color: '#1a1a1a', marginBottom: '0.4rem' }}>
-                    Event digest chain · {custodyStatusLabel}
+                    Transfer-event digest trail · {custodyStatusLabel}
                   </h4>
                   <table style={{ width: '100%', fontSize: '0.76rem', borderCollapse: 'collapse' }}>
                     <thead>
@@ -723,7 +717,7 @@ ${investigatorNotes}
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem' }}>
-                  <span style={{ color: '#999', fontSize: '0.74rem' }}>Signature</span>
+                  <span style={{ color: '#999', fontSize: '0.74rem' }}>Signature image (not digitally signed)</span>
                   <div style={{ position: 'relative', border: isLocked ? 'none' : '1px dashed #ddd', borderRadius: '6px', backgroundColor: '#fafafa' }}>
                     <canvas
                       ref={canvasRef}

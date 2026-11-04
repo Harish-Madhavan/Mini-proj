@@ -30,16 +30,20 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
   const sourceManifest = [];
   let haltReason = null;
   let nodeLimitReached = false;
+  let omittedInputNodeCount = 0;
   let omittedLinkCount = 0;
   let totalFetched = 0;
 
   // Dedup helpers
   const nodeIds = new Set();
-  function recordOmittedNode(nodeId) {
-    haltReason = 'NODE_LIMIT';
+  function recordOmittedNode(nodeId, reason = 'NODE_LIMIT') {
+    if (reason === 'NODE_LIMIT' || haltReason === null) haltReason = reason;
     if (!omittedNodeIds.includes(nodeId)) omittedNodeIds.push(nodeId);
-    if (!warnings.some(w => w.startsWith(`Total node limit ${TRACE_CONFIG.MAX_NODES}`))) {
-      warnings.push(`Total node limit ${TRACE_CONFIG.MAX_NODES} reached; additional nodes and dependent edges are omitted.`);
+    const warning = reason === 'INPUT_LIMIT'
+      ? `Input node limit ${TRACE_CONFIG.MAX_INPUT_NODES} reached; additional input leaves are omitted.`
+      : `Total node limit ${TRACE_CONFIG.MAX_NODES} reached; additional nodes and dependent edges are omitted.`;
+    if (!warnings.includes(warning)) {
+      warnings.push(warning);
     }
   }
   function addNode(node) {
@@ -213,6 +217,7 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
       // transaction and its first output when this branch can still expand.
       const inputScriptTypes = [];
       if (depth === 0) {
+        let emittedInputNodes = 0;
         const remainingCapacity = Math.max(0, TRACE_CONFIG.MAX_NODES - nodeIds.size);
         const continuationReserve = depth < (item.limit ?? maxDepth) ? 2 : 0;
         const outputReserve = Math.min(
@@ -229,15 +234,24 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
             const sat = input.prevout?.value || 0;
             const valBtc = satsToBtc(sat);
             const inputNodeId = `in_${addr}`;
-            if (nodeIds.size >= TRACE_CONFIG.MAX_NODES - outputReserve - continuationReserve) {
-              recordOmittedNode(inputNodeId);
+            if (emittedInputNodes >= TRACE_CONFIG.MAX_INPUT_NODES) {
+              recordOmittedNode(inputNodeId, 'INPUT_LIMIT');
+              omittedInputNodeCount++;
               omittedLinkCount++;
               continue;
             }
-            addNode(buildInputNode({ addr, scriptStd, satoshis: sat }));
-            addLink(inputNodeId, txNodeId, `${valBtc} BTC`, 'On-chain', tx, {
-              inputOutpoint: input.txid && Number.isInteger(input.vout) ? `${input.txid}:${input.vout}` : null,
-            });
+            if (nodeIds.size >= TRACE_CONFIG.MAX_NODES - outputReserve - continuationReserve) {
+              recordOmittedNode(inputNodeId);
+              omittedInputNodeCount++;
+              omittedLinkCount++;
+              continue;
+            }
+            if (addNode(buildInputNode({ addr, scriptStd, satoshis: sat }))) {
+              emittedInputNodes++;
+              addLink(inputNodeId, txNodeId, `${valBtc} BTC`, 'On-chain', tx, {
+                inputOutpoint: input.txid && Number.isInteger(input.vout) ? `${input.txid}:${input.vout}` : null,
+              });
+            }
           }
         }
       } else {
@@ -299,7 +313,12 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
 
         const lastActive = cls.kycStatus?.includes('UNSPENT') ? 'Holds unspent funds' : cls.kycStatus?.includes('MIXED') ? 'Mixed funds' : 'On chain';
         if (!addNode(buildOutputNode({ outNodeId, addr, valBtc, scriptStd, cls, tx, lastActive, outspendSpent: outspend.spent }))) break;
-        addLink(txNodeId, outNodeId, `${valBtc} BTC`, tx.status?.block_time ? new Date(tx.status.block_time*1000).toLocaleDateString() : 'On-chain', tx, { txid: item.txId, outputIndex: i });
+        addLink(txNodeId, outNodeId, `${valBtc} BTC`, tx.status?.block_time ? new Date(tx.status.block_time*1000).toLocaleDateString() : 'On-chain', tx, {
+          txid: item.txId,
+          outputIndex: i,
+          valueSats: output.value,
+          scriptType: output.scriptpubkey_type || 'unknown',
+        });
         seenAddresses.add(addr);
 
         // Queue next hop only if: spent, not dust, not CoinJoin, not self-loop, and under depth
@@ -367,6 +386,7 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
       linkCount: links.length,
       depthReached,
       omittedNodeCount: omittedNodeIds.length,
+      omittedInputNodeCount,
       omittedNodeIds,
       omittedLinkCount,
       prunedBranches,

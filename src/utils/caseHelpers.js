@@ -169,15 +169,15 @@ export function createAlgorithmicTraceCase(searchVal, scenarios) {
 
 export function createCustomInvestigationCase(newCaseData) {
   const caseId = `case-custom-${Date.now().toString(36)}`;
-  const suspectAddr = newCaseData.suspectAddress || 'bc1q999customtargetaddressforensicset';
+  const suspectAddr = newCaseData.suspectAddress || null;
   const amount = newCaseData.amount || '5.5000 BTC';
-  const receiverAddr = newCaseData.receiverAddress || 'bc1qdepositaddressforensictarget999';
+  const receiverAddr = newCaseData.receiverAddress || null;
 
   return {
     id: caseId,
     title: newCaseData.title || `Custom Case ${caseId.slice(-6).toUpperCase()}`,
     currency: "BTC",
-    initialTxHash: newCaseData.txHash || "custom_tx_hash_placeholder",
+    initialTxHash: newCaseData.txHash || null,
     suspectName: newCaseData.suspectName || "Custom target",
     description: newCaseData.description || "Manually assembled case.",
     riskScore: null,
@@ -189,15 +189,14 @@ export function createCustomInvestigationCase(newCaseData) {
         label: "Start",
         type: "suspect",
         entityName: newCaseData.suspectName || "Target person",
-        balance: amount,
-        risk: "critical",
+        balance: `${amount} (user supplied)`,
+        risk: "unknown",
         details: {
-          address: suspectAddr,
+          ...(suspectAddr ? { address: suspectAddr } : {}),
           ipLog: "Not supplied",
-          lastActive: "Recent activity",
+          lastActive: "Not verified",
           kycStatus: "UNVERIFIED (USER-SUPPLIED CASE)",
-          scriptStandard: "Native SegWit",
-          riskReason: "Starting wallet from the initial notes."
+          riskReason: "User-supplied starting point; no chain lookup has been performed."
         }
       },
       {
@@ -205,15 +204,13 @@ export function createCustomInvestigationCase(newCaseData) {
         label: "Step 1",
         type: "hop",
         entityName: "Middle wallet",
-        balance: amount,
-        risk: "medium",
+        balance: `${amount} (user supplied)`,
+        risk: "unknown",
         details: {
-          address: `bc1qhop${Date.now().toString(36)}transithopaddr`,
-          ipLog: "Network relay",
-          lastActive: "Passing funds on",
-          kycStatus: "UNLINKED FUNDS",
-          scriptStandard: "SegWit script",
-          riskReason: "Middle address splitting funds."
+          ipLog: "Not supplied",
+          lastActive: "Not verified",
+          kycStatus: "USER-SUPPLIED HYPOTHESIS",
+          riskReason: "Hypothetical intermediate step; no transaction evidence recorded."
         }
       },
       {
@@ -221,16 +218,15 @@ export function createCustomInvestigationCase(newCaseData) {
         label: "End receiver",
         type: "receiver",
         entityName: newCaseData.targetExchange ? "User-reported destination (unverified)" : "Unverified destination",
-        balance: amount,
-        risk: "low",
+        balance: `${amount} (user supplied)`,
+        risk: "unknown",
         details: {
-          address: receiverAddr,
+          ...(receiverAddr ? { address: receiverAddr } : {}),
           ipLog: "Not supplied",
-          lastActive: "Active deposit",
+          lastActive: "Not verified",
           kycStatus: "UNVERIFIED (USER-SUPPLIED CASE)",
           reportedLabel: newCaseData.targetExchange || null,
-          scriptStandard: "Script address (P2SH)",
-          riskReason: "End deposit at a government-registered exchange with identity records."
+          riskReason: "User-reported destination hypothesis; no chain or service attribution has been verified."
         }
       }
     ],
@@ -239,13 +235,13 @@ export function createCustomInvestigationCase(newCaseData) {
         source: "custom_suspect",
         target: "custom_hop_1",
         value: amount,
-        timestamp: "Block Confirmed"
+        timestamp: "User supplied (not chain verified)"
       },
       {
         source: "custom_hop_1",
         target: "custom_receiver",
         value: amount,
-        timestamp: "Settlement Confirmed"
+        timestamp: "User supplied (not chain verified)"
       }
     ]
   };

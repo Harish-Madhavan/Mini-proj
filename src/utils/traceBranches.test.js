@@ -50,7 +50,7 @@ describe('trace branch behavior', () => {
     expect(res.meta.stats.fetchedTxCount).toBe(1);
   });
 
-  it('caps total graph nodes and records exact omitted input nodes', async () => {
+  it('caps input leaves separately while reserving room for outputs', async () => {
     const ROOT = 'a'.repeat(64);
     const root = txShape({
       txid: ROOT,
@@ -64,11 +64,13 @@ describe('trace branch behavior', () => {
 
     const result = await traceEndReceiver(ROOT, 1);
     expect(result.nodes.length).toBeLessThanOrEqual(TRACE_CONFIG.MAX_NODES);
+    expect(result.nodes.filter(node => node.id.startsWith('in_')).length).toBe(TRACE_CONFIG.MAX_INPUT_NODES);
     expect(result.nodes.some(node => node.id === 'out_bc1qoutputa')).toBe(true);
     expect(result.nodes.some(node => node.id === 'out_bc1qoutputb')).toBe(true);
     expect(result.meta.stats.omittedNodeCount).toBeGreaterThan(0);
+    expect(result.meta.stats.omittedInputNodeCount).toBeGreaterThan(0);
     expect(result.meta.stats.omittedNodeIds.length).toBe(result.meta.stats.omittedNodeCount);
-    expect(result.meta.haltReason).toBe('NODE_LIMIT');
+    expect(result.meta.haltReason).toBe('INPUT_LIMIT');
   });
 
   it('preserves transaction and output-index provenance across a spend edge', async () => {
@@ -255,6 +257,6 @@ describe('trace branch behavior', () => {
     expect(res.nodes.some(n => n.id === `tx_${CHILD}`)).toBe(true);
     expect(res.nodes.some(n => n.id === 'out_bc1qend11111111111111111111111111')).toBe(true);
     expect(res.meta.stats.omittedNodeCount).toBeGreaterThan(0);
-    expect(res.meta.haltReason).toBe('NODE_LIMIT');
+    expect(res.meta.haltReason).toBe('INPUT_LIMIT');
   });
 });

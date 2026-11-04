@@ -155,13 +155,14 @@ export default function BatchAddressImporter({ isOpen, onClose, onImportComplete
               </label>
               <button
                 type="button"
-                onClick={() => setRawText("bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh,Seized Wallet A,Phone dump\n1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa,Genesis Target,Hardcoded seed\n3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy,Exchange Deposit,Darknet cashout")}
+                onClick={() => setRawText("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa,Example address A,Public example; no attribution implied\n3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy,Example address B,Public example; no attribution implied")}
                 className="btn-quiet"
                 style={{ fontSize: '0.76rem' }}
               >
                 Insert Sample
               </button>
             </div>
+            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Sample rows are public examples only; importing them does not imply risk, seizure, or attribution.</p>
             <textarea
               rows={4}
               placeholder="Paste one address per line, or CSV format: address, tag, notes, riskTier"

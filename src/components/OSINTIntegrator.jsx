@@ -14,8 +14,6 @@ import { parseCrossChainMemo } from '../utils/crossChainForensics';
 import { 
   EXCHANGES, 
   EXCHANGE_DIRECTORY,
-  DEFAULT_FIR_NUMBER, 
-  DEFAULT_OFFICER_TITLE, 
   ZONAL_UNITS, 
   generateSection67NoticeText,
   generateComplianceEmailTemplate
@@ -49,10 +47,10 @@ export default function OSINTIntegrator() {
 
   const [noticeForm, setNoticeForm] = useState({
     selectedExchange: EXCHANGES[0],
-    firNumber: DEFAULT_FIR_NUMBER,
+    firNumber: '',
     zonalUnit: ZONAL_UNITS[0].value,
-    officerRank: DEFAULT_OFFICER_TITLE,
-    officerBadge: 'NCB-84920-LE'
+    officerRank: '',
+    officerBadge: ''
   });
   const updateNotice = (key, val) => setNoticeForm(prev => ({ ...prev, [key]: val }));
 
@@ -101,29 +99,28 @@ export default function OSINTIntegrator() {
       depositAddress: receiverNode.details?.address || receiverNode.id || 'N/A',
       currency: activeCase.currency,
       balance: receiverNode.balance || '0 BTC',
-      officerRank: `${noticeForm.officerRank} [Badge: ${noticeForm.officerBadge}]`,
-      sigKey: undefined
+      officerRank: [noticeForm.officerRank, noticeForm.officerBadge].filter(Boolean).join(' / '),
     });
   };
 
   const handleCopySubpoena = () => {
     const text = getSubpoenaText();
     if (!text) {
-      showToast("No end receiver for a notice yet.", "warning");
+      showToast("No end receiver is recorded in this case.", "warning");
       return;
     }
     navigator.clipboard.writeText(text);
-    showToast("Notice copied.", "success");
+    showToast("Draft worksheet copied.", "success");
   };
 
   const handleDownloadSubpoena = () => {
     const text = getSubpoenaText();
     if (!text) {
-      showToast("No end receiver for a notice yet.", "warning");
+      showToast("No end receiver is recorded in this case.", "warning");
       return;
     }
-    downloadText(text, `NCB-Section67-Notice-${activeCase.id.toUpperCase()}.txt`);
-    showToast("Notice downloaded.", "success");
+    downloadText(text, `request-draft-${activeCase.id}.txt`);
+    showToast("Draft worksheet downloaded.", "success");
   };
 
   const handleSendEmail = () => {
@@ -136,22 +133,26 @@ export default function OSINTIntegrator() {
       firNumber: noticeForm.firNumber,
       depositAddress: receiverNode.details?.address || receiverNode.id || 'N/A',
       balance: receiverNode.balance || '0 BTC',
-      officerRank: `${noticeForm.officerRank} [Badge: ${noticeForm.officerBadge}]`
+      officerRank: [noticeForm.officerRank, noticeForm.officerBadge].filter(Boolean).join(' / ')
     });
     window.open(mailto, '_blank');
     showToast("Opened email draft.", "info");
   };
 
   return (
-    <div className="responsive-split-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+      <div className="responsive-split-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
       
       {/* Notice panel */}
       <div className="glass-panel" style={{ padding: '1.75rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
         <div>
           <h3 style={{ fontSize: '0.95rem', fontWeight: 600 }}>
-            Attribution & notice
+            Attribution & request worksheet
           </h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: '0.2rem' }}>Endpoint context and the exchange notice.</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: '0.2rem' }}>Inspect endpoint evidence and prepare an unapproved draft for authorized review.</p>
+        </div>
+
+        <div role="note" style={{ padding: '0.7rem', border: '1px solid rgba(245,158,11,0.3)', borderRadius: '8px', color: 'var(--text-secondary)', fontSize: '0.78rem' }}>
+          Draft only. A trace does not establish address ownership, current funds, or legal authority. Verify facts, recipient contacts, and applicable process independently before preparing or issuing a request.
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -268,10 +269,10 @@ export default function OSINTIntegrator() {
           </div>
         </div>
 
-        {/* Section 67 NDPS Notice Parameters */}
+        {/* Request worksheet details; statutory authority is supplied only after review. */}
         <div style={{ borderTop: '1px solid var(--border-soft)', paddingTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
           <h4 style={{ fontSize: '0.82rem', fontWeight: 600 }}>
-            Notice details
+            Draft details
           </h4>
 
           <div>
@@ -339,20 +340,20 @@ export default function OSINTIntegrator() {
         </div>
       </div>
 
-      {/* Subpoena Preview Panel */}
+      {/* Draft Preview Panel */}
       <div className="glass-panel" style={{ padding: '1.75rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.5rem' }}>
           <h3 style={{ fontSize: '0.95rem', fontWeight: 600 }}>
-            Notice preview
+            Draft preview
           </h3>
           <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
             <button
               onClick={handleSendEmail}
               className="btn-quiet"
               style={{ fontSize: '0.8rem' }}
-              title="Launch Compliance Email Dispatch"
+              title="Open an email draft for review; this does not send it"
             >
-              <Mail size={13} /> Email
+              <Mail size={13} /> Email draft
             </button>
             <button
               onClick={handleCopySubpoena}

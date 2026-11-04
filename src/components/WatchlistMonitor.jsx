@@ -20,6 +20,7 @@ import {
   saveMempoolAlerts, 
   checkAddressMempoolStatus,
   initMempoolWebSocket,
+  refreshMempoolAddressTracking,
   closeMempoolWebSocket,
   onMempoolAlert,
   onMempoolStatusChange,
@@ -36,7 +37,7 @@ export default function WatchlistMonitor() {
 
   const [watchlist, setWatchlist] = useState([]);
   const [alerts, setAlerts] = useState([]);
-  const [form, setForm] = useState({ address: '', tag: '', syndicate: '', tier: 'CRITICAL' });
+  const [form, setForm] = useState({ address: '', tag: '', syndicate: '', tier: 'UNASSESSED' });
   const [isCheckingAll, setIsCheckingAll] = useState(false);
   const [mempoolResults, setMempoolResults] = useState({});
   const [wsStatus, setWsStatus] = useState(() => getWebSocketStatus());
@@ -67,6 +68,10 @@ export default function WatchlistMonitor() {
     };
   }, [liveMode, showToast]);
 
+  useEffect(() => {
+    if (liveMode) refreshMempoolAddressTracking();
+  }, [watchlist, liveMode]);
+
   const handleAdd = () => {
     const trimmed = form.address.trim();
     if (!trimmed) {
@@ -77,6 +82,7 @@ export default function WatchlistMonitor() {
     const validation = validateBtcAddress(trimmed);
     if (!validation.isValid) {
       showToast(`Address warning: ${validation.error}`, "warning");
+      return;
     }
 
     const res = addToWatchlist({
@@ -88,7 +94,7 @@ export default function WatchlistMonitor() {
 
     if (res.success) {
       setWatchlist(res.watchlist);
-      setForm({ address: '', tag: '', syndicate: '', tier: 'CRITICAL' });
+      setForm({ address: '', tag: '', syndicate: '', tier: 'UNASSESSED' });
       showToast("Address added to watchlist.", "success");
     } else {
       showToast(res.message, "warning");
@@ -111,12 +117,12 @@ export default function WatchlistMonitor() {
 
     suspects.forEach(node => {
       const addr = node.details?.address;
-      if (addr && addr.length > 20 && !addr.startsWith('0x')) {
+      if (addr && validateBtcAddress(addr).isValid) {
         const res = addToWatchlist({
           address: addr,
           tag: node.label || 'Case Target',
           syndicate: activeCase.title || 'Open case',
-          riskTier: node.type === 'suspect' ? 'CRITICAL' : 'HIGH',
+          riskTier: 'UNASSESSED',
           notes: `Imported from Case: ${activeCase.id}`
         });
         if (res.success) addedCount++;
@@ -221,7 +227,7 @@ export default function WatchlistMonitor() {
               ) : null}
             </div>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: '0.15rem' }}>
-              Sub-second mempool surveillance & 0-confirmation transaction interception.
+              Address-specific unconfirmed transaction alerts. Alerts do not prevent transactions or establish wallet ownership.
             </p>
           </div>
 
@@ -290,6 +296,7 @@ export default function WatchlistMonitor() {
             className="select-field"
             style={{ fontSize: '0.8rem', background: 'transparent', borderColor: 'transparent', color: 'var(--text-muted)' }}
           >
+            <option value="UNASSESSED">Unassessed</option>
             <option value="CRITICAL">Critical</option>
             <option value="HIGH">High</option>
             <option value="MEDIUM">Medium</option>

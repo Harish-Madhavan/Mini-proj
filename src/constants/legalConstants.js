@@ -48,14 +48,12 @@ export const ZONAL_UNITS = [
 ];
 
 export const WATERMARK_OPTIONS = [
-  { label: 'CONFIDENTIAL — OFFICIAL USE ONLY', value: 'CONFIDENTIAL — OFFICIAL USE ONLY' },
-  { label: 'PROSECUTION EXHIBIT', value: 'PROSECUTION EXHIBIT' },
-  { label: 'RESTRICTED / LAW ENFORCEMENT', value: 'RESTRICTED / LAW ENFORCEMENT' },
-  { label: 'COURT EVIDENCE SUBMISSION', value: 'COURT EVIDENCE SUBMISSION' }
+  { label: 'DRAFT FOR REVIEW', value: 'DRAFT FOR REVIEW' },
+  { label: 'INTERNAL WORKING COPY', value: 'INTERNAL WORKING COPY' },
+  { label: 'INVESTIGATIVE LEAD - UNVERIFIED', value: 'INVESTIGATIVE LEAD - UNVERIFIED' }
 ];
-
-export const DEFAULT_OFFICER_TITLE = 'Inspector R. Sharma (Investigating Officer)';
-export const DEFAULT_FIR_NUMBER = 'NCB/NDPS/CR-104/2026';
+export const DEFAULT_OFFICER_TITLE = '';
+export const DEFAULT_FIR_NUMBER = '';
 
 export function generateSection67NoticeText({
   zonalUnit,
@@ -66,45 +64,29 @@ export function generateSection67NoticeText({
   currency,
   balance,
   officerRank,
-  sigKey
 }) {
-  const generatedSigKey = sigKey || "NCB-CERT-F839A2";
-  return `OFFICE OF THE NARCOTICS CONTROL BUREAU
-MINISTRY OF HOME AFFAIRS, GOVERNMENT OF INDIA
-ZONAL UNIT: ${(zonalUnit || 'NCB Headquarters').toUpperCase()}
-CASE CRIME REF: ${firNumber || DEFAULT_FIR_NUMBER}
+  return `DRAFT REQUEST WORKSHEET - FOR AUTHORIZED AND LEGAL REVIEW ONLY
+NOT A STATUTORY NOTICE, ORDER, CERTIFICATE, OR APPROVED COMMUNICATION
 
-Date: ${new Date().toISOString().split('T')[0]}
+Prepared: ${new Date().toISOString().split('T')[0]}
+Proposed issuing unit: ${zonalUnit || 'Not supplied'}
+Case reference: ${firNumber || 'Not supplied'}
+Case title: ${caseTitle || 'Not supplied'}
+Proposed recipient: ${selectedExchange || 'Not supplied'}
 
-TO,
-Legal Compliance & Law Enforcement Relations Division
-${selectedExchange || EXCHANGES[0]}
+Address under review: ${depositAddress || 'Not supplied'}
+Asset recorded in case: ${currency || 'Not supplied'}
+Recorded graph amount: ${balance || 'Not supplied'}
 
-SUBJECT: Formal Notice under Section 67 of the Narcotic Drugs and Psychotropic Substances (NDPS) Act, 1985 - Immediate Statutory Request for Account & KYC Records.
+These values are copied from application case data. A transaction trace does not establish that this address belongs to the proposed recipient, that funds are currently available, or that any person or service is involved.
 
-Sir/Madam,
+Before preparing or issuing a communication, an authorized reviewer must independently verify the source records, destination attribution, case authority, jurisdiction, requested records, applicable legal basis, and approved contact channel.
 
-This office is conducting an active investigation involving suspicious cryptocurrency transactions (Case Title: ${caseTitle || 'Cryptocurrency Investigation'}). 
+Reviewer-supplied legal basis and approved request text: [complete after legal review]
+Reviewer: ${officerRank || 'Not supplied'}
+Digital signature or certificate: Not provided by this application
 
-On-chain forensic blockchain tracing demonstrates that transaction value movement terminates directly at a deposit wallet address assigned to your platform:
-
-Deposit Wallet Address: ${depositAddress}
-Attributed Asset: ${currency} Protocol
-Settled Traced Value: ${balance}
-
-Pursuant to Section 67 of the NDPS Act, 1985, you are hereby directed to provide the following subscriber details associated with this deposit address within 48 hours of receipt:
-
-1. Full Name, Date of Birth, Address, Government Photo ID (Aadhaar / PAN / Passport) submitted during KYC.
-2. Connected Bank Account details (Bank Name, Account Number, IFSC) and Fiat Withdrawal History.
-3. Complete IP Access logs with timestamps (UTC) for registration, logins, and deposit sessions.
-4. Linked Email Address, Phone Number, and Device Identifiers.
-
-Kindly treat this communication as CONFIDENTIAL under statutory law.
-
-Issued By:
-${officerRank || DEFAULT_OFFICER_TITLE}
-Narcotics Control Bureau (NCB), Govt. of India
-Digital Verification Key: SECURE-KEY-${generatedSigKey}`;
+This worksheet has no legal effect and must not be represented as an issued notice.`;
 }
 
 export function generateComplianceEmailTemplate({
@@ -114,24 +96,22 @@ export function generateComplianceEmailTemplate({
   balance,
   officerRank
 }) {
-  const exInfo = EXCHANGE_DIRECTORY[selectedExchange] || { email: 'compliance@exchange.com' };
-  const subject = encodeURIComponent(`[URGENT] Statutory Notice u/s 67 NDPS Act - Ref: ${firNumber || DEFAULT_FIR_NUMBER} - Deposit Addr: ${depositAddress.slice(0, 10)}...`);
-  const body = encodeURIComponent(`To Nodal Compliance Officer,
-${selectedExchange}
+  const exInfo = EXCHANGE_DIRECTORY[selectedExchange] || { email: 'compliance@example.invalid' };
+  const subject = encodeURIComponent(`[DRAFT FOR REVIEW] Cryptocurrency transaction lead${firNumber ? ` - Ref: ${firNumber}` : ''}`);
+  const body = encodeURIComponent(`To ${selectedExchange || 'recipient'},
 
-Please find attached statutory legal notice issued under Section 67 of NDPS Act, 1985 regarding Bitcoin deposit address: ${depositAddress} (Traced Value: ${balance}).
+This is an unapproved draft for internal and legal review. It is not a statutory notice or a verified attribution.
 
-Crime Reference: ${firNumber || DEFAULT_FIR_NUMBER}
-Investigating Officer: ${officerRank || DEFAULT_OFFICER_TITLE}
+Case reference: ${firNumber || 'Not supplied'}
+Reviewer: ${officerRank || 'Not supplied'}
+Address under review: ${depositAddress || 'Not supplied'}
+Amount recorded in case: ${balance || 'Not supplied'}
 
-Kindly furnish KYC documents, registered bank accounts, and IP session access logs within statutory timeline.
+The application has not verified that this address belongs to your organization. This draft makes no records request. Independently verify the facts, authority, and contact channel before preparing any communication.
 
-Regards,
-Narcotics Control Bureau (NCB)`);
-
+Draft prepared from AegisTrace case data.`);
   return `mailto:${exInfo.email}?subject=${subject}&body=${body}`;
 }
-
 export function generateEvidenceWorksheetText({
   caseId,
   caseTitle,

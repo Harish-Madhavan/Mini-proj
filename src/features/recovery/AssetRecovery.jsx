@@ -79,7 +79,7 @@ export default function AssetRecovery() {
           <div style={{ width: 32, height: 32, borderRadius: 8, background: 'rgba(59,130,246,0.12)', color: 'var(--primary-accent)', display: 'grid', placeItems: 'center', fontWeight: 700 }}>#{index + 1}</div>
           <div><h3 style={{ fontSize: '0.97rem' }}>{lead.label}</h3><code style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', overflowWrap: 'anywhere' }}>{lead.address}</code></div>
         </div>
-        <div style={{ textAlign: 'right' }}><strong style={{ color: lead.followUpUrgency === 'overdue' ? '#f87171' : 'var(--primary-accent)' }}>{lead.followUpUrgency === 'overdue' ? 'Follow-up overdue' : `${lead.priority} priority`}</strong><div style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>Evidence score {lead.rankScore}/100 · schedule score {lead.schedulingScore}/100</div></div>
+        <div style={{ textAlign: 'right' }}><strong style={{ color: lead.followUpUrgency === 'overdue' ? '#f87171' : 'var(--primary-accent)' }}>{lead.followUpUrgency === 'overdue' ? 'Follow-up overdue' : `${lead.priority} priority`}</strong><div style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>Lead priority score {lead.rankScore}/100 · schedule score {lead.schedulingScore}/100 (heuristics)</div></div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.75rem' }}>

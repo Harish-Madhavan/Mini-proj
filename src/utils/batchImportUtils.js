@@ -27,16 +27,16 @@ export function parseAddressCsv(rawText) {
     seen.add(lower);
 
     const validation = validateBtcAddress(addr);
-    const tag = parts[1] || 'Seized Address';
+    const tag = parts[1] || 'Watched address';
     const notes = parts[2] || 'Batch imported';
-    const riskTier = (parts[3] || 'HIGH').toUpperCase();
+    const riskTier = (parts[3] || 'UNASSESSED').toUpperCase();
 
     results.push({
       index: i + 1,
       address: addr,
       tag,
       notes,
-      riskTier: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].includes(riskTier) ? riskTier : 'HIGH',
+      riskTier: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNASSESSED'].includes(riskTier) ? riskTier : 'UNASSESSED',
       isValid: validation.isValid,
       error: validation.error || null,
       isDuplicate: isDupe

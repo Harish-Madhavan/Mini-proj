@@ -16,7 +16,7 @@ function roleLabel(role) {
 }
 
 const VERDICT_LABEL = {
-  SAME_OPERATOR_LIKELY: 'Likely shared operator',
+  SAME_OPERATOR_LIKELY: 'Strong infrastructure overlap (not identity)',
   SHARED_INFRASTRUCTURE: 'Shared addresses',
   WEAK_OVERLAP: 'Weak overlap',
 };
@@ -35,7 +35,7 @@ export default function SyndicateMap() {
           <Network size={15} style={{ color: 'var(--text-muted)' }} /> Linked cases
         </h3>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: '0.2rem' }}>
-          Cases reusing the same addresses are probably run by the same people.
+          Shared addresses can indicate shared infrastructure or case reuse. They do not establish that the same person or group controls the activity.
         </p>
         <div style={{ display: 'flex', gap: '1.5rem', marginTop: '0.9rem', fontSize: '0.82rem' }}>
           <span><strong style={{ fontSize: '1.05rem', fontWeight: 600 }}>{correlation.caseCount}</strong> <span style={{ color: 'var(--text-muted)' }}>cases</span></span>

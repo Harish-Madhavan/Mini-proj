@@ -84,7 +84,7 @@ export default function Dashboard() {
 
   const sessionStats = [
     { label: "Cases", value: scenarios.length.toString() },
-    { label: "Total traced", value: `${totalSessionBtc.toFixed(2)} BTC`, subValue: fiatMetrics.formattedUsd },
+    { label: "Sum of recorded case starts", value: `${totalSessionBtc.toFixed(2)} BTC`, subValue: `${fiatMetrics.formattedUsd} at fixed reference rates; cases may overlap` },
     { label: "Open case", value: activeCase ? (activeCase.title.length > 18 ? activeCase.title.slice(0, 18) + '…' : activeCase.title) : "—" },
   ];
 
@@ -104,13 +104,14 @@ export default function Dashboard() {
       const validation = validateBtcAddress(newCase.suspectAddr.trim());
       if (!validation.isValid) {
         showToast(`Address warning: ${validation.error}`, "warning");
+        return;
       }
     }
 
     handleCreateCustomCase({
       title: newCase.title.trim(),
       suspectName: newCase.suspectName.trim() || 'Suspect Entity Alpha',
-      suspectAddress: newCase.suspectAddr.trim() || 'bc1q999targetwalletcustomforensicnode',
+      suspectAddress: newCase.suspectAddr.trim() || null,
       amount: `${parseFloat(newCase.amount) || 1.0} BTC`,
       targetExchange: newCase.exchange,
       description: newCase.notes.trim() || 'Notes added by the investigator.'
@@ -355,7 +356,7 @@ export default function Dashboard() {
                     <span style={{ fontSize: '0.9rem', fontWeight: 600 }}>{c.title}</span>
                     {c.riskScore && (
                       <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                        {c.riskScore}% risk
+                        {c.riskScore}% heuristic score
                       </span>
                     )}
                   </div>
@@ -426,7 +427,7 @@ export default function Dashboard() {
                   />
                 </div>
                 <div>
-                  <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>Amount (BTC)</label>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '0.25rem' }}>User-supplied amount (BTC)</label>
                   <input
                     type="number"
                     step="0.0001"

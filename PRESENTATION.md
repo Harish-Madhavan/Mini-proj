@@ -3,7 +3,7 @@ marp: true
 theme: default
 paginate: true
 header: "AegisTrace — Bitcoin Blockchain Forensics Suite"
-footer: "NCB / SIH-1675 | Confidential & Proprietary"
+footer: "AegisTrace | SIH Problem Solution"
 backgroundColor: "#0d1117"
 color: "#e6edf3"
 style: |
@@ -86,10 +86,10 @@ Duration: 1.0 min
 |---|---|
 | **Engine Architecture** | Pure Client-Side Zero-Trust React 19 + Dual-Gateway Live Mainnet Tracing |
 | **Analysis Suite** | 8-Factor Heuristics • Triple Taint Engine • DSU Clustering • 5D Risk Radar |
-| **Evidentiary Standard** | Section 67 NDPS Act & Section 65B BSA 2023 (Hash-Chained Audit Ledger) |
+| **Evidence Workflow** | Draft worksheets and review aids; not statutory notices or certified evidence |
 
 > 🎙️ **Speaker Notes (Opening Pitch):**  
-> *"Good morning respected mentors and evaluators. Today we present AegisTrace — an end-to-end, mathematically verifiable cryptocurrency forensics workstation engineered for agencies like India's Narcotics Control Bureau. When syndicates move illicit drug capital across the Bitcoin blockchain, they rely on complex layering — peel chains, CoinJoin mixers, smurfing, and nested exchange hops. Current commercial tools like Chainalysis operate as expensive, closed black boxes. AegisTrace brings transparent, verifiable forensic tracing directly into the investigator's hands on the live mainnet with zero server-side telemetry, cryptographic chain-of-custody, and automated court-admissible certificates."*
+> *"AegisTrace is a Bitcoin tracing and case review solution developed for the SIH problem statement. It queries public blockchain data providers on user actions, records case data in the browser, and offers analytical leads with their assumptions and limitations visible. Its reports and legal worksheets are drafts for independent review; the application does not issue legal notices or certify evidence."*
 
 ---
 
@@ -133,7 +133,7 @@ Duration: 1.5 mins
 | **Cost & Accessibility** | Prohibitive licenses ($50k+/yr) | Free / Basic | **Open, accessible, self-hostable** |
 | **Verifiable Methodology** | Proprietary "black-box" scoring | No heuristic intelligence | **Mathematically verifiable math & code** |
 | **Data Privacy & Operational Security**| Investigated addresses leak to US clouds | Public web queries leak IP/queries | **100% Client-side; zero external telemetry** |
-| **Legal Integration** | Generic PDF export | No legal artifacts | **Native Section 67 NDPS & Section 65B BSA** |
+| **Legal Integration** | Generic PDF export | No legal artifacts | **Reviewable draft worksheets; no statutory form or certificate issued** |
 | **Taint Modeling** | Rigid single-model taint | None | **Tri-Model (FIFO, Haircut, Poison)** |
 | **Mempool & 0-Conf** | Delayed block sync | Varies | **Live 0-Conf mempool leak monitor** |
 
@@ -207,7 +207,7 @@ When Bitcoin is spent, UTXOs split into payment outputs and change returns. Misi
 7. **Client LockTime / RBF Fingerprint**: Matches nLockTime and sequence signaling.
 8. **Output Position Matching**: Bypasses pseudo-random BIP69 output ordering.
 
-> 📊 **Result:** Every edge in AegisTrace displays an objective **Change Probability Confidence Score (0-100%)** with full rationale breakdown.
+> 📊 **Result:** Each scored edge displays a heuristic change-likelihood score and rationale. The score is not a calibrated probability or proof of payment/change ownership.
 
 ---
 
@@ -378,19 +378,19 @@ Duration: 2.0 mins
 
 A technical investigation is useless if the evidence is thrown out of court on procedural or provenance grounds.
 
-### 1. Section 67 NDPS Act, 1985 (Statutory Requisition Notices)
-* Automated drafting of legal summon notices directed to Indian & International Crypto Asset Service Providers (VDA / CASPs like CoinDCX, WazirX, Binance, Kraken).
-* Formal summons requiring KYC records, IP access logs, bank payout account details, and wallet ownership verification under statutory authority.
+### 1. Request worksheet (draft only)
+* A worksheet can collect case reference, proposed recipient, address, and amount for later authorized review.
+* It is not a statutory notice, makes no verified attribution or records demand, and does not establish legal authority or jurisdiction.
 
 ### 2. Section 65B BSA 2023 / Indian Evidence Act (Digital Evidence Certificate)
-* **Cryptographic Hash-Chaining**: Every user interaction (import, trace, node expand, tag, export) is committed to an append-only, tamper-evident ledger where each entry is sealed with `SHA-256(prevHash + timestamp + payload)`.
-* **State Verification**: Captures client user-agent, gateway latency, API response hash, and machine timestamp.
-* **One-Click Export**: Generates court-ready, print-formatted Section 65B certificates with investigator signature blanks.
+* **Digest checks**: Selected stored case and transfer event data can be hashed to detect later changes to the hashed content.
+* **Limits**: Digests are not digitally signed, externally anchored, or proof of source authenticity; ordinary user interactions are not all logged.
+* **Draft Export**: Generates a review worksheet with digest and provenance fields. It is not a Section 65B/63 certificate and is not court-ready evidence.
 
 ---
 
 > 🎙️ **Speaker Notes:**  
-> *"Now we come to one of our greatest competitive advantages: legal admissibility. Under Indian law, digital evidence presented in a trial court must strictly satisfy Section 65B of the Indian Evidence Act, now Section 63 of the Bharatiya Sakshya Adhiniyam, 2023. Defense attorneys routinely argue that screenshots could be doctored in DevTools. AegisTrace embeds an append-only, SHA-256 hash-chained Chain of Custody ledger. Every single network fetch, user click, and classification is cryptographically sealed in an immutable log. The application then automatically prints a formal Section 65B certificate alongside Section 67 NDPS summon notices to exchanges."*
+> *"The evidence workflow records a digest of selected case data and a transfer-event digest trail. These browser-generated hashes can reveal later changes to the hashed content, but they are not digitally signed, independently timestamped, externally anchored, or proof of source authenticity. The application does not determine legal admissibility, issue Section 65B/63 certificates, or send statutory notices."*
 
 ---
 
@@ -406,29 +406,28 @@ Duration: 1.5 mins
 Investigators cannot afford to wait 60 minutes for 6 blockchain confirmations while a suspect is cashing out illicit gains.
 
 ```
-       [Suspect Address] bc1q_narcotics_treasury...
+       [Watched Bitcoin Address] (user supplied)
                |
                | (Broadcasting transaction to Bitcoin P2P network)
                v
   +---------------------------------------------------------------------+
-  |              AEGIS-TRACE 0-CONF MEMPOOL LEAK SENSOR                 |
-  |  * Scans unconfirmed memory pool (0-conf)                           |
-  |  * Detects outspend broadcast within seconds of network propagation |
-  |  * Evaluates RBF (Replace-by-Fee) status & fee-bump attempts        |
-  |  * Dispatches instant browser alert & logs pre-confirmation trail   |
+  |       AEGIS-TRACE ADDRESS-SPECIFIC MEMPOOL ALERTS                   |
+  |  * Subscribes to watched address activity over a public WebSocket   |
+  |  * Shows matching unconfirmed transactions when received            |
+  |  * Does not prevent transactions or contact an exchange              |
   +---------------------------------------------------------------------+
                |
                v
-  [Instant Action]: Trigger Section 67 freezing notice to destination exchange!
+  [Analyst]: Independently review activity and decide next steps
 ```
 
 * **Target Watchlist Engine**: Maintain persistent case watchlists with local alerts.
-* **Proactive Interception**: Gives enforcement officers a crucial 10-to-60 minute head-start to freeze accounts at domestic exchanges before the first block confirmation.
+* **Activity alerts**: Delivery depends on the public data provider and network connection. Alerts are not guaranteed instant, do not intercept funds, and do not prove address ownership.
 
 ---
 
 > 🎙️ **Speaker Notes:**  
-> *"When a suspect initiates a cash-out transaction to an exchange, the transaction first sits in the Bitcoin Mempool — the waiting room before miners confirm it into a block. This window typically lasts between 10 to 60 minutes. AegisTrace features a zero-confirmation mempool monitoring sensor. As soon as a watched wallet broadcasts a transaction across the peer-to-peer network, our system captures the pending outspend in real time, inspects Replace-By-Fee flags, and alerts the investigator immediately. This gives law enforcement the critical minutes needed to issue an emergency freeze to the receiving exchange before the suspect withdraws fiat."*
+> *"AegisTrace can subscribe to public mempool updates for watched Bitcoin addresses and display matching unconfirmed activity. Delivery depends on the provider and connection. An alert does not prevent confirmation, establish address ownership, or send a freeze request."*
 
 ---
 
@@ -461,7 +460,7 @@ A simulated real-world narcotics takedown demonstrating AegisTrace in action:
 ### Forensic Outcome in AegisTrace:
 1. **Graph Explorer**: Full interactive DAG showing 5 hops with edge taint percentages.
 2. **Cluster Profile**: Cartel cluster identified with 18.4 BTC total received.
-3. **Legal Output**: Section 67 Notice pre-populated with Exchange UID & Section 65B Certificate generated.
+3. **Legal Output**: Draft request worksheets and evidence review aids; any official communication or certificate requires separate authorized preparation and review.
 
 ---
 
@@ -495,14 +494,14 @@ A forensic tool must be flawless in its mathematical computations. A single calc
 |      * Cross-chain bridge memo decoding & multi-chain destination extraction      |
 |      * Dual-gateway failover simulation and rate-limiting circuit breakers        |
 |  [✓] Linter: OxLint (Rust-based ultra-fast linter, zero undefined symbol tolerance)|
-|  [✓] Production Build: Pure ESM via Vite 8; zero server runtime vulnerabilities   |
+|  [✓] Production Build: Pure ESM via Vite 8; browser application build completes   |
 +-----------------------------------------------------------------------------------+
 ```
 
 ---
 
 > 🎙️ **Speaker Notes:**  
-> *"In legal forensics, technical rigor is paramount. A single floating-point rounding error in JavaScript could invalidate evidence regarding seized funds. AegisTrace is built with strict Satoshi-level integer arithmetic. Our codebase has 33 comprehensive Vitest test suites comprising 221 automated unit tests covering our 8-factor heuristics, DSU clustering, cross-chain bridge parsers, taint mathematics, and hash-chained custody ledgers. Our code adheres to OxLint's strict Rust-based linting standards, ensuring high performance, zero memory leaks, and total reproducibility."*
+> *"The project includes automated tests for transaction parsing, tracing, heuristic analysis, value-flow calculations, and digest checks. Test results are regression checks; they do not demonstrate field accuracy, legal admissibility, absence of defects, or production readiness."*
 
 ---
 
@@ -517,7 +516,7 @@ Duration: 1.0 min
 
 | Phase | Milestone | Technological Capability |
 |---|---|---|
-| **Phase 1 (Complete)** | **Bitcoin Mainnet Engine** | Client-side tracing, 8-factor classification, DSU clustering, Section 65B & 67 notices (221 tests). |
+| **SIH Solution** | **Bitcoin Mainnet Engine** | Client-side tracing, heuristic classification, candidate clustering, and draft review worksheets. |
 | **Phase 2 (Q4 2026)** | **Encrypted Local Storage** | IndexedDB migration (unlimited capacity), AES-GCM at-rest vault encryption & private node RPC mode. |
 | **Phase 3 (Q1 2027)** | **Evidence Interoperability** | WebCrypto ECDSA/Ed25519 digital signing, STIX 2.1 intelligence sharing & Neo4j Cypher export. |
 | **Phase 4 (Q2 2027)** | **Advanced De-anonymization**| CoinJoin Knapsack subset-sum solver, Lightning Network HTLC detection, and live Tron/EVM USDT tracing. |
@@ -525,7 +524,7 @@ Duration: 1.0 min
 ---
 
 > 🎙️ **Speaker Notes:**  
-> *"Looking ahead, our roadmap builds directly upon AegisTrace's modular foundation. In Phase 2, we are expanding our persistence layer to IndexedDB with zero-knowledge AES-GCM vault encryption and private RPC support for air-gapped labs. In Phase 3, we add WebCrypto ECDSA asymmetric digital signing and STIX 2.1 threat intelligence export for inter-agency coordination with CERT-In and Interpol. In Phase 4, we introduce CoinJoin subset-sum unmixing and live multi-chain token tracing across Tron and Ethereum. AegisTrace is designed not just for today's Bitcoin cases, but as an evolving platform for digital asset law enforcement."*
+> *"The roadmap includes stronger local storage controls, signing and export options, and additional chain data sources. Those capabilities require separate implementation and validation. The current subset-sum tool returns bounded candidate partitions; it does not unmix CoinJoin transactions or identify participants. Cross-chain memo parsing proposes destination details but does not trace activity on another chain."*
 
 ---
 
@@ -547,7 +546,7 @@ Duration: 1.0 min
 ---
 
 > 🎙️ **Speaker Notes:**  
-> *"To conclude: AegisTrace is not a theoretical concept or a simple UI mockup. It is a production-ready, mathematically rigorous blockchain forensics workstation built specifically to solve the real operational challenges faced by the Narcotics Control Bureau and law enforcement agencies. It protects national security and operational privacy, eliminates multi-million rupee foreign software dependencies, and delivers ironclad, court-admissible evidence. Thank you, and we look forward to your questions."*
+> *"AegisTrace brings Bitcoin tracing, heuristic analysis, and case review tools into one workstation as a solution to the SIH problem statement. Its outputs are investigative leads that need independent source and attribution checks. It is not a production-certified system and does not establish legal admissibility. Thank you, and we look forward to your questions."*
 
 ---
 
@@ -569,5 +568,5 @@ Duration: As needed for Q&A
 ### Q3: "How does your tool handle CoinJoin mixers like Wasabi or Whirlpool?"
 * **Answer**: *"CoinJoin transactions intentionally break the Common Input Ownership Heuristic. When AegisTrace detects identical-value multi-outputs with uniform fee distributions, it flags the transaction as a mixer pool, marks it in the typology engine, and halts automated branch traversal to avoid false cluster pollution."*
 
-### Q4: "How does your Section 65B certificate hold up against defense challenges in court?"
-* **Answer**: *"Defense counsel usually attacks digital evidence by alleging tampering between collection and trial. AegisTrace builds an append-only, SHA-256 hash-chained Chain of Custody ledger. Any modification to a single past node or timestamp breaks the mathematical hash chain, providing verifiable tamper-evidence as required by the Indian Evidence Act / BSA 2023."*
+### Q4: "What does the evidence worksheet establish?"
+* **Answer**: *"The application does not issue an evidence certificate or determine admissibility. Its digest trail can detect changes to selected stored content, but it is not signed, externally anchored, or proof that source data is authentic. Applicable legal requirements need independent review."*
