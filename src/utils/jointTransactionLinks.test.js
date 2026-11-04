@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { recordJointTransactionAcrossCases } from './jointTransactionLinks';
+import { recordJointTransactionAcrossCases, recordManualCaseAssociation } from './jointTransactionLinks';
 import { correlateCases } from './syndicateAnalysis';
 
 const INPUT_A = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
@@ -32,6 +32,44 @@ describe('recordJointTransactionAcrossCases', () => {
     });
   });
 
+  describe('recordManualCaseAssociation', () => {
+    const rationale = 'Separate transaction references reviewed together by the investigator.';
+
+    it('records a labeled manual association on both selected cases', () => {
+      const cases = [makeCase('case-a', INPUT_A), makeCase('case-b', INPUT_B)];
+      const result = recordManualCaseAssociation(cases, {
+        caseAId: 'case-a',
+        caseBId: 'case-b',
+        transactionIds: [TXID, 'b'.repeat(64)],
+        rationale,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.cases[0].manualCaseAssociations[0]).toMatchObject({
+        caseAId: 'case-a',
+        caseBId: 'case-b',
+        transactionIds: [TXID, 'b'.repeat(64)],
+        rationale,
+        classification: 'investigator-reported; not independently verified',
+      });
+      expect(result.cases[1].manualCaseAssociations[0].associationId)
+        .toBe(result.cases[0].manualCaseAssociations[0].associationId);
+    });
+
+    it('rejects same-case, invalid transaction references, and missing rationale', () => {
+      const cases = [makeCase('case-a', INPUT_A), makeCase('case-b', INPUT_B)];
+      expect(recordManualCaseAssociation(cases, {
+        caseAId: 'case-a', caseBId: 'case-a', transactionIds: [TXID], rationale
+      })).toMatchObject({ success: false, reason: 'Choose two different saved cases.' });
+      expect(recordManualCaseAssociation(cases, {
+        caseAId: 'case-a', caseBId: 'case-b', transactionIds: ['bad'], rationale
+      })).toMatchObject({ success: false, reason: 'Enter 1 to 20 valid 64-character transaction IDs.' });
+      expect(recordManualCaseAssociation(cases, {
+        caseAId: 'case-a', caseBId: 'case-b', transactionIds: [TXID], rationale: ' '
+      })).toMatchObject({ success: false, reason: 'Enter a rationale (up to 2,000 characters).' });
+    });
+  });
+
   it('updates rather than duplicates a previously recorded transaction', () => {
     const cases = [
       { ...makeCase('case-a', INPUT_A), jointTransactionEvidence: [{ txid: TXID, inputAddresses: [INPUT_A], recordedAt: '2026-01-01T00:00:00.000Z' }] },
@@ -48,8 +86,19 @@ describe('recordJointTransactionAcrossCases', () => {
     const result = recordJointTransactionAcrossCases(cases, { txid: TXID, inputAddresses: [INPUT_A, INPUT_B] });
 
     expect(result.linkedCaseIds).toEqual([]);
-    expect(result.reason).toMatch(/distinct transaction input addresses/);
+    expect(result.reason).toMatch(/Matched only 1 distinct transaction input address across 2 saved case/);
+    expect(result.unmatchedAddresses).toEqual([INPUT_B]);
     expect(result.cases).toBe(cases);
+  });
+
+  it('matches valid legacy input nodes stored by address in their node IDs', () => {
+    const cases = [
+      { id: 'case-a', nodes: [{ id: `in_${INPUT_A}` }], links: [] },
+      { id: 'case-b', nodes: [{ id: `out_${INPUT_B}` }], links: [] },
+    ];
+    const result = recordJointTransactionAcrossCases(cases, { txid: TXID, inputAddresses: [INPUT_A, INPUT_B] });
+
+    expect(result.linkedCaseIds).toEqual(['case-a', 'case-b']);
   });
 
   it('rejects invalid transaction references', () => {

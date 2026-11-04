@@ -72,6 +72,11 @@ trace is computed live from gateway data.
   input addresses. Linked Cases then shows that transaction as a weak,
   reviewable relationship alongside shared-address matches. Co-spending is a
   heuristic and does not establish common ownership or control.
+- **Investigator-reported case associations** — Clustering can also record a
+  manually reviewed association between two selected cases with transaction
+  references and a required rationale. Linked Cases labels these separately
+  from on-chain matches; the association is not independently verified evidence
+  and does not establish a transaction link, ownership, or control.
 - **Investigation timeline** — filter recorded case notes, transaction references,
   evidence reviews, and recovery actions by event type or text. Missing timestamps
   remain explicit; this is not a tamper-proof audit log.

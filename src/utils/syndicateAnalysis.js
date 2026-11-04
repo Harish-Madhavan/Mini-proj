@@ -74,7 +74,7 @@ export function correlateCases(cases = []) {
     const [a, b] = [caseA, caseB].sort();
     const key = `${a}<>${b}`;
     if (!pairHits.has(key)) {
-      pairHits.set(key, { caseA: a, caseB: b, shared: [], sharedTransactions: [] });
+      pairHits.set(key, { caseA: a, caseB: b, shared: [], sharedTransactions: [], manualAssociations: [] });
     }
     return pairHits.get(key);
   };
@@ -130,6 +130,44 @@ export function correlateCases(cases = []) {
     }
   }
 
+  const manualAssociationsById = new Map();
+  for (const caseData of valid) {
+    const records = Array.isArray(caseData.manualCaseAssociations) ? caseData.manualCaseAssociations : [];
+    for (const association of records) {
+      if (typeof association?.associationId !== 'string' ||
+          typeof association.caseAId !== 'string' ||
+          typeof association.caseBId !== 'string' ||
+          association.caseAId === association.caseBId ||
+          !Array.isArray(association.transactionIds) ||
+          !association.transactionIds.length ||
+          association.transactionIds.some(txid => !/^[0-9a-f]{64}$/i.test(txid)) ||
+          typeof association.rationale !== 'string' || !association.rationale.trim()) continue;
+      const [caseAId, caseBId] = [association.caseAId, association.caseBId].sort();
+      if (!valid.some(item => item.id === caseAId) || !valid.some(item => item.id === caseBId) ||
+          (caseData.id !== caseAId && caseData.id !== caseBId)) continue;
+      if (!manualAssociationsById.has(association.associationId)) {
+        manualAssociationsById.set(association.associationId, {
+          caseAId,
+          caseBId,
+          transactionIds: [...new Set(association.transactionIds.map(txid => txid.toLowerCase()))],
+          rationale: association.rationale,
+          warning: association.warning || 'Investigator-reported association; not independently verified.',
+          caseIds: new Set(),
+        });
+      }
+      const saved = manualAssociationsById.get(association.associationId);
+      if (saved.caseAId === caseAId && saved.caseBId === caseBId &&
+          saved.rationale === association.rationale) {
+        saved.caseIds.add(caseData.id);
+      }
+    }
+  }
+  for (const association of manualAssociationsById.values()) {
+    if (!association.caseIds.has(association.caseAId) || !association.caseIds.has(association.caseBId)) continue;
+    dsu.union(association.caseAId, association.caseBId);
+    getPair(association.caseAId, association.caseBId).manualAssociations.push(association);
+  }
+
   const pairs = [...pairHits.values()].map(p => {
     // A shared ENDPOINT (receiver/exchange deposit) is stronger evidence of a
     // common cash-out controller than a shared transit hop.
@@ -140,9 +178,11 @@ export function correlateCases(cases = []) {
       ...p,
       sharedCount: p.shared.length,
       sharedTransactionCount: p.sharedTransactions.length,
+      manualAssociationCount: p.manualAssociations.length,
       endpointShares,
       linkScore,
-      verdict: linkScore >= 55 ? 'SAME_OPERATOR_LIKELY'
+      verdict: p.manualAssociations.length > 0 && linkScore === 0 ? 'INVESTIGATOR_ASSOCIATED'
+        : linkScore >= 55 ? 'SAME_OPERATOR_LIKELY'
         : linkScore >= 35 ? 'SHARED_INFRASTRUCTURE' : 'WEAK_OVERLAP',
     };
   }).sort((a, b) => b.linkScore - a.linkScore);

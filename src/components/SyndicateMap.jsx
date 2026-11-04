@@ -19,6 +19,7 @@ const VERDICT_LABEL = {
   SAME_OPERATOR_LIKELY: 'Strong infrastructure overlap (not identity)',
   SHARED_INFRASTRUCTURE: 'Shared addresses',
   WEAK_OVERLAP: 'Weak overlap',
+  INVESTIGATOR_ASSOCIATED: 'Investigator-recorded association (not independently verified)',
 };
 
 export default function SyndicateMap() {
@@ -35,7 +36,7 @@ export default function SyndicateMap() {
           <Network size={15} style={{ color: 'var(--text-muted)' }} /> Linked cases
         </h3>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: '0.2rem' }}>
-          Compare shared addresses and recorded joint-input transactions. These are investigative links only; neither establishes that the same person or group controls the activity.
+          Compare shared addresses, recorded joint-input transactions, and investigator-reported case associations. Manual associations are not independently verified; none of these links establishes who controls the activity.
         </p>
         <div style={{ display: 'flex', gap: '1.5rem', marginTop: '0.9rem', fontSize: '0.82rem' }}>
           <span><strong style={{ fontSize: '1.05rem', fontWeight: 600 }}>{correlation.caseCount}</strong> <span style={{ color: 'var(--text-muted)' }}>cases</span></span>
@@ -78,7 +79,7 @@ export default function SyndicateMap() {
         </h4>
         {correlation.pairs.length === 0 ? (
           <EmptyState icon={<Network size={28} style={{ opacity: 0.6 }} />}>
-            No shared address or recorded joint-transaction links across these {correlation.caseCount} cases. In Clustering, record co-spend evidence to link the saved cases containing its input addresses.
+            No shared-address, recorded joint-transaction, or investigator-reported links across these {correlation.caseCount} cases.
           </EmptyState>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -97,7 +98,7 @@ export default function SyndicateMap() {
                       {(caseById.get(pair.caseB)?.title || pair.caseB).slice(0, 28)}
                     </button>
                     <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
-                      {pair.sharedCount} shared address{pair.sharedCount === 1 ? '' : 'es'} · {pair.sharedTransactionCount} joint transaction{pair.sharedTransactionCount === 1 ? '' : 's'} · {pair.linkScore} · {verdict}
+                      {pair.sharedCount} shared address{pair.sharedCount === 1 ? '' : 'es'} · {pair.sharedTransactionCount} joint transaction{pair.sharedTransactionCount === 1 ? '' : 's'} · {pair.manualAssociationCount} manual association{pair.manualAssociationCount === 1 ? '' : 's'}{pair.manualAssociationCount && !pair.linkScore ? '' : ` · ${pair.linkScore}`} · {verdict}
                     </span>
                     <button
                       onClick={() => setExpandedPair(open ? null : key)}
@@ -125,6 +126,16 @@ export default function SyndicateMap() {
                             Inputs in case A: {transaction.inputAddressesA.join(', ')} · Inputs in case B: {transaction.inputAddressesB.join(', ')}
                           </div>
                           <div style={{ fontSize: '0.68rem', color: '#fbbf24', marginTop: '0.15rem' }}>{transaction.warning}</div>
+                        </div>
+                      ))}
+                      {pair.manualAssociations.map(association => (
+                        <div key={association.associationId} style={{ borderTop: '1px solid var(--border-soft)', marginTop: '0.35rem', paddingTop: '0.45rem', fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                          <strong>Investigator-reported association</strong>
+                          <div className="mono-addr" style={{ fontSize: '0.7rem', marginTop: '0.2rem', overflowWrap: 'anywhere' }}>
+                            Transaction references: {association.transactionIds.join(', ')}
+                          </div>
+                          <div style={{ marginTop: '0.2rem' }}>Rationale: {association.rationale}</div>
+                          <div style={{ fontSize: '0.68rem', color: '#fbbf24', marginTop: '0.15rem' }}>{association.warning}</div>
                         </div>
                       ))}
                     </div>

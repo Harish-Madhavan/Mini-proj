@@ -16,6 +16,7 @@ import { useToast } from '../hooks/useToast';
 import { validateBtcAddress, exportToCsv } from '../utils/forensicUtils';
 import { computeAddressClusters, detectPeelingChain, feeFingerprintSimilarity, estimatePoolReceived, solveCoinJoinSubsetSum } from '../utils/clusteringAlgorithms';
 import { downloadJson } from '../utils/download';
+import { getCaseBitcoinAddresses } from '../utils/jointTransactionLinks';
 import EmptyState from './EmptyState';
 
 function StatBox({ label, value, sub = null }) {
@@ -61,7 +62,7 @@ function AddressRow({ addr, onRemove }) {
 }
 
 export default function HeuristicClustering() {
-  const { activeCase, scenarios, handleRecordJointTransaction, setActiveTab } = useCase();
+  const { activeCase, scenarios, handleRecordJointTransaction, handleRecordManualCaseAssociation, setActiveTab } = useCase();
   const { showToast } = useToast();
   const savedCases = Array.isArray(scenarios) ? scenarios : [];
 
@@ -77,6 +78,10 @@ export default function HeuristicClustering() {
   const [isSolvingCoinJoin, setIsSolvingCoinJoin] = useState(false);
   const [recordedJointTxIds, setRecordedJointTxIds] = useState([]);
   const [caseToImportId, setCaseToImportId] = useState('');
+  const [manualCaseAId, setManualCaseAId] = useState('');
+  const [manualCaseBId, setManualCaseBId] = useState('');
+  const [manualTransactionRefs, setManualTransactionRefs] = useState('');
+  const [manualRationale, setManualRationale] = useState('');
 
   const handleCoinJoinAnalysis = async () => {
     const txid = coinJoinTxid.trim();
@@ -153,10 +158,7 @@ export default function HeuristicClustering() {
       return;
     }
 
-    const addressesFromGraph = activeCase.nodes
-      .map(n => n.details?.address)
-      .filter(Boolean)
-      .filter(addr => validateBtcAddress(addr).isValid);
+    const addressesFromGraph = getCaseBitcoinAddresses(activeCase);
 
     const uniqueAddrs = Array.from(new Set([...suspectAddresses, ...addressesFromGraph]));
     const newlyAdded = uniqueAddrs.length - suspectAddresses.length;
@@ -172,9 +174,7 @@ export default function HeuristicClustering() {
       showToast('Choose a saved case to import.', 'warning');
       return;
     }
-    const addressesFromCase = [...new Set((sourceCase.nodes || [])
-      .map(node => node.details?.address)
-      .filter(address => typeof address === 'string' && validateBtcAddress(address).isValid))];
+    const addressesFromCase = getCaseBitcoinAddresses(sourceCase);
     if (!addressesFromCase.length) {
       showToast(`No valid Bitcoin addresses found in "${sourceCase.title || sourceCase.id}".`, 'warning');
       return;
@@ -200,6 +200,31 @@ export default function HeuristicClustering() {
     });
     if (linkedCaseCount > 0) {
       setRecordedJointTxIds(previous => [...new Set([...previous, jointTransaction.txid.toLowerCase()])]);
+    }
+  };
+
+  const defaultManualCaseAId = savedCases.some(caseData => caseData.id === activeCase?.id)
+    ? activeCase.id
+    : savedCases[0]?.id || '';
+  const selectedManualCaseAId = savedCases.some(caseData => caseData.id === manualCaseAId)
+    ? manualCaseAId
+    : defaultManualCaseAId;
+  const selectedManualCaseBId = savedCases.some(caseData => caseData.id === manualCaseBId && caseData.id !== selectedManualCaseAId)
+    ? manualCaseBId
+    : savedCases.find(caseData => caseData.id !== selectedManualCaseAId)?.id || '';
+
+  const handleManualCaseAssociation = (event) => {
+    event.preventDefault();
+    const transactionIds = manualTransactionRefs.split(/[\s,;]+/).filter(Boolean);
+    const saved = handleRecordManualCaseAssociation({
+      caseAId: selectedManualCaseAId,
+      caseBId: selectedManualCaseBId,
+      transactionIds,
+      rationale: manualRationale,
+    });
+    if (saved) {
+      setManualTransactionRefs('');
+      setManualRationale('');
     }
   };
 
@@ -479,6 +504,39 @@ export default function HeuristicClustering() {
                       </button> : <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Cannot link without a transaction ID.</span>}
                   </div>;
                 })}
+                {savedCases.length >= 2 && (
+                  <form onSubmit={handleManualCaseAssociation} style={{ display: 'grid', gap: '0.5rem', borderTop: '1px solid var(--border-soft)', paddingTop: '0.75rem' }}>
+                    <strong style={{ fontSize: '0.78rem' }}>Add an investigator-reviewed case association</strong>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '0.72rem', margin: 0 }}>
+                      Use when a co-spend maps to only one saved case or when comparing separate transactions. This records your association and rationale; it does not verify a relationship on-chain.
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.5rem' }}>
+                      <label style={{ display: 'grid', gap: '0.25rem', color: 'var(--text-muted)', fontSize: '0.72rem' }}>
+                        Case A
+                        <select className="select-field" aria-label="Manual association case A" value={selectedManualCaseAId} onChange={event => setManualCaseAId(event.target.value)} required>
+                          {savedCases.map(caseData => <option key={caseData.id} value={caseData.id}>{caseData.title || caseData.id}</option>)}
+                        </select>
+                      </label>
+                      <label style={{ display: 'grid', gap: '0.25rem', color: 'var(--text-muted)', fontSize: '0.72rem' }}>
+                        Case B
+                        <select className="select-field" aria-label="Manual association case B" value={selectedManualCaseBId} onChange={event => setManualCaseBId(event.target.value)} required>
+                          {savedCases.filter(caseData => caseData.id !== selectedManualCaseAId).map(caseData => <option key={caseData.id} value={caseData.id}>{caseData.title || caseData.id}</option>)}
+                        </select>
+                      </label>
+                    </div>
+                    <label style={{ display: 'grid', gap: '0.25rem', color: 'var(--text-muted)', fontSize: '0.72rem' }}>
+                      Transaction references (one or more, comma- or line-separated)
+                      <textarea className="input-field mono-addr" aria-label="Manual association transaction references" value={manualTransactionRefs} onChange={event => setManualTransactionRefs(event.target.value)} placeholder="Paste 64-character transaction IDs" rows={2} required />
+                    </label>
+                    <label style={{ display: 'grid', gap: '0.25rem', color: 'var(--text-muted)', fontSize: '0.72rem' }}>
+                      Investigator rationale
+                      <textarea className="input-field" aria-label="Manual association rationale" value={manualRationale} onChange={event => setManualRationale(event.target.value)} placeholder="Explain why these cases should be reviewed together and cite the basis." rows={3} maxLength={2000} required />
+                    </label>
+                    <button type="submit" className="btn" style={{ justifySelf: 'start', fontSize: '0.74rem' }}>
+                      Save manual association
+                    </button>
+                  </form>
+                )}
                 <button type="button" className="btn-quiet" onClick={() => setActiveTab('syndicate')} style={{ justifySelf: 'start', fontSize: '0.74rem' }}>
                   Open Linked Cases
                 </button>

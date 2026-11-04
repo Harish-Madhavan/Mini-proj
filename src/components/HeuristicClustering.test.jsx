@@ -1,12 +1,17 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import HeuristicClustering from './HeuristicClustering';
 import * as useCaseModule from '../hooks/useCase';
 import * as useToastModule from '../hooks/useToast';
+import { fetchAddressTxs } from '../services/blockchain/gateway';
 
 vi.mock('../hooks/useCase');
 vi.mock('../hooks/useToast');
+vi.mock('../services/blockchain/gateway', () => ({
+  fetchAddressTxs: vi.fn().mockResolvedValue([]),
+  fetchTx: vi.fn().mockResolvedValue({}),
+}));
 vi.mock('../utils/bitcoinApi', () => ({
   fetchAddressTxs: vi.fn().mockResolvedValue([]),
   fetchTx: vi.fn().mockResolvedValue({}),
@@ -37,6 +42,7 @@ describe('HeuristicClustering Component', () => {
         importedCase,
       ],
       handleRecordJointTransaction: vi.fn(),
+      handleRecordManualCaseAssociation: vi.fn().mockReturnValue(true),
       setActiveTab: vi.fn(),
     });
   });
@@ -102,5 +108,41 @@ describe('HeuristicClustering Component', () => {
       'Imported 1 new address(es) from "Imported Case".',
       'success'
     );
+  });
+
+  it('records a rationale-backed manual association for selected cases', async () => {
+    const txid = 'c'.repeat(64);
+    fetchAddressTxs.mockResolvedValue([{
+      txid,
+      vin: [
+        { prevout: { scriptpubkey_address: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh' } },
+        { prevout: { scriptpubkey_address: '3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy' } },
+      ],
+      vout: [{ value: 100000000 }],
+    }]);
+    const caseValue = useCaseModule.useCase();
+    render(<HeuristicClustering />);
+
+    const addressInput = screen.getByPlaceholderText(/Enter a Bitcoin address/i);
+    for (const address of [
+      'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
+      '3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy',
+    ]) {
+      fireEvent.change(addressInput, { target: { value: address } });
+      fireEvent.click(screen.getByRole('button', { name: /^add$/i }));
+    }
+    fireEvent.click(screen.getByRole('button', { name: /find groups/i }));
+
+    await waitFor(() => expect(screen.getByText('Add an investigator-reviewed case association')).toBeDefined());
+    fireEvent.change(screen.getByRole('textbox', { name: /transaction references/i }), { target: { value: `${txid}\n${'d'.repeat(64)}` } });
+    fireEvent.change(screen.getByRole('textbox', { name: /manual association rationale/i }), { target: { value: 'Reviewed two transaction references as part of this investigation.' } });
+    fireEvent.click(screen.getByRole('button', { name: /save manual association/i }));
+
+    expect(caseValue.handleRecordManualCaseAssociation).toHaveBeenCalledWith({
+      caseAId: 'case-test',
+      caseBId: 'case-import',
+      transactionIds: [txid, 'd'.repeat(64)],
+      rationale: 'Reviewed two transaction references as part of this investigation.',
+    });
   });
 });

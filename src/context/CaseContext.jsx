@@ -26,7 +26,7 @@ import { downloadJson } from '../utils/download';
 import { satsToBtc } from '../utils/forensicUtils';
 import { updateRecoveryActionRecord } from '../features/recovery/recoveryLeads';
 import { isValidCaseShape } from '../utils/caseValidation';
-import { recordJointTransactionAcrossCases } from '../utils/jointTransactionLinks';
+import { recordJointTransactionAcrossCases, recordManualCaseAssociation } from '../utils/jointTransactionLinks';
 
 const MAX_SCENARIOS = 50;
 
@@ -455,7 +455,7 @@ export function CaseProvider({ children }) {
     const result = recordJointTransactionAcrossCases(scenarios, evidence);
     if (!result.linkedCaseIds.length) {
       showToast(
-        'The joint transaction inputs are not represented in at least two saved cases. Add addresses from each relevant case to Clustering and run it again.',
+        `Could not record this co-spend link. ${result.reason || 'The inputs could not be matched to saved cases.'} Add the missing input address to the relevant saved case graph; importing it into Clustering alone does not update the case.`,
         'warning',
         7000
       );
@@ -468,6 +468,23 @@ export function CaseProvider({ children }) {
       6500
     );
     return result.linkedCaseIds.length;
+  }, [scenarios, showToast]);
+
+  const handleRecordManualCaseAssociation = useCallback((association) => {
+    const result = recordManualCaseAssociation(scenarios, association);
+    if (!result.success) {
+      showToast(`Could not save manual case association. ${result.reason}`, 'warning', 7000);
+      return false;
+    }
+    if (!result.duplicate) setScenarios(result.cases);
+    showToast(
+      result.duplicate
+        ? 'This investigator-reported association is already recorded.'
+        : 'Saved investigator-reported case association. It is not independently verified on-chain evidence.',
+      result.duplicate ? 'info' : 'warning',
+      7000
+    );
+    return true;
   }, [scenarios, showToast]);
 
   const value = {
@@ -499,6 +516,7 @@ export function CaseProvider({ children }) {
     updateEvidenceClaimReview,
     updatePathReview,
     handleRecordJointTransaction,
+    handleRecordManualCaseAssociation,
     getGatewayStatus,
     getCacheStats
   };

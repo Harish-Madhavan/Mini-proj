@@ -82,6 +82,33 @@ describe('syndicateAnalysis', () => {
     expect(res.pairs[0].sharedCount).toBe(1);
   });
 
+  it('shows investigator-recorded associations separately from chain evidence', () => {
+    const association = {
+      associationId: 'manual-1',
+      caseAId: 'case-a',
+      caseBId: 'case-b',
+      transactionIds: ['c'.repeat(64)],
+      rationale: 'Reviewed together by investigator.',
+      warning: 'Not independently verified.',
+    };
+    const cases = [
+      { ...mkCase('case-a', [HOP]), manualCaseAssociations: [association] },
+      { ...mkCase('case-b', [DEP]), manualCaseAssociations: [association] },
+    ];
+    const result = correlateCases(cases);
+
+    expect(result.pairs).toHaveLength(1);
+    expect(result.pairs[0]).toMatchObject({
+      sharedCount: 0,
+      sharedTransactionCount: 0,
+      manualAssociationCount: 1,
+      linkScore: 0,
+      verdict: 'INVESTIGATOR_ASSOCIATED',
+    });
+    expect(result.pairs[0].manualAssociations[0].rationale).toBe(association.rationale);
+    expect(result.components).toHaveLength(1);
+  });
+
   it('extracts address footprints with roles', () => {
     const fp = extractCaseAddresses(mkCase('c', [HOP, DEP]));
     expect(fp.has(HOP)).toBe(true);

@@ -1,14 +1,25 @@
 import React from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import SyndicateMap from './SyndicateMap';
 
-const { handleSelectCase } = vi.hoisted(() => ({ handleSelectCase: vi.fn() }));
+const { handleSelectCase, scenarios } = vi.hoisted(() => ({ handleSelectCase: vi.fn(), scenarios: [] }));
 const TXID = 'a'.repeat(64);
 
 vi.mock('../hooks/useCase', () => ({
   useCase: () => ({
-    scenarios: [
+    scenarios,
+    activeCaseId: 'case-a',
+    handleSelectCase,
+  }),
+}));
+
+describe('SyndicateMap joint transaction links', () => {
+  afterEach(cleanup);
+
+  beforeEach(() => {
+    handleSelectCase.mockClear();
+    scenarios.splice(0, scenarios.length,
       {
         id: 'case-a',
         title: 'Case A',
@@ -23,14 +34,8 @@ vi.mock('../hooks/useCase', () => ({
         links: [],
         jointTransactionEvidence: [{ txid: TXID, inputAddresses: ['3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy'] }],
       },
-    ],
-    activeCaseId: 'case-a',
-    handleSelectCase,
-  }),
-}));
-
-describe('SyndicateMap joint transaction links', () => {
-  beforeEach(() => handleSelectCase.mockClear());
+    );
+  });
 
   it('shows recorded co-spends as weak cross-case evidence', () => {
     render(<SyndicateMap />);
@@ -41,5 +46,27 @@ describe('SyndicateMap joint transaction links', () => {
 
     expect(screen.getByText(`Joint transaction · ${TXID}`)).toBeDefined();
     expect(screen.getByText(/does not establish common ownership or control/)).toBeDefined();
+  });
+
+  it('displays manual associations as unverified, separate from on-chain links', () => {
+    const association = {
+      associationId: 'manual-2',
+      caseAId: 'case-a',
+      caseBId: 'case-b',
+      transactionIds: ['b'.repeat(64)],
+      rationale: 'Investigator supplied context for review.',
+      warning: 'Not independently verified.',
+    };
+    scenarios.splice(0, scenarios.length,
+      { id: 'case-a', title: 'Case A', nodes: [], links: [], manualCaseAssociations: [association] },
+      { id: 'case-b', title: 'Case B', nodes: [], links: [], manualCaseAssociations: [association] },
+    );
+    render(<SyndicateMap />);
+
+    expect(screen.getByText(/Investigator-recorded association/)).toBeDefined();
+    expect(screen.getByText(/1 manual association/)).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: /show link evidence/i }));
+    expect(screen.getByText('Rationale: Investigator supplied context for review.')).toBeDefined();
+    expect(screen.getByText('Not independently verified.')).toBeDefined();
   });
 });
