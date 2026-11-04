@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Radio,
+  Sparkles,
   PlusCircle,
   Trash2,
   ExternalLink,
@@ -153,6 +154,21 @@ export default function WatchlistMonitor() {
     } catch (error) {
       showToast(`Watchlist export failed: ${error.message}`, 'error');
     }
+  };
+
+  const handleLoadDemoTargets = () => {
+    const demoTargets = [
+      { address: 'bc1qa5wkgaew2dkv56kfvj49j0av5nml45x9ek9hz6', tag: 'FBI Silk Road Seizure Sink', syndicate: 'Silk Road Vault', tier: 'CRITICAL' },
+      { address: '1HB5XMLmzFVj8ALj6mfBsbifRoD4miY36v', tag: 'WikiLeaks Defense Fund', syndicate: 'Public Vault', tier: 'HIGH' },
+      { address: '3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy', tag: 'WazirX Liquidation Sink', syndicate: 'Shared Gateway', tier: 'MEDIUM' }
+    ];
+    let count = 0;
+    demoTargets.forEach(target => {
+      const res = addToWatchlist(target.address, target.tag, target.syndicate, target.tier);
+      if (res.success) count++;
+    });
+    setWatchlist(getWatchlist());
+    showToast(`Loaded ${count} demo target address(es) into watchlist.`, 'success');
   };
 
   const handleImportCaseSuspects = () => {
@@ -318,6 +334,15 @@ export default function WatchlistMonitor() {
               title="Download the local watchlist as JSON"
             >
               <Download size={13} /> Export JSON
+            </button>
+            <button
+              onClick={handleLoadDemoTargets}
+              className="btn-quiet"
+              type="button"
+              style={{ fontSize: '0.8rem' }}
+              title="Load 3 verified demo target addresses"
+            >
+              <Sparkles size={13} /> Demo targets
             </button>
             <button
               onClick={handleImportCaseSuspects}

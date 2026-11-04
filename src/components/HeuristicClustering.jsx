@@ -341,6 +341,24 @@ export default function HeuristicClustering() {
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
             <button
+              type="button"
+              onClick={() => {
+                setSuspectAddresses(prev => [
+                  ...new Set([
+                    ...prev,
+                    'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
+                    'bc1q7w5pxj2lznq48as923kd8mzklaq02947alkwsj',
+                    'bc1qdf4w9sl2lznq48as923kd8mzklaq02947a11122'
+                  ])
+                ]);
+              }}
+              className="btn-quiet"
+              style={{ fontSize: '0.8rem' }}
+              title="Preload 3 demo suspect addresses"
+            >
+              ⚡ Demo Pool
+            </button>
+            <button
               onClick={handleImportFromGraph}
               className="btn-quiet"
               style={{ fontSize: '0.8rem' }}
@@ -559,6 +577,15 @@ export default function HeuristicClustering() {
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           <input className="mono-addr input-field" aria-label="CoinJoin transaction ID" placeholder="64-character transaction ID" value={coinJoinTxid} onChange={event => setCoinJoinTxid(event.target.value)} style={{ flex: 1 }} />
+          <button
+            type="button"
+            className="btn-quiet"
+            style={{ fontSize: '0.78rem', whiteSpace: 'nowrap' }}
+            onClick={() => setCoinJoinTxid('2b22df65026d8384e01e0deb9b115ba9725bbe9d95c4f61d18dee6e40fa47b74')}
+            title="Preload 1-in-2-out Ransom Peel transaction"
+          >
+            ⚡ Demo Mix Tx
+          </button>
           <button className="btn btn-primary" onClick={handleCoinJoinAnalysis} disabled={isSolvingCoinJoin}>{isSolvingCoinJoin ? 'Analyzing…' : 'Analyze'}</button>
         </div>
         {coinJoinResult && <div role="status" style={{ color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
@@ -573,6 +600,22 @@ export default function HeuristicClustering() {
           <h3 style={{ fontSize: '0.95rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
             <Fingerprint size={15} style={{ color: 'var(--text-muted)' }} /> Fee habits
           </h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <button
+              type="button"
+              className="btn-quiet"
+              style={{ fontSize: '0.78rem' }}
+              onClick={() => {
+                setFeeTxs({
+                  a: '35e5d5fe8c8128cfa6884f56be5817e4138c58c91b79d78d3e78a8d365b9d8a7',
+                  b: '409803bb5e124fd028c0482027c7722e84ce55b78204b279d3a44aba5e7c1698'
+                });
+              }}
+              title="Preload two real ransom sweep transactions with matching fee rates"
+            >
+              ⚡ Demo Fee Pair (Ransom Hops)
+            </button>
+          </div>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
             Similar fee-rate patterns are weak supporting evidence; they do not establish identity.
           </p>

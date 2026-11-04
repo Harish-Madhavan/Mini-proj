@@ -65,7 +65,7 @@ export const SCENARIOS = [
         risk: "low",
         entityName: "Possible custodial endpoint (hypothesis)",
         details: {
-          address: "3E8tMa9Jkdf923kd8mzklaq02947aWazirX",
+          address: "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy",
           lastActive: "Deposit settled",
           ipLog: "Service type unverified",
           kycStatus: "POSSIBLE CUSTODIAL SERVICE (HYPOTHESIS)",
@@ -165,6 +165,70 @@ export const SCENARIOS = [
       { source: "addr_suspect", target: "addr_layering_hop", value: "8.50 BTC", timestamp: "On-chain" },
       { source: "addr_layering_hop", target: "addr_bridge_vault", value: "8.48 BTC", timestamp: "Bridge Deposit" },
       { source: "addr_bridge_vault", target: "addr_eth_receiver", value: "8.40 BTC (Bridged)", timestamp: "Cross-Chain Swap" }
+    ]
+  },
+  {
+    id: "case-syndicate-02",
+    title: "Syndicate Sweep: Cartel Liquidation",
+    subtitle: "Coordinated cash-out sweep",
+    currency: "BTC",
+    suspectName: "Cartel Cashout Network",
+    initialTxHash: "8a34b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3",
+    status: "ACTIVE_TRACE",
+    riskScore: null,
+    traceType: "SIMULATED_ESTIMATE",
+    evidenceStatus: "SIMULATED",
+    description: "Multi-input sweep consolidating dark market proceeds into the same WazirX deposit gateway as Case BTC-01.",
+    nodes: [
+      {
+        id: "addr_cartel_origin",
+        label: "Cartel Treasury",
+        type: "suspect",
+        balance: "12.20 BTC",
+        risk: "critical",
+        entityName: "Cartel Treasury Wallet",
+        details: {
+          address: "bc1qcarteltreasurywalletorigin009988",
+          lastActive: "Consolidation transfer",
+          ipLog: "Mullvad VPN",
+          kycStatus: "NON-KYC ILLICIT SOURCE",
+          riskReason: "High-value illicit vendor treasury."
+        }
+      },
+      {
+        id: "addr_mule_hop",
+        label: "Mule Layering Hop",
+        type: "hop",
+        balance: "12.18 BTC",
+        risk: "high",
+        entityName: "Mule Account B",
+        details: {
+          address: "bc1qmuletransitforwardinglayering77",
+          lastActive: "Immediate forwarding",
+          ipLog: "Tor Exit Node",
+          kycStatus: "UNREGISTERED TRANSIT",
+          riskReason: "Fast sweep toward exchange deposit."
+        }
+      },
+      {
+        id: "addr_wazirx_shared",
+        label: "Shared Exchange Sink",
+        type: "receiver",
+        balance: "12.15 BTC",
+        risk: "medium",
+        entityName: "WazirX Deposit Sink (Shared)",
+        details: {
+          address: "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy",
+          lastActive: "Deposit settled",
+          ipLog: "Exchange Gateway",
+          kycStatus: "CUSTODIAL GATEWAY (SHARED INFRASTRUCTURE)",
+          riskReason: "Identical terminal deposit address as Case case-btc-01."
+        }
+      }
+    ],
+    links: [
+      { source: "addr_cartel_origin", target: "addr_mule_hop", value: "12.20 BTC", timestamp: "On-chain" },
+      { source: "addr_mule_hop", target: "addr_wazirx_shared", value: "12.15 BTC", timestamp: "Settled" }
     ]
   }
 ];

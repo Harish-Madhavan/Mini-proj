@@ -224,6 +224,36 @@ export default function Dashboard() {
           </button>
         </form>
 
+        {/* 1-Click Demo Showcase Presets */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', marginTop: '0.2rem' }}>
+          <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 600 }}>⚡ Demo Targets:</span>
+          {[
+            { label: 'Ransom Peel (0.04%)', value: '2b22df65026d8384e01e0deb9b115ba9725bbe9d95c4f61d18dee6e40fa47b74', title: 'Ransom peel chain (99.96% change / 0.04% payment)' },
+            { label: 'Sweep (76→1)', value: '35e5d5fe8c8128cfa6884f56be5817e4138c58c91b79d78d3e78a8d365b9d8a7', title: '76-input consolidation sweep aggregation' },
+            { label: 'First Tx (Block 170)', value: 'f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e9831e9e16', title: 'Satoshi to Hal Finney historical transfer' },
+            { label: 'FBI Seizure Sink', value: 'bc1qa5wkgaew2dkv56kfvj49j0av5nml45x9ek9hz6', title: 'Silk Road FBI seizure address (69k BTC)' },
+            { label: 'WikiLeaks Fund', value: '1HB5XMLmzFVj8ALj6mfBsbifRoD4miY36v', title: 'Multi-year active donation address' }
+          ].map((preset) => (
+            <button
+              key={preset.label}
+              type="button"
+              onClick={() => setSearchVal(preset.value)}
+              className="btn-quiet"
+              style={{
+                fontSize: '0.72rem',
+                padding: '0.22rem 0.55rem',
+                borderRadius: '12px',
+                border: '1px solid var(--border-soft)',
+                background: 'rgba(255, 255, 255, 0.04)',
+                cursor: 'pointer'
+              }}
+              title={preset.title}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+
         {/* Depth + hint — quiet footer row */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexWrap: 'wrap' }}>
