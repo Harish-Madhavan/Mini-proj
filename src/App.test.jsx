@@ -34,10 +34,30 @@ describe('application smoke test', () => {
     render(<App />);
     expect(await screen.findByRole('form', { name: 'Blockchain trace search' })).toBeTruthy();
 
+    fireEvent.click(screen.getByText('Tools'));
     fireEvent.click(screen.getByRole('button', { name: 'Go to Request prep' }));
     expect(await screen.findByRole('heading', { name: 'Request preparation worksheet' })).toBeTruthy();
     expect(screen.getByRole('textbox', { name: 'Recipient email' }).value).toBe('');
     expect(screen.getByRole('button', { name: 'Email draft' }).disabled).toBe(true);
     expect(screen.getByRole('textbox', { name: 'Request worksheet preview' }).value).toContain('NOT A SUBPOENA');
+  });
+
+  it('opens case comparison and timeline from primary navigation', async () => {
+    vi.stubGlobal('indexedDB', undefined);
+    window.history.replaceState({}, '', '/dashboard');
+
+    render(<App />);
+    expect(await screen.findByRole('form', { name: 'Blockchain trace search' })).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Tools'));
+    fireEvent.click(screen.getByRole('button', { name: 'Go to Case comparison' }));
+    expect(await screen.findByRole('heading', { name: 'Case comparison' })).toBeTruthy();
+    expect(screen.getByRole('table').textContent).toContain('Tx reference coverage');
+
+    fireEvent.click(screen.getByText('Tools'));
+    fireEvent.click(screen.getByRole('button', { name: 'Go to Timeline' }));
+    expect(await screen.findByRole('heading', { name: 'Investigation timeline' })).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: 'Timeline case' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Search timeline events' })).toBeTruthy();
   });
 });

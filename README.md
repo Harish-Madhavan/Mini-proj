@@ -55,6 +55,14 @@ trace is computed live from gateway data.
   contacts are investigator-entered and must be independently verified. These are
   investigative aids, not legal process, a legal-admissibility guarantee, or
   identity verification.
+- **Case comparison** — compare trace reference coverage, review gaps, endpoints,
+  and open recovery actions across saved cases without summing potentially
+  overlapping flows.
+- **Investigation timeline** — filter recorded case notes, transaction references,
+  evidence reviews, and recovery actions by event type or text. Missing timestamps
+  remain explicit; this is not a tamper-proof audit log.
+- **Watchlist management** — import addresses in batches, export the local list as
+  JSON, and select multiple entries for a confirmed bulk removal.
 - **Cross-Chain Intelligence** — bridge memo extraction proposes destination
   details from memo text. It does not verify settlement or trace transactions on
   the destination network.
@@ -65,6 +73,8 @@ trace is computed live from gateway data.
 
 - `src/components/` — routes (Dashboard, Tracing, Request prep, Clustering,
   Linked cases, Risk, Watchlist, Report) plus graph canvas/sidebar/timeline.
+- `src/features/` — case comparison, investigation timeline, evidence review,
+  and recovery workflow features.
 - `src/utils/` — chain API, heuristics, taint, clustering, risk, dossiers,
   custody, cross-chain bridge analysis, and narrative modules. Every module has colocated `.test.js`
   tests. Run `npm test` for current totals.

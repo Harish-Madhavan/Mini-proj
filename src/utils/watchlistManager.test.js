@@ -3,6 +3,7 @@ import {
   getWatchlist,
   addToWatchlist,
   removeFromWatchlist,
+  removeManyFromWatchlist,
   checkAddressMempoolStatus,
   normalizeWatchlist,
   makeWatchEntry,
@@ -71,6 +72,31 @@ describe('watchlistManager', () => {
     const result = removeFromWatchlist(newTarget.address);
     expect(result.success).toBe(true);
     expect(result.watchlist.some(w => w.address === newTarget.address)).toBe(false);
+  });
+
+  it('removes selected watchlist addresses with one persisted update', () => {
+    addToWatchlist({ address: 'bc1qbulkone' });
+    addToWatchlist({ address: 'bc1qbulktwo' });
+    addToWatchlist({ address: 'bc1qkeep' });
+
+    const result = removeManyFromWatchlist(['BC1Qbulkone', 'bc1qbulktwo', 'not-present']);
+
+    expect(result).toMatchObject({ success: true, removedCount: 2 });
+    expect(result.watchlist.map(entry => entry.address)).toEqual(['bc1qkeep']);
+    expect(removeManyFromWatchlist([])).toMatchObject({
+      success: false,
+      message: 'Select at least one watched address.'
+    });
+  });
+
+  it('does not report a bulk removal as successful when storage writes fail', () => {
+    addToWatchlist({ address: 'bc1qbulkstorage' });
+    global.localStorage.setItem = () => { throw new DOMException('storage full', 'QuotaExceededError'); };
+
+    expect(removeManyFromWatchlist(['bc1qbulkstorage'])).toMatchObject({
+      success: false,
+      message: 'Could not save the updated watchlist in browser storage.'
+    });
   });
 
   it('does not report a watchlist change as successful when storage writes fail', () => {

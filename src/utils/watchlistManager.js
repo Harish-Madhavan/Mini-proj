@@ -106,6 +106,24 @@ export function removeFromWatchlist(address) {
   return { success: true, watchlist: updated };
 }
 
+export function removeManyFromWatchlist(addresses) {
+  const targets = new Set(
+    (Array.isArray(addresses) ? addresses : [])
+      .filter(address => typeof address === 'string')
+      .map(address => address.toLowerCase())
+  );
+  if (!targets.size) {
+    return { success: false, message: 'Select at least one watched address.' };
+  }
+  const current = getWatchlist();
+  const updated = current.filter(entry => !targets.has(entry.address.toLowerCase()));
+  const removedCount = current.length - updated.length;
+  if (!saveWatchlist(updated)) {
+    return { success: false, message: 'Could not save the updated watchlist in browser storage.' };
+  }
+  return { success: true, watchlist: updated, removedCount };
+}
+
 export function getMempoolAlerts() {
   const saved = safeGetItem(ALERTS_STORAGE_KEY, []);
   return Array.isArray(saved)

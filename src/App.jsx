@@ -17,6 +17,8 @@ const ReportGenerator = lazy(() => import('./components/ReportGenerator'));
 const WatchlistMonitor = lazy(() => import('./components/WatchlistMonitor'));
 const AssetRecovery = lazy(() => import('./features/recovery/AssetRecovery'));
 const EvidenceReview = lazy(() => import('./features/evidence/EvidenceReview.jsx'));
+const CaseComparison = lazy(() => import('./features/cases/CaseComparison'));
+const InvestigationTimeline = lazy(() => import('./features/timeline/InvestigationTimeline'));
 
 const ROUTE_COMPONENTS = {
   dashboard: Dashboard,
@@ -28,7 +30,9 @@ const ROUTE_COMPONENTS = {
   watchlist: WatchlistMonitor,
   report: ReportGenerator,
   recovery: AssetRecovery,
-  evidence: EvidenceReview
+  evidence: EvidenceReview,
+  compare: CaseComparison,
+  timeline: InvestigationTimeline
 };
 
 function RouteFallback() {
@@ -42,9 +46,12 @@ import {
   Radio,
   Wifi,
   WifiOff,
-  Command
+  Command,
+  ChevronDown
 } from 'lucide-react';
 import { NAV_ITEMS } from './constants/navigation';
+
+const PRIMARY_NAV_IDS = new Set(['dashboard', 'trace', 'watchlist', 'recovery', 'evidence']);
 
 function AppContent() {
   const { 
@@ -145,9 +152,9 @@ function AppContent() {
         </div>
       </header>
 
-      {/* Main Tab Navigation */}
+      {/* Keep frequent destinations visible; group secondary tools in a disclosure menu. */}
       <nav className="main-nav" aria-label="Primary">
-        {NAV_ITEMS.map((item) => {
+        {NAV_ITEMS.filter(item => PRIMARY_NAV_IDS.has(item.id)).map((item) => {
           const Icon = item.icon;
           const isActive = currentTab === item.id || location.pathname === item.path;
           return (
@@ -164,6 +171,36 @@ function AppContent() {
             </button>
           );
         })}
+        <details className="nav-more">
+          <summary aria-label="More investigation tools">
+            Tools <ChevronDown size={13} aria-hidden="true" />
+            {NAV_ITEMS.some(item => !PRIMARY_NAV_IDS.has(item.id) && item.id === currentTab) && (
+              <span className="nav-more-active">· {NAV_ITEMS.find(item => item.id === currentTab)?.label}</span>
+            )}
+          </summary>
+          <div className="nav-more-menu" role="group" aria-label="Additional tools">
+            {NAV_ITEMS.filter(item => !PRIMARY_NAV_IDS.has(item.id)).map(item => {
+              const Icon = item.icon;
+              const isActive = currentTab === item.id || location.pathname === item.path;
+              return (
+                <button
+                  key={item.id}
+                  onClick={(event) => {
+                    event.currentTarget.closest('details').open = false;
+                    navigate(item.path);
+                  }}
+                  className={`nav-more-item ${isActive ? 'active' : ''}`}
+                  aria-current={isActive ? 'page' : undefined}
+                  aria-label={`Go to ${item.label}`}
+                  type="button"
+                >
+                  <Icon size={14} aria-hidden="true" />
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+        </details>
       </nav>
 
       {/* Main Body panels with React Router Routes */}

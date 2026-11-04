@@ -8,7 +8,8 @@ import {
   CheckCircle,
   Upload,
   ArrowRight,
-  FileText
+  FileText,
+  Download
 } from 'lucide-react';
 import { useCase } from '../hooks/useCase';
 import { useToast } from '../hooks/useToast';
@@ -19,6 +20,7 @@ import {
   getMempoolAlerts, 
   saveMempoolAlerts, 
   mergeMempoolAlerts,
+  removeManyFromWatchlist,
   checkAddressMempoolStatus,
   initMempoolWebSocket,
   refreshMempoolAddressTracking,
@@ -31,6 +33,7 @@ import { validateBtcAddress } from '../utils/forensicUtils';
 import { getExplorerUrls } from '../utils/knownEntities';
 import EmptyState from './EmptyState';
 import BatchAddressImporter from './BatchAddressImporter';
+import { downloadJson } from '../utils/download';
 
 export default function WatchlistMonitor() {
   const { activeCase, liveMode, handleSearch } = useCase();
@@ -43,6 +46,7 @@ export default function WatchlistMonitor() {
   const [mempoolResults, setMempoolResults] = useState({});
   const [wsStatus, setWsStatus] = useState(() => getWebSocketStatus());
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+  const [selectedAddresses, setSelectedAddresses] = useState([]);
 
   useEffect(() => {
     setWatchlist(getWatchlist());
@@ -106,9 +110,48 @@ export default function WatchlistMonitor() {
     const result = removeFromWatchlist(address);
     if (result.success) {
       setWatchlist(result.watchlist);
+      setSelectedAddresses(previous => previous.filter(item => item !== address));
       showToast("Address removed.", "info");
     } else {
       showToast(result.message, "error");
+    }
+  };
+
+  const handleToggleSelected = (address) => {
+    setSelectedAddresses(previous => previous.includes(address)
+      ? previous.filter(item => item !== address)
+      : [...previous, address]);
+  };
+
+  const handleToggleAll = () => {
+    setSelectedAddresses(previous => previous.length === watchlist.length
+      ? []
+      : watchlist.map(item => item.address));
+  };
+
+  const handleRemoveSelected = () => {
+    const selected = selectedAddresses.filter(address => watchlist.some(item => item.address === address));
+    if (!selected.length) {
+      showToast('Select at least one watched address.', 'warning');
+      return;
+    }
+    if (!window.confirm(`Remove ${selected.length} selected address(es) from the watchlist?`)) return;
+    const result = removeManyFromWatchlist(selected);
+    if (result.success) {
+      setWatchlist(result.watchlist);
+      setSelectedAddresses([]);
+      showToast(`Removed ${result.removedCount} address(es).`, 'info');
+    } else {
+      showToast(result.message, 'error');
+    }
+  };
+
+  const handleExportWatchlist = () => {
+    try {
+      downloadJson(watchlist, `aegistrace-watchlist-${new Date().toISOString().slice(0, 10)}.json`);
+      showToast('Watchlist exported as JSON.', 'success');
+    } catch (error) {
+      showToast(`Watchlist export failed: ${error.message}`, 'error');
     }
   };
 
@@ -267,6 +310,16 @@ export default function WatchlistMonitor() {
               <FileText size={13} /> Batch CSV
             </button>
             <button
+              onClick={handleExportWatchlist}
+              disabled={watchlist.length === 0}
+              className="btn-quiet"
+              type="button"
+              style={{ fontSize: '0.8rem' }}
+              title="Download the local watchlist as JSON"
+            >
+              <Download size={13} /> Export JSON
+            </button>
+            <button
               onClick={handleImportCaseSuspects}
               className="btn-quiet"
               type="button"
@@ -337,11 +390,21 @@ export default function WatchlistMonitor() {
           </div>
         </div>
 
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <span style={{ color: 'var(--text-muted)', fontSize: '0.76rem' }}>{selectedAddresses.filter(address => watchlist.some(item => item.address === address)).length} selected · {watchlist.length} / 100 addresses</span>
+          <button onClick={handleRemoveSelected} disabled={!selectedAddresses.some(address => watchlist.some(item => item.address === address))} className="btn-quiet" type="button" style={{ fontSize: '0.78rem', color: 'var(--color-danger, #ef4444)' }}>
+            <Trash2 size={13} /> Remove selected
+          </button>
+        </div>
+
         {/* Watchlist Table */}
         <div style={{ overflowX: 'auto', flex: 1 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', textAlign: 'left' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                <th style={{ padding: '0.5rem' }}>
+                  <input type="checkbox" aria-label="Select all watched addresses" checked={watchlist.length > 0 && watchlist.every(item => selectedAddresses.includes(item.address))} onChange={handleToggleAll} />
+                </th>
                 <th style={{ padding: '0.5rem' }}>Address</th>
                 <th style={{ padding: '0.5rem' }}>Label</th>
                 <th style={{ padding: '0.5rem' }}>Tier</th>
@@ -356,6 +419,9 @@ export default function WatchlistMonitor() {
 
                 return (
                   <tr key={item.address} style={{ borderBottom: '1px solid var(--border-soft)' }}>
+                    <td style={{ padding: '0.55rem 0.5rem 0.55rem 0' }}>
+                      <input type="checkbox" aria-label={`Select ${item.address}`} checked={selectedAddresses.includes(item.address)} onChange={() => handleToggleSelected(item.address)} />
+                    </td>
                     <td style={{ padding: '0.55rem 0.5rem 0.55rem 0' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                         <span className="mono-addr" style={{ color: 'var(--text-secondary)', fontSize: '0.78rem' }}>
