@@ -40,7 +40,7 @@ flowchart TD
     subgraph Core ["State & Execution Core"]
         CC["CaseContext (Central State & Dispatcher)"]
         TC["Toast & Notification Context"]
-        LS[("LocalStorage Persistence Cache")]
+        LS[("IndexedDB Case Store")]
     end
 
     subgraph Engines ["Algorithmic Forensics Engine"]
@@ -82,7 +82,7 @@ flowchart TD
 | **Bundler** | **Vite 8** | Sub-second HMR, optimized ES-module chunking, and strict tree-shaking for lean bundles. |
 | **Icons & UI** | **Lucide React** + Glassmorphic CSS | High-contrast law enforcement dark-mode UI; Outfit for typography, JetBrains Mono for addresses/hashes. |
 | **Blockchain Gateways** | **Blockstream.info + Mempool.space** | RESTful Esplora-compatible endpoints with automatic fallback, timeout handling, and no API key barriers. |
-| **Testing** | **Vitest 3.2** | 41 test files and 271 tests passed in the latest full-suite run; run `npm test` for current results. |
+| **Testing** | **Vitest 3.2** | 44 test files and 283 tests passed in the latest full-suite run; run `npm run validate` for lint, tests, and production build. |
 | **Code Quality** | **OxLint** | High-performance Rust-based linter ensuring strict correctness and zero undefined symbols. |
 
 ---
@@ -414,9 +414,11 @@ classDiagram
     CaseModel --> LinkModel : contains
 ```
 
-### Persistence & Storage Strategy (`src/utils/storage.js`):
-- `localStorage` keys: `aegistrace_scenarios`, `aegistrace_activeCaseId`, `aegistrace_watchlist`, `aegistrace_mempool_alerts`.
-- All reads and writes are protected by defensive JSON parsers and storage wrappers that handle QuotaExceeded exceptions and sanitize schemas up to a maximum cap of 50 active cases.
+### Persistence & Storage Strategy (`src/utils/caseStorage.js`, `src/utils/storage.js`):
+- Case portfolios are stored as a single IndexedDB record; existing `aegistrace_scenarios` and `aegistrace_activeCaseId` localStorage values are migrated without deleting the legacy copy.
+- Failed IndexedDB writes attempt a timestamped localStorage recovery copy and display a warning. Case initialization waits for hydration before rendering the investigation UI.
+- Watchlists and mempool alerts continue to use localStorage through defensive JSON storage wrappers.
+- Browser-managed storage is not encrypted at rest; both IndexedDB and localStorage remain subject to browser policy, quotas, and user clearing.
 
 ---
 
@@ -453,7 +455,7 @@ When demonstrating AegisTrace to project mentors or evaluators, follow this stru
 
 #### Q1: "Why did you build this when Chainalysis and Elliptic already exist?"
 > **Answer:**  
-> *"AegisTrace addresses the SIH-1675 problem statement with inspectable Bitcoin tracing and review workflows. Its current deployment stores case data in browser localStorage without at-rest encryption, and live lookups send queried identifiers to public gateways. Operational use with sensitive investigations therefore requires an approved deployment and appropriate privacy controls."*
+> *"AegisTrace addresses the SIH-1675 problem statement with inspectable Bitcoin tracing and review workflows. Its current deployment stores case data in browser-managed IndexedDB without at-rest encryption, and live lookups send queried identifiers to public gateways. Operational use with sensitive investigations therefore requires an approved deployment and appropriate privacy controls."*
 
 #### Q2: "How do you distinguish change outputs from payment outputs? Isn't Bitcoin designed to make that impossible?"
 > **Answer:**  
@@ -490,8 +492,11 @@ When demonstrating AegisTrace to project mentors or evaluators, follow this stru
 
 ## 7. Verification & Test Suite Summary
 
-Run `npm test` for the current result; a passing unit suite does not establish
-real-world forensic accuracy or legal admissibility.
+Run `npm run validate` for lint, full tests, and production build. The suite
+includes app startup/navigation, storage migration/fallback, trace regression,
+and provenance-gated benchmark checks. Passing it does not establish real-world
+forensic accuracy or legal admissibility; it also does not contact live
+gateways.
 
 ---
 
@@ -536,7 +541,7 @@ src/
 │   └── scenarios.js               # Seed baseline forensic cases
 └── utils/
     ├── accuracy.js                # Offline heuristic fixture regression evaluator
-    ├── groundTruthEvaluation.js   # Provenance-gated exact-output benchmark metrics
+    ├── groundTruthEvaluation.js   # Provenance-gated output and node-role benchmark metrics
     ├── bitcoinApi.js              # Esplora gateway, BFS recursive tracer
     ├── caseHelpers.js             # Case builders and algorithmic mock generation
     ├── chainOfCustody.js          # SHA-256 digest chain (unsigned, unanchored)
@@ -551,6 +556,7 @@ src/
     ├── obfuscationForensics.js    # Mixers, instant swaps, sweep detector
     ├── riskScoring.js             # 5-dimensional forensic risk scoring
     ├── scriptDecoder.js           # Opcode disassembler & OP_RETURN parser
+    ├── caseStorage.js             # IndexedDB portfolio persistence and recovery
     ├── storage.js                 # Defensive localStorage wrappers
     ├── structuringAnalysis.js     # Smurfing & sub-threshold payment clustering
     ├── syndicateAnalysis.js       # Cross-case entity resolution
@@ -568,8 +574,7 @@ A comprehensive architectural evaluation has identified five key engineering pil
 
 ### Pillar 1: Data Persistence & Cryptographic Local Storage
 1. **Migration to IndexedDB (Dexie.js / Native IDB)**:
-   - **Rationale**: Browser-managed `localStorage` has limited, implementation-dependent capacity. Writes can fail at quota, and the current provider does not notify users when persistence fails.
-   - **Implementation**: Adopt an asynchronous IndexedDB store for larger case portfolios and graph data, with explicit handling and user notification for storage failures.
+   - **Completed**: Case portfolios use native IndexedDB with legacy localStorage migration, timestamped recovery copies, and user-visible storage warnings.
 2. **At-Rest Zero-Knowledge Vault Encryption (AES-GCM-256)**:
    - **Rationale**: Investigative case notes, target names, and suspect addresses must be protected against forensic extraction from seized analyst workstations.
    - **Implementation**: Introduce PBKDF2/WebCrypto key derivation from an investigator master passphrase to encrypt local database entries before persistence.

@@ -135,6 +135,7 @@ export const TRACE_BENCHMARK_CASES = Object.freeze([
         addressDerivation: 'Base58Check(version 0x00, RIPEMD160(SHA256(uncompressed P2PK public key)))',
         valueSats: 1000000000,
         expectedRole: 'payment',
+        expectedNodeRole: 'payee',
         sourceIds: Object.freeze(['bitcoincom-transaction', 'bitcoincom-notable']),
       }),
       Object.freeze({
@@ -146,6 +147,7 @@ export const TRACE_BENCHMARK_CASES = Object.freeze([
         addressDerivation: 'Base58Check(version 0x00, RIPEMD160(SHA256(uncompressed P2PK public key)))',
         valueSats: 4000000000,
         expectedRole: 'change',
+        expectedNodeRole: 'change',
         sourceIds: Object.freeze(['bitcoincom-transaction', 'bitcoincom-notable']),
       }),
     ]),

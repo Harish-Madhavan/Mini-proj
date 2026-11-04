@@ -103,9 +103,46 @@ describe('trace branch behavior', () => {
       previousTxid: ROOT,
       spendingTxid: CHILD,
       outputIndex: 0,
+      inputOutpoint: `${ROOT}:0`,
     });
     expect(result.meta.collection.sourceManifest).toHaveLength(2);
     expect(result.meta.collection.sourceManifest[0].transactionResponse.canonicalResponseSha256).toMatch(/^SHA256:/);
+  });
+
+  it('keeps same-address outputs as separate UTXOs and links every spend input', async () => {
+    const ROOT = '1'.repeat(64);
+    const CHILD = '2'.repeat(64);
+    const sharedAddress = 'bc1qreused111111111111111111111111';
+    const root = txShape({
+      txid: ROOT,
+      ins: [['bc1qsource111111111111111111111111', 3000000]],
+      outs: [[sharedAddress, 1000000], [sharedAddress, 1999000]],
+    });
+    const child = txShape({
+      txid: CHILD,
+      ins: [[sharedAddress, 1000000], [sharedAddress, 1999000]],
+      outs: [['bc1qterminal1111111111111111111', 2998000]],
+    });
+    stubRoutes([
+      [`/tx/${ROOT}/outspends`, [
+        { spent: true, txid: CHILD, vin: 0 },
+        { spent: true, txid: CHILD, vin: 1 },
+      ]],
+      [`/tx/${ROOT}`, root],
+      [`/tx/${CHILD}/outspends`, [{ spent: false }]],
+      [`/tx/${CHILD}`, child],
+    ]);
+
+    const result = await traceEndReceiver(ROOT, 1);
+    const outputIds = result.nodes
+      .filter(node => node.details?.address === sharedAddress)
+      .map(node => node.id);
+    const spendLinks = result.links.filter(link =>
+      outputIds.includes(link.source) && link.target === `tx_${CHILD}`
+    );
+    expect(new Set(outputIds).size).toBe(2);
+    expect(spendLinks).toHaveLength(2);
+    expect(spendLinks.map(link => link.inputIndex).sort()).toEqual([0, 1]);
   });
 
   it('skips self-loop spends without hanging', async () => {

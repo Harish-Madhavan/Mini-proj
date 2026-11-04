@@ -41,8 +41,8 @@ const verifiedFixture = {
     primary: true,
   }],
   expectedOutputs: [
-    { txid: TXID, outputIndex: 0, address: 'bc1qpayment', expectedRole: 'payment', sourceIds: ['primary-record'] },
-    { txid: TXID, outputIndex: 1, address: 'bc1qchange', expectedRole: 'change', sourceIds: ['primary-record'] },
+    { txid: TXID, outputIndex: 0, address: 'bc1qpayment', expectedRole: 'payment', expectedNodeRole: 'payee', sourceIds: ['primary-record'] },
+    { txid: TXID, outputIndex: 1, address: 'bc1qchange', expectedRole: 'change', expectedNodeRole: 'change', sourceIds: ['primary-record'] },
   ],
 };
 
@@ -67,6 +67,14 @@ describe('ground-truth benchmark safeguards', () => {
   it('requires cited label sources, on-chain provenance, exact outputs, and recorded review', () => {
     expect(validateGroundTruthCase(verifiedFixture).valid).toBe(true);
     expect(validateGroundTruthCase(TRACE_VALIDATION_CANDIDATES[0]).valid).toBe(false);
+    expect(validateGroundTruthCase({
+      ...verifiedFixture,
+      expectedOutputs: verifiedFixture.expectedOutputs.map(output => {
+        const outputWithoutNodeRole = { ...output };
+        delete outputWithoutNodeRole.expectedNodeRole;
+        return outputWithoutNodeRole;
+      }),
+    }).valid).toBe(false);
     expect(validateGroundTruthCase({
       ...verifiedFixture,
       sources: [{
@@ -102,7 +110,65 @@ describe('ground-truth benchmark safeguards', () => {
       precision: 2 / 3,
       recall: 1,
       classificationAccuracy: 1,
+      nodeRoleAccuracy: 1,
+      nodeRoleCoverage: 1,
     });
+    expect(result.nodeRoles.map(row => row.predictedNodeRoles)).toEqual([
+      ['payee_candidate'],
+      ['change'],
+    ]);
+  });
+
+  it('distinguishes followed intermediate nodes from unspent end receivers', () => {
+    const pathFixture = {
+      ...verifiedFixture,
+      id: 'reviewed-path-fixture',
+      expectedOutputs: [
+        { ...verifiedFixture.expectedOutputs[0], expectedNodeRole: 'intermediate' },
+        { ...verifiedFixture.expectedOutputs[1], expectedNodeRole: 'end_receiver' },
+      ],
+    };
+    const trace = {
+      nodes: [
+        { id: 'middle', type: 'hop', details: { address: 'bc1qpayment', outspendSpent: true } },
+        { id: 'receiver', type: 'receiver', details: { address: 'bc1qchange', outspendSpent: false } },
+        { id: 'tx_spend', type: 'hop', details: {} },
+      ],
+      links: [
+        { source: `tx_${TXID}`, target: 'middle', txid: TXID, outputIndex: 0, value: '1 BTC' },
+        {
+          source: 'middle',
+          target: 'tx_spend',
+          value: '1 BTC',
+          previousTxid: TXID,
+          outputIndex: 0,
+          inputOutpoint: `${TXID}:0`,
+        },
+        { source: `tx_${TXID}`, target: 'receiver', txid: TXID, outputIndex: 1, value: '2 BTC' },
+      ],
+    };
+    const result = evaluateTraceAgainstGroundTruth(trace, pathFixture);
+    expect(result.nodeRoleAccuracy).toBe(1);
+    expect(result.nodeRoleCoverage).toBe(1);
+    expect(result.nodeRoles.map(row => row.predictedNodeRoles)).toEqual([
+      ['intermediate'],
+      ['payee_candidate', 'end_receiver'],
+    ]);
+
+    const brokenSpendLinkTrace = {
+      ...trace,
+      links: trace.links.map(link => link.source === 'middle'
+        ? { ...link, inputOutpoint: `${TXID}:1` }
+        : link),
+    };
+    const brokenResult = evaluateTraceAgainstGroundTruth(brokenSpendLinkTrace, pathFixture);
+    expect(brokenResult.nodeRoles[0]).toMatchObject({
+      pathRole: 'trace_boundary',
+      matched: false,
+      predictionAvailable: false,
+    });
+    expect(brokenResult.nodeRoleAccuracy).toBe(0.5);
+    expect(brokenResult.nodeRoleCoverage).toBe(0.5);
   });
 
   it('reports no verified benchmark cases instead of a misleading perfect score', () => {
@@ -197,7 +263,13 @@ describe('ground-truth benchmark safeguards', () => {
         precision: 1,
         recall: 1,
         classificationAccuracy: 1,
+        nodeRoleAccuracy: 1,
+        nodeRoleCoverage: 1,
       });
+      expect(result.nodeRoles.map(row => row.predictedNodeRoles)).toEqual([
+        ['payee_candidate', 'intermediate'],
+        ['change', 'intermediate'],
+      ]);
       expect(trace.meta.collection.sourceManifest[0].transactionResponse.canonicalResponseSha256).toMatch(/^SHA256:/);
       const aggregate = evaluateGroundTruthBenchmark([benchmarkCase], {
         [benchmarkCase.id]: trace,
@@ -205,7 +277,7 @@ describe('ground-truth benchmark safeguards', () => {
       expect(aggregate).toMatchObject({
         status: 'SOURCE_CORROBORATED',
         caseCount: 1,
-        aggregate: { precision: 1, recall: 1, classificationAccuracy: 1 },
+        aggregate: { precision: 1, recall: 1, classificationAccuracy: 1, nodeRoleAccuracy: 1, nodeRoleCoverage: 1 },
       });
     } finally {
       vi.unstubAllGlobals();

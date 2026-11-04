@@ -70,16 +70,36 @@ describe('Gateway Circuit Breaker & LRU Cache Telemetry', () => {
     unsubscribe();
   });
 
+  it('fails over when a gateway returns a malformed transaction payload', async () => {
+    const txid = 'f'.repeat(64);
+    const calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      calls.push(String(url));
+      if (String(url).includes('blockstream.info')) {
+        return { ok: true, status: 200, json: async () => ({ txid }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ txid, vin: [], vout: [], fee: 0 }),
+      };
+    }));
+
+    await expect(fetchTx(txid)).resolves.toMatchObject({ txid, vin: [], vout: [] });
+    expect(calls.some(url => url.includes('blockstream.info'))).toBe(true);
+    expect(calls.some(url => url.includes('mempool.space'))).toBe(true);
+  });
+
   it('immediately routes to fallback gateway when primary is on cooldown', async () => {
     const mockTxId1 = 'b'.repeat(64);
     const mockTxId2 = 'c'.repeat(64);
-    const mockData = { fee: 1000, vin: [], vout: [] };
 
     const fetchMock = vi.fn(async (url) => {
       if (url.includes('blockstream.info')) {
         return { ok: false, status: 429, json: async () => ({}) };
       }
-      return { ok: true, status: 200, json: async () => mockData };
+      const txid = String(url).match(/\/tx\/([0-9a-f]{64})/i)?.[1];
+      return { ok: true, status: 200, json: async () => ({ txid, fee: 1000, vin: [], vout: [] }) };
     });
     vi.stubGlobal('fetch', fetchMock);
 

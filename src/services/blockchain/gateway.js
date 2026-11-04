@@ -82,6 +82,82 @@ export class GatewayError extends Error {
   }
 }
 
+function isNonNegativeInteger(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function isValidSatoshiAmount(value) {
+  return isNonNegativeInteger(value) && value <= 2_100_000_000_000_000;
+}
+
+function isTransactionResponse(data, expectedTxid = null) {
+  return Boolean(
+    data &&
+    typeof data === 'object' &&
+    !Array.isArray(data) &&
+    typeof data.txid === 'string' &&
+    /^[0-9a-f]{64}$/i.test(data.txid) &&
+    (!expectedTxid || data.txid.toLowerCase() === expectedTxid.toLowerCase()) &&
+    Array.isArray(data.vin) &&
+    data.vin.every(input =>
+      input &&
+      typeof input === 'object' &&
+      !Array.isArray(input) &&
+      (!input.prevout || isValidSatoshiAmount(input.prevout.value))
+    ) &&
+    Array.isArray(data.vout) &&
+    data.vout.every(output =>
+      output &&
+      typeof output === 'object' &&
+      !Array.isArray(output) &&
+      isValidSatoshiAmount(output.value)
+    ) &&
+    (data.fee == null || isValidSatoshiAmount(data.fee))
+  );
+}
+
+function validateGatewayResponse(endpoint, data) {
+  const outspendsMatch = endpoint.match(/^\/tx\/([0-9a-f]{64})\/outspends$/i);
+  if (outspendsMatch) {
+    const valid = Array.isArray(data) && data.every(outspend =>
+      outspend &&
+      typeof outspend === 'object' &&
+      typeof outspend.spent === 'boolean' &&
+      (!outspend.spent || /^[0-9a-f]{64}$/i.test(outspend.txid || '')) &&
+      (outspend.vin == null || isNonNegativeInteger(outspend.vin))
+    );
+    if (!valid) throw new Error(`Invalid outspends response for ${endpoint}`);
+    return;
+  }
+
+  const txMatch = endpoint.match(/^\/tx\/([0-9a-f]{64})$/i);
+  if (txMatch) {
+    if (!isTransactionResponse(data, txMatch[1])) {
+      throw new Error(`Invalid transaction response for ${endpoint}`);
+    }
+    return;
+  }
+
+  if (/^\/address\/[^/]+\/txs(?:\/chain\/[0-9a-f]{64})?$/.test(endpoint)) {
+    if (!Array.isArray(data) || !data.every(tx => isTransactionResponse(tx))) {
+      throw new Error(`Invalid address history response for ${endpoint}`);
+    }
+    return;
+  }
+
+  if (/^\/address\/[^/]+$/.test(endpoint)) {
+    const validStats = stats =>
+      stats &&
+      typeof stats === 'object' &&
+      ['tx_count', 'funded_txo_count', 'funded_txo_sum', 'spent_txo_count', 'spent_txo_sum']
+        .every(key => stats[key] == null || isNonNegativeInteger(stats[key]));
+    if (!data || typeof data !== 'object' || Array.isArray(data) ||
+        !validStats(data.chain_stats) || !validStats(data.mempool_stats)) {
+      throw new Error(`Invalid address summary response for ${endpoint}`);
+    }
+  }
+}
+
 const gatewayListeners = new Set();
 
 export function onGatewayEvent(listener) {
@@ -180,6 +256,7 @@ async function fetchWithFallbackAndCache(endpoint) {
       const response = await fetchWithTimeout(url);
       if (response.ok) {
         const data = await response.json();
+        validateGatewayResponse(endpoint, data);
         const provenance = {
           provider: gw.name,
           fetchedAt: new Date().toISOString(),
@@ -231,10 +308,11 @@ async function fetchWithFallbackAndCache(endpoint) {
         gw.status = 'DEGRADED';
         gw.cooldownUntil = now + 30000;
       }
-      lastError = err.name === 'AbortError' ? new Error(`Request timeout for ${endpoint}`) : err;
+      const timedOut = err.name === 'AbortError';
+      lastError = timedOut ? new Error(`Request timeout for ${endpoint}`) : err;
       providerErrors.push(`${gw.name}: ${lastError.message}`);
       emitGatewayEvent({
-        type: 'GATEWAY_TIMEOUT',
+        type: timedOut ? 'GATEWAY_TIMEOUT' : 'GATEWAY_ERROR',
         gateway: gw.name,
         endpoint,
         error: lastError.message

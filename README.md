@@ -14,11 +14,18 @@ Bitcoin tracing and forensic investigation.
 npm install
 npm run dev      # local dev server
 npm test         # unit suite (vitest)
+npm run validate # lint, full suite (including app smoke), and production build
 npm run verify   # offline heuristic-fixture regression table
 npm run verify:ground-truth # source/provenance checks and reviewed-case evaluator tests
 npm run lint     # oxlint
 npm run build    # production bundle
 ```
+
+`npm run validate` is the offline release gate: it runs lint, the complete
+Vitest suite (including app startup/navigation, storage migration/fallback,
+trace regressions, and sourced benchmark checks), and the production build.
+It does not contact live gateways or establish real-world heuristic accuracy;
+those require independently reviewed, representative payment/change labels.
 
 Open the app and paste any mainnet transaction hash or address — every
 trace is computed live from gateway data.
@@ -27,7 +34,12 @@ trace is computed live from gateway data.
 
 - **Tracing** — forward outspend tracing with bounded parallelism, peel-chain
   priority (high-confidence change runs up to 2 levels past max depth),
-  branch pruning, and CoinJoin halt.
+  branch pruning, and CoinJoin halt. Distinct outputs remain distinct UTXOs
+  even when an address is reused, and all inputs spending the same transaction
+  are preserved in the graph.
+- **Gateway reliability** — validates transaction, outspend, address-history,
+  and address-summary response shapes before caching; malformed provider
+  responses trigger failover rather than entering a case as live evidence.
 - **Classification** — weighted change-vs-payment scoring (script match,
   address identity incl. bare public keys, roundness, dwell timing, fee
   context, plus live chain-reuse checks on ambiguous outputs) with per-hop
@@ -60,10 +72,13 @@ trace is computed live from gateway data.
 - `src/hooks/`, `src/context/`, `src/constants/` — shared state and config.
 
 Live network calls happen only on explicit user actions (trace, expand,
-fee compare, mempool scan, endpoint profiles). Case data is stored in browser
-`localStorage` without at-rest encryption. Live lookups send the requested
-transaction IDs or addresses to Blockstream or Mempool.space, so this is not
-an air-gapped or query-private deployment.
+fee compare, mempool scan, endpoint profiles). Case portfolios and graphs are
+stored in IndexedDB, with legacy `localStorage` migration and a recovery-copy
+fallback when IndexedDB writes fail. This is browser-managed storage, not
+encryption: case data is not protected at rest. Watchlists and alert settings
+remain in `localStorage`. Live lookups send the requested transaction IDs or
+addresses to Blockstream or Mempool.space, so this is not an air-gapped or
+query-private deployment.
 
 ## Measuring accuracy & test suite
 
@@ -85,9 +100,13 @@ Be precise about what the numbers mean:
   recorded review method. Source tier is explicit: the current first
   person-to-person transaction case is source-corroborated by Bitcoin.com and
   its transaction outputs are independently checked against Blockstream.
-  It reports exact-output and payment/change agreement, not independently
-  established legal identity. `JUDICIAL_GROUND_TRUTH` remains empty until
-  court-backed labels meet a separate evidence standard.
+  It reports exact-output, payment/change, and reviewed node-role agreement.
+  Payee agreement is only payment-candidate classification, not identity;
+  intermediate roles require a followed spend edge with matching outpoint
+  provenance, while end receivers require an observed unspent output. These
+  checks do not establish legal identity or beneficial ownership.
+  `JUDICIAL_GROUND_TRUTH` remains empty until court-backed labels meet a
+  separate evidence standard.
 - `npm run verify:ground-truth` tests the evaluator and a regression fixture
   based on that one historical transaction; this small, curated case does not
   estimate accuracy on new transactions or establish generalization.
@@ -112,7 +131,7 @@ source or prove legal admissibility.
 A technical evaluation identified key strategic vectors for the project's evolution:
 
 1. **Storage & Local Security (Priority 1)**:
-   - Migrate persistence from browser-managed `localStorage` to **IndexedDB** for larger case graphs, and handle storage failures explicitly.
+   - **Completed**: Migrate case portfolios and graphs to **IndexedDB**, migrate existing `localStorage` cases without deleting the legacy copy, and surface storage failures with a recovery-copy fallback.
    - Implement **AES-GCM-256** local at-rest vault encryption using PBKDF2 WebCrypto keys for sensitive case notes and suspect PII.
    - Add custom private node RPC endpoint configuration in `config.js` for air-gapped forensic laboratories.
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { SCENARIOS } from '../data/scenarios';
 import { traceEndReceiver } from '../services/blockchain/tracing';
@@ -21,7 +21,7 @@ import {
 } from '../utils/caseHelpers';
 import { useToast } from '../hooks/useToast';
 import { CaseContext } from './CaseContextObject';
-import { safeGetItem, safeSetItem, safeRemoveItem } from '../utils/storage';
+import { loadCaseState, saveCaseState } from '../utils/caseStorage';
 import { downloadJson } from '../utils/download';
 import { satsToBtc } from '../utils/forensicUtils';
 import { transitionRecoveryAction } from '../features/recovery/recoveryLeads';
@@ -42,33 +42,65 @@ export function CaseProvider({ children }) {
     }
   }, [location.pathname, navigate]);
 
-  const [scenarios, setScenarios] = useState(() => {
-    const saved = safeGetItem('aegistrace_scenarios', null);
-    if (Array.isArray(saved) && saved.length > 0 && saved.every(isValidCaseShape)) return saved.slice(0, MAX_SCENARIOS);
-    return SCENARIOS;
-  });
-
-  const [activeCaseId, setActiveCaseId] = useState(() => {
-    const saved = safeGetItem('aegistrace_activeCaseId', null);
-    if (typeof saved === 'string' && saved) return saved;
-    return SCENARIOS[0].id;
-  });
+  const [scenarios, setScenarios] = useState(SCENARIOS);
+  const [activeCaseId, setActiveCaseId] = useState(SCENARIOS[0].id);
+  const [caseStorageReady, setCaseStorageReady] = useState(false);
+  const storageWarningShown = useRef(false);
 
   const [liveMode, setLiveMode] = useState(true);
   const [isLoadingLive, setIsLoadingLive] = useState(false);
   const [traceDepth, setTraceDepth] = useState(2);
 
   useEffect(() => {
-    if (!safeSetItem('aegistrace_scenarios', scenarios.slice(0, MAX_SCENARIOS))) {
-      showToast("Cases are in memory only; browser storage could not save the latest changes.", "error", 6000);
-    }
-  }, [scenarios, showToast]);
+    let cancelled = false;
+    loadCaseState().then(({ state, warning, migrated }) => {
+      if (cancelled) return;
+      const savedScenarios = Array.isArray(state?.scenarios) &&
+        state.scenarios.length > 0 &&
+        state.scenarios.every(isValidCaseShape)
+        ? state.scenarios.slice(0, MAX_SCENARIOS)
+        : SCENARIOS;
+      const savedActiveCaseId = typeof state?.activeCaseId === 'string' &&
+        savedScenarios.some(scenario => scenario.id === state.activeCaseId)
+        ? state.activeCaseId
+        : savedScenarios[0].id;
+      setScenarios(savedScenarios);
+      setActiveCaseId(savedActiveCaseId);
+      setCaseStorageReady(true);
+      if (warning) {
+        storageWarningShown.current = true;
+        showToast(`Case storage warning: ${warning}`, 'warning', 8000);
+      } else if (migrated) {
+        showToast('Saved cases were migrated to IndexedDB.', 'info', 4000);
+      }
+    }).catch(error => {
+      if (cancelled) return;
+      setCaseStorageReady(true);
+      storageWarningShown.current = true;
+      showToast(`Could not load saved cases: ${error.message}. Current cases are in memory only.`, 'error', 8000);
+    });
+    return () => { cancelled = true; };
+  }, [showToast]);
 
   useEffect(() => {
-    if (!safeSetItem('aegistrace_activeCaseId', activeCaseId)) {
-      showToast("The selected case may not remain selected after reload; browser storage is unavailable.", "error", 6000);
-    }
-  }, [activeCaseId, showToast]);
+    if (!caseStorageReady) return;
+    saveCaseState({
+      scenarios: scenarios.slice(0, MAX_SCENARIOS),
+      activeCaseId,
+    }).then(({ backend, warning }) => {
+      if (backend === 'indexedDB') {
+        if (storageWarningShown.current) {
+          storageWarningShown.current = false;
+          showToast('Case storage is working normally again.', 'success', 3500);
+        }
+        return;
+      }
+      if (!storageWarningShown.current) {
+        storageWarningShown.current = true;
+        showToast(warning, 'warning', 8000);
+      }
+    });
+  }, [activeCaseId, caseStorageReady, scenarios, showToast]);
 
   // Subscribe to gateway events to notify user of circuit-breaker failovers
   useEffect(() => {
@@ -161,8 +193,6 @@ export function CaseProvider({ children }) {
     if (window.confirm("Reset all cases?")) {
       setScenarios(SCENARIOS);
       setActiveCaseId(SCENARIOS[0].id);
-      safeRemoveItem('aegistrace_scenarios');
-      safeRemoveItem('aegistrace_activeCaseId');
       showToast("Cases reset.", "info");
     }
   }, [showToast]);
@@ -455,7 +485,11 @@ export function CaseProvider({ children }) {
 
   return (
     <CaseContext.Provider value={value}>
-      {children}
+      {caseStorageReady ? children : (
+        <div className="glass-panel" role="status" aria-live="polite" style={{ margin: '2rem', padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+          Loading saved cases…
+        </div>
+      )}
     </CaseContext.Provider>
   );
 }

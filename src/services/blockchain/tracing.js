@@ -165,7 +165,22 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
     const nextFrontier = [];
 
     for (const item of frontier) {
-      if (processedTxs.has(item.txId)) continue;
+      if (processedTxs.has(item.txId)) {
+        if (item.parentOutNodeId) {
+          const repeatedTx = txMap.get(item.txId)?.tx || null;
+          addLink(item.parentOutNodeId, `tx_${item.txId}`, item.parentValue || '0 BTC', 'Forwarded', repeatedTx, {
+            txid: item.txId,
+            previousTxid: item.parentTxId || null,
+            outputIndex: item.parentOutputIndex ?? null,
+            inputIndex: item.spendingInputIndex ?? null,
+            inputOutpoint: item.inputOutpoint || null,
+            spendingTxid: item.txId,
+            blockTime: repeatedTx?.status?.block_time || null,
+            blockHeight: repeatedTx?.status?.block_height || null,
+          });
+        }
+        continue;
+      }
       processedTxs.add(item.txId);
 
       const res = txMap.get(item.txId);
@@ -209,6 +224,8 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
         addLink(item.parentOutNodeId, txNodeId, item.parentValue || '0 BTC', 'Forwarded', tx, {
           previousTxid: item.parentTxId || null,
           outputIndex: item.parentOutputIndex ?? null,
+          inputIndex: item.spendingInputIndex ?? null,
+          inputOutpoint: item.inputOutpoint || null,
           spendingTxid: item.txId,
         });
       }
@@ -268,6 +285,7 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
 
       // Pass 1: classify everything without chain data.
       const pending = [];
+      const pendingOutputIds = new Set();
       for (let i = 0; i < (tx.vout || []).length; i++) {
         if (nodeLimitReached) break;
         const output = tx.vout[i];
@@ -277,7 +295,11 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
           addLink(txNodeId, `op_${item.txId}_${i}`, '0 BTC Data', 'Embedded', tx, { txid: item.txId, outputIndex: i });
           continue;
         }
-        pending.push({ output, index: i, ...prep });
+        const outNodeId = nodeIds.has(prep.outNodeId) || pendingOutputIds.has(prep.outNodeId)
+          ? `out_utxo_${item.txId}_${i}`
+          : prep.outNodeId;
+        pendingOutputIds.add(outNodeId);
+        pending.push({ output, index: i, ...prep, outNodeId });
       }
 
       // Pass 2: chain-reuse check (H9), gated on ambiguity so decisive calls
@@ -342,6 +364,8 @@ export async function traceEndReceiver(startTxId, maxDepth = 2) {
             parentOutNodeId: outNodeId,
             parentTxId: item.txId,
             parentOutputIndex: i,
+            spendingInputIndex: Number.isInteger(outspend.vin) ? outspend.vin : null,
+            inputOutpoint: `${item.txId}:${i}`,
             parentValue: `${valBtc} BTC`,
             branchValueSats: output.value || 0,
             _isChange: isHighConfChange,

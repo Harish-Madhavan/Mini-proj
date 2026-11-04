@@ -25,7 +25,13 @@ describe('bitcoinApi LRU Cache & Formatting', () => {
     vi.stubGlobal('fetch', async () => ({
       ok: true,
       status: 200,
-      json: async () => ({ txid, status: { confirmed: true, block_height: 800000 } }),
+      json: async () => ({
+        txid,
+        vin: [],
+        vout: [],
+        fee: 0,
+        status: { confirmed: true, block_height: 800000 },
+      }),
     }));
     try {
       await fetchTx(txid);
@@ -89,6 +95,27 @@ describe('bitcoinApi LRU Cache & Formatting', () => {
     expect(txNode).toBeDefined();
     expect(txNode.details.feeRateSatVb).toContain('satoshis per byte');
     expect(txNode.details.rbfStatus).toBe('Replaceable fee');
+  });
+
+  it('keeps duplicate-address outputs distinct in a formatted transaction graph', () => {
+    const address = 'bc1qreused111111111111111111111111';
+    const formatted = formatBlockstreamTx({
+      txid: 'd'.repeat(64),
+      fee: 1000,
+      size: 200,
+      weight: 800,
+      vin: [{ prevout: { scriptpubkey_address: 'bc1qsource', value: 3000000 } }],
+      vout: [
+        { scriptpubkey_address: address, value: 1000000 },
+        { scriptpubkey_address: address, value: 1999000 },
+      ],
+      status: { confirmed: true, block_height: 800000, block_time: 1700000000 },
+    });
+
+    const outputNodes = formatted.nodes.filter(node => node.details?.address === address);
+    expect(outputNodes).toHaveLength(2);
+    expect(new Set(outputNodes.map(node => node.id)).size).toBe(2);
+    expect(formatted.links.filter(link => outputNodes.some(node => node.id === link.target))).toHaveLength(2);
   });
 
   it('should label dust outputs as uneconomic and skip payment logic', () => {

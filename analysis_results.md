@@ -4,7 +4,7 @@
 
 **AegisTrace** is a software solution developed in response to the SIH-1675 problem statement for Bitcoin tracing and forensic investigation. It reconstructs and analyzes fund-flow graphs from live public blockchain data and supports case management, review, and report preparation. It is an investigative aid: its heuristics do not establish identity or prove attribution, and its reports are not automatically certified as court-admissible evidence.
 
-Most analysis executes in the browser, but case data is stored in unencrypted browser `localStorage`, and live lookups send queried transaction IDs or addresses to Blockstream or Mempool.space. The current build is neither air-gapped nor query-private and should not be used for sensitive investigations without an approved deployment and privacy controls.
+Most analysis executes in the browser. Case portfolios and graphs use browser-managed IndexedDB with localStorage migration and a recovery-copy fallback; this does not encrypt data at rest. Watchlists remain in localStorage. Live lookups send queried transaction IDs or addresses to Blockstream or Mempool.space. The current build is neither air-gapped nor query-private and should not be used for sensitive investigations without an approved deployment and privacy controls.
 
 ---
 
@@ -17,7 +17,7 @@ Most analysis executes in the browser, but case data is stored in unencrypted br
 | **Build & Tooling** | **Vite 8** + `@vitejs/plugin-react` | Ultra-fast HMR, ES module chunking, and strict tree-shaking. |
 | **Iconography & Styling** | **Lucide React** + Glassmorphic CSS | High-contrast law enforcement dark-mode UI; Outfit (UI) + JetBrains Mono (hashes/scripts). |
 | **Linter** | **OxLint** | Rust-based high-speed static analyzer (91 rules, zero errors/warnings across 87 files). |
-| **Test Runner** | **Vitest 3.2** | Latest full-suite run passed **41 test files and 271 tests**; run `npm test` for current results. |
+| **Test Runner** | **Vitest 3.2** | Latest full-suite run passed **44 test files and 283 tests**; run `npm run validate` for lint, tests, and production build. |
 | **Blockchain Gateways** | **Blockstream.info + Mempool.space** | RESTful Esplora API layer with LRU caching, timeout handling, and automatic circuit-breaking failover. |
 
 ```mermaid
@@ -95,11 +95,12 @@ flowchart TD
 
 ## 4. Verification & Test Suite Status
 
-The latest full-suite run passed **41 test files and 271 tests**.
-Run `npm test` for a fresh result; a passing unit suite does not establish
-real-world forensic accuracy or legal admissibility.
+The latest full-suite run passed **44 test files and 283 tests**.
+Run `npm run validate` for a fresh lint, test, and production build result; a
+passing suite does not establish real-world forensic accuracy or legal
+admissibility and does not query live gateways.
 
-The offline heuristic fixtures (`npm run verify`) are regression examples, not held-out ground truth or empirical accuracy estimates. The source-corroborated first person-to-person transaction case is exercised by `npm run verify:ground-truth`: its output scripts and values were checked against Blockstream, while Bitcoin.com's published address/role labels are secondary-source claims. The single historical case is a regression check, not an accuracy estimate or proof of generalization; the judicial ground-truth set remains empty.
+The offline heuristic fixtures (`npm run verify`) are regression examples, not held-out ground truth or empirical accuracy estimates. The source-corroborated first person-to-person transaction case is exercised by `npm run verify:ground-truth`: its output scripts and values were checked against Blockstream, while Bitcoin.com's published address/role labels are secondary-source claims. The evaluator reports output and payment/change agreement, a payee-candidate check, and observed intermediate/end-receiver path roles (using spend-edge outpoint provenance and UTXO status). These do not identify a person or establish ownership. The single historical case is a regression check, not an accuracy estimate or proof of generalization; the judicial ground-truth set remains empty.
 
 ---
 
@@ -108,10 +109,9 @@ The offline heuristic fixtures (`npm run verify`) are regression examples, not h
 A forensic and software engineering audit of the codebase yielded the following concrete enhancement opportunities:
 
 ### 1. Storage & Persistence Architecture (High Impact)
-* **Finding**: In `src/utils/storage.js`, case data is persisted in browser `localStorage` without at-rest encryption. Writes that exceed browser quota are logged and return failure; the provider does not currently surface that persistence failure to the user. Public gateway lookups also disclose the requested transaction IDs or addresses to those providers.
+* **Finding**: Case data is stored in browser-managed IndexedDB without at-rest encryption. On IndexedDB failure, the app attempts a localStorage recovery copy and reports storage degradation; recovery remains subject to browser storage limits. Public gateway lookups also disclose the requested transaction IDs or addresses to those providers.
 * **Recommendation**: 
-  - Migrate case portfolios and node graphs to **IndexedDB** (using native IDB or Dexie.js).
-  - IndexedDB supports hundreds of megabytes of structured data, eliminating quota failures for deep, complex cases.
+  - **Completed**: Migrate case portfolios and node graphs to native **IndexedDB**, preserving legacy localStorage data and reporting storage failures.
   - Implement client-side **AES-GCM-256** at-rest encryption for stored dossiers using an investigator master PIN/passphrase derived with `PBKDF2`.
 
 ### 2. Forensic De-anonymization Depth

@@ -2,6 +2,7 @@ import { TRACE_BENCHMARK_CASES } from '../data/judicialCorpus';
 import { parseSats } from './taintAnalysis';
 
 const VALID_ROLES = new Set(['payment', 'change']);
+const VALID_NODE_ROLES = new Set(['payee', 'change', 'intermediate', 'end_receiver']);
 const ALLOWED_SOURCE_TYPES = new Set([
   'primary_record',
   'primary_chain_data',
@@ -59,6 +60,9 @@ export function validateGroundTruthCase(caseEntry) {
       if (!VALID_ROLES.has(output.expectedRole)) {
         errors.push(`Expected output ${index} must have a payment or change role.`);
       }
+      if (!VALID_NODE_ROLES.has(output.expectedNodeRole)) {
+        errors.push(`Expected output ${index} must have a reviewed payee, change, intermediate, or end_receiver node role.`);
+      }
       if (!Array.isArray(output.sourceIds) || output.sourceIds.length === 0 ||
           output.sourceIds.some(sourceId => !sourceIds.has(sourceId))) {
         errors.push(`Expected output ${index} must cite the source(s) supporting its label.`);
@@ -81,9 +85,42 @@ function traceRole(node) {
   return null;
 }
 
+function tracePathRole(node, nodeId, links) {
+  if (node?.details?.outspendSpent === false) return 'end_receiver';
+  const isFollowed = links.some(link => {
+    const source = typeof link.source === 'object' ? link.source.id : link.source;
+    const target = typeof link.target === 'object' ? link.target.id : link.target;
+    return source === nodeId &&
+      typeof target === 'string' &&
+      target.startsWith('tx_') &&
+      typeof link.previousTxid === 'string' &&
+      Number.isInteger(link.outputIndex) &&
+      link.inputOutpoint === `${link.previousTxid}:${link.outputIndex}`;
+  });
+  if (isFollowed) return 'intermediate';
+  if (node?.details?.outspendSpent === true) return 'trace_boundary';
+  return 'unknown';
+}
+
+function nodeRoleMatches(expectedNodeRole, classificationRole, pathRole) {
+  if (expectedNodeRole === 'payee') return classificationRole === 'payment';
+  if (expectedNodeRole === 'change') return classificationRole === 'change';
+  return pathRole === expectedNodeRole;
+}
+
+function predictedNodeRoles(classificationRole, pathRole) {
+  const roles = [];
+  if (classificationRole === 'payment') roles.push('payee_candidate');
+  if (classificationRole === 'change') roles.push('change');
+  if (pathRole === 'intermediate') roles.push('intermediate');
+  if (pathRole === 'end_receiver') roles.push('end_receiver');
+  if (pathRole === 'trace_boundary') roles.push('trace_boundary');
+  return roles.length > 0 ? roles : ['unknown'];
+}
+
 /**
- * Compare traced output links to a reviewed case. Metrics cover only the
- * transaction IDs included in that case and do not establish attribution.
+ * Compare traced outputs and node roles to a reviewed case. Payee agreement
+ * means the output was classified as payment; it does not identify a person.
  */
 export function evaluateTraceAgainstGroundTruth(trace, caseEntry) {
   const validation = validateGroundTruthCase(caseEntry);
@@ -106,24 +143,65 @@ export function evaluateTraceAgainstGroundTruth(trace, caseEntry) {
     const valueSats = parseSats(link.value);
     if (!txids.has(txid) || sourceId !== `tx_${link.txid}` ||
         !Number.isInteger(link.outputIndex) || valueSats <= 0 || !node?.details?.address) continue;
-    predictions.set(`${txid}:${link.outputIndex}`, { node, valueSats });
+    predictions.set(`${txid}:${link.outputIndex}`, { node, nodeId: targetId, valueSats });
   }
 
   const matched = [];
+  const roleResults = [];
   for (const [key, output] of expected) {
     const prediction = predictions.get(key);
-    if (!prediction) continue;
-    const node = prediction.node;
+    if (!prediction) {
+      roleResults.push({
+        key,
+        expectedNodeRole: output.expectedNodeRole,
+        predictedNodeRoles: ['unknown'],
+        classificationRole: null,
+        pathRole: 'unknown',
+        matched: false,
+        predictionAvailable: false,
+      });
+      continue;
+    }
+    const { node, nodeId } = prediction;
     const addressMatches = output.address &&
       node?.details?.address?.toLowerCase() === output.address.toLowerCase();
     const traceIdentifierMatches = output.traceIdentifier &&
       node?.details?.address === output.traceIdentifier;
     const valueMatches = output.valueSats == null || prediction.valueSats === output.valueSats;
-    if (!node || (!addressMatches && !traceIdentifierMatches) || !valueMatches) continue;
+    if (!node || (!addressMatches && !traceIdentifierMatches) || !valueMatches) {
+      roleResults.push({
+        key,
+        expectedNodeRole: output.expectedNodeRole,
+        predictedNodeRoles: ['unknown'],
+        classificationRole: null,
+        pathRole: 'unknown',
+        matched: false,
+        predictionAvailable: false,
+      });
+      continue;
+    }
+    const classificationRole = traceRole(node);
+    const pathRole = tracePathRole(node, nodeId, trace?.links || []);
+    const predictedRoles = predictedNodeRoles(classificationRole, pathRole);
+    const roleMatch = nodeRoleMatches(output.expectedNodeRole, classificationRole, pathRole);
     matched.push({
       key,
       expectedRole: output.expectedRole,
-      actualRole: traceRole(node),
+      actualRole: classificationRole,
+      expectedNodeRole: output.expectedNodeRole,
+      predictedNodeRoles: predictedRoles,
+      roleMatch,
+    });
+    roleResults.push({
+      key,
+      expectedNodeRole: output.expectedNodeRole,
+      predictedNodeRoles: predictedRoles,
+      classificationRole,
+      pathRole,
+      matched: roleMatch,
+      predictionAvailable: ['payee', 'change'].includes(output.expectedNodeRole)
+        ? classificationRole !== null
+        : !['unknown', 'trace_boundary'].includes(pathRole),
     });
   }
 
@@ -134,6 +212,12 @@ export function evaluateTraceAgainstGroundTruth(trace, caseEntry) {
   const classificationAccuracy = classified.length === 0
     ? null
     : classified.filter(row => row.actualRole === row.expectedRole).length / classified.length;
+  const nodeRoleAccuracy = roleResults.length === 0
+    ? null
+    : roleResults.filter(row => row.matched).length / roleResults.length;
+  const nodeRoleCoverage = roleResults.length === 0
+    ? 0
+    : roleResults.filter(row => row.predictionAvailable).length / roleResults.length;
 
   return {
     caseId: caseEntry.id,
@@ -147,7 +231,12 @@ export function evaluateTraceAgainstGroundTruth(trace, caseEntry) {
     classifiedOutputs: classified.length,
     correctlyClassifiedOutputs: classified.filter(row => row.actualRole === row.expectedRole).length,
     classificationAccuracy,
-    limitations: 'Measures exact transaction/output coverage and published payment/change label agreement only; source-corroborated labels are not independent legal findings and do not generalize to unseen cases.',
+    nodeRoleCount: roleResults.length,
+    matchedNodeRoleCount: roleResults.filter(row => row.matched).length,
+    nodeRoleAccuracy,
+    nodeRoleCoverage,
+    nodeRoles: roleResults,
+    limitations: 'Payee agreement measures payment-candidate classification, not identity or beneficial ownership. Intermediate/end-receiver agreement measures only observed spend links and UTXO status; a depth or fetch boundary is not an end receiver. Results cover cited labels only and do not generalize to unseen cases.',
   };
 }
 
@@ -173,12 +262,19 @@ export function evaluateGroundTruthBenchmark(
     predictedOutputs: sum.predictedOutputs + result.predictedOutputs,
     classifiedOutputs: sum.classifiedOutputs + result.classifiedOutputs,
     correctlyClassifiedOutputs: sum.correctlyClassifiedOutputs + result.correctlyClassifiedOutputs,
+    nodeRoleCount: sum.nodeRoleCount + result.nodeRoleCount,
+    matchedNodeRoleCount: sum.matchedNodeRoleCount + result.matchedNodeRoleCount,
+    availableNodeRolePredictions: sum.availableNodeRolePredictions +
+      result.nodeRoles.filter(row => row.predictionAvailable).length,
   }), {
     matchedOutputs: 0,
     expectedOutputs: 0,
     predictedOutputs: 0,
     classifiedOutputs: 0,
     correctlyClassifiedOutputs: 0,
+    nodeRoleCount: 0,
+    matchedNodeRoleCount: 0,
+    availableNodeRolePredictions: 0,
   });
   const precision = totals.predictedOutputs === 0 ? 0 : totals.matchedOutputs / totals.predictedOutputs;
   const recall = totals.expectedOutputs === 0 ? 0 : totals.matchedOutputs / totals.expectedOutputs;
@@ -198,6 +294,12 @@ export function evaluateGroundTruthBenchmark(
       classificationAccuracy: totals.classifiedOutputs === 0
         ? null
         : totals.correctlyClassifiedOutputs / totals.classifiedOutputs,
+      nodeRoleAccuracy: totals.nodeRoleCount === 0
+        ? null
+        : totals.matchedNodeRoleCount / totals.nodeRoleCount,
+      nodeRoleCoverage: totals.nodeRoleCount === 0
+        ? 0
+        : totals.availableNodeRolePredictions / totals.nodeRoleCount,
     },
     limitations: 'Results measure only cited labels represented in this benchmark; secondary-source labels are not independent legal findings and do not prove legal admissibility or performance on unseen cases.',
   };

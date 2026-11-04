@@ -412,6 +412,7 @@ export function formatBlockstreamTx(tx, outspends = [], addressMeta = null) {
   }));
 
   const inputScriptTypes = [];
+  const outputNodeIds = new Set(nodes.map(node => node.id));
   (tx.vin || []).forEach(input => {
     const addr = input.prevout ? getAddressOrIdentifier(input.prevout) : (input.is_coinbase ? 'Coinbase (Mining Reward)' : null);
     const scriptStd = input.prevout ? getScriptTypeFromAddress(addr, input.prevout?.scriptpubkey_type) : 'Coinbase';
@@ -437,15 +438,17 @@ export function formatBlockstreamTx(tx, outspends = [], addressMeta = null) {
       links.push({ source: txNodeId, target: `op_${tx.txid}_${i}`, value: '0 BTC Data', timestamp: 'Embedded', txid: tx.txid, outputIndex: i, blockTime: tx.status?.block_time || null });
       return;
     }
-    const { addr, valBtc, outNodeId, scriptStd, cls } = prep;
+    const { addr, valBtc, scriptStd, cls } = prep;
+    const outNodeId = outputNodeIds.has(prep.outNodeId)
+      ? `out_utxo_${tx.txid}_${i}`
+      : prep.outNodeId;
 
-    if (!nodes.some(n => n.id === outNodeId)) {
-      const lastActive = cls.kycStatus?.includes('UNSPENT')
-        ? (tx.status?.block_time ? new Date(tx.status.block_time * 1000).toLocaleDateString() : 'Active unspent funds')
-        : cls.kycStatus?.includes('HISTORICAL') ? 'Historical Transfer'
-        : cls.kycStatus?.includes('MIXED') ? 'Mixed funds' : 'Transit';
-      nodes.push(buildOutputNode({ outNodeId, addr, valBtc, scriptStd, cls, tx, lastActive, outspendSpent: outspends[i]?.spent }));
-    }
+    const lastActive = cls.kycStatus?.includes('UNSPENT')
+      ? (tx.status?.block_time ? new Date(tx.status.block_time * 1000).toLocaleDateString() : 'Active unspent funds')
+      : cls.kycStatus?.includes('HISTORICAL') ? 'Historical Transfer'
+      : cls.kycStatus?.includes('MIXED') ? 'Mixed funds' : 'Transit';
+    nodes.push(buildOutputNode({ outNodeId, addr, valBtc, scriptStd, cls, tx, lastActive, outspendSpent: outspends[i]?.spent }));
+    outputNodeIds.add(outNodeId);
 
     links.push({ source: txNodeId, target: outNodeId, value: `${valBtc} BTC`, timestamp: tx.status?.block_time ? new Date(tx.status.block_time*1000).toLocaleDateString() : 'On-chain', txid: tx.txid, outputIndex: i, blockTime: tx.status?.block_time || null });
     seenAddresses.add(addr);
