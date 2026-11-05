@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AegisTrace — System Workflow Architecture</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: #f8fafc;
+      color: #1e293b;
+      width: 2040px;
+      height: 1180px;
+      overflow: hidden;
+      padding: 30px 40px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    /* HEADER */
+    .header {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .header h1 {
+      font-size: 34px;
+      font-weight: 800;
+      letter-spacing: 1.5px;
+      color: #0f2b48;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .header p {
+      font-size: 16px;
+      font-weight: 500;
+      color: #64748b;
+    }
+
+    /* MAIN WORKFLOW GRID */
+    .workflow-row {
+      display: flex;
+      align-items: stretch;
+      justify-content: space-between;
+      gap: 12px;
+      position: relative;
+    }
+
+    .step-arrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #94a3b8;
+      font-size: 28px;
+      font-weight: bold;
+      user-select: none;
+    }
+
+    .card {
+      background: #ffffff;
+      border-radius: 14px;
+      padding: 16px 14px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05);
+      position: relative;
+    }
+
+    .card-header {
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      text-align: center;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .card-icon {
+      width: 48px;
+      height: 48px;
+      margin: 4px auto 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card-icon svg {
+      width: 42px;
+      height: 42px;
+    }
+
+    .card-body {
+      flex: 1;
+      font-size: 12.5px;
+      line-height: 1.45;
+      color: #334155;
+    }
+
+    .card-body ul {
+      list-style-type: none;
+      padding: 0;
+    }
+    .card-body li {
+      position: relative;
+      padding-left: 14px;
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+    .card-body li::before {
+      content: "•";
+      position: absolute;
+      left: 0;
+      font-weight: bold;
+    }
+
+    .card-subtitle {
+      font-size: 12px;
+      font-weight: 600;
+      color: #475569;
+      margin-bottom: 8px;
+      padding-bottom: 6px;
+      border-bottom: 1px dashed #cbd5e1;
+      text-align: center;
+      font-style: italic;
+    }
+
+    /* STEP 1: USER INPUT */
+    .step-1 {
+      width: 250px;
+      border: 1.8px solid #3b82f6;
+    }
+    .step-1 .card-header {
+      background: #eff6ff;
+      color: #1d4ed8;
+      border: 1px solid #bfdbfe;
+    }
+    .step-1 .card-body li::before { color: #3b82f6; }
+
+    /* STEP 2: DATA ACQUISITION */
+    .step-2 {
+      width: 275px;
+      border: 1.8px solid #22c55e;
+    }
+    .step-2 .card-header {
+      background: #f0fdf4;
+      color: #15803d;
+      border: 1px solid #bbf7d0;
+    }
+    .step-2 .card-body li::before { color: #22c55e; }
+
+    /* STEP 3: DATA PREPROCESSING */
+    .step-3 {
+      width: 260px;
+      border: 1.8px solid #f97316;
+    }
+    .step-3 .card-header {
+      background: #fff7ed;
+      color: #c2410c;
+      border: 1px solid #fed7aa;
+    }
+    .step-3 .card-body li::before { color: #f97316; }
+
+    /* STEP 4: ANALYSIS ENGINE */
+    .step-4 {
+      width: 480px;
+      border: 2px solid #8b5cf6;
+      background: #faf5ff;
+    }
+    .step-4 .card-header {
+      background: #f3e8ff;
+      color: #6b21a8;
+      border: 1px solid #ddd6fe;
+    }
+    .engine-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      height: 100%;
+    }
+    .engine-subcard {
+      background: #ffffff;
+      border: 1px solid #e9d5ff;
+      border-radius: 8px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 1px 3px rgba(139, 92, 246, 0.05);
+    }
+    .engine-subcard-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11.5px;
+      font-weight: 700;
+      color: #581c87;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .engine-subcard-header svg {
+      width: 16px;
+      height: 16px;
+      color: #7c3aed;
+      flex-shrink: 0;
+    }
+    .engine-subcard p {
+      font-size: 10.8px;
+      color: #475569;
+      line-height: 1.35;
+    }
+
+    /* STEP 5: VISUALIZATION */
+    .step-5 {
+      width: 275px;
+      border: 1.8px solid #06b6d4;
+    }
+    .step-5 .card-header {
+      background: #ecfeff;
+      color: #0e7490;
+      border: 1px solid #a5f3fc;
+    }
+    .step-5 .card-body li::before { color: #06b6d4; }
+
+    /* STEP 6: REPORT & EVIDENCE */
+    .step-6 {
+      width: 275px;
+      border: 1.8px solid #eab308;
+    }
+    .step-6 .card-header {
+      background: #fefce8;
+      color: #a16207;
+      border: 1px solid #fef08a;
+    }
+    .step-6 .card-body li::before { color: #eab308; }
+
+    /* BOTTOM ROW: KNOWLEDGE BASE & RECOVERY */
+    .bottom-section {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      margin-top: 24px;
+      position: relative;
+    }
+
+    .legend-box {
+      width: 250px;
+      border: 1.5px dashed #94a3b8;
+      border-radius: 12px;
+      padding: 14px 18px;
+      background: #ffffff;
+    }
+    .legend-title {
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      color: #0f172a;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+    .legend-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #475569;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .legend-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+
+    .insights-container {
+      flex: 1;
+      border: 1.8px solid #6366f1;
+      border-radius: 14px;
+      background: #ffffff;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.08);
+      position: relative;
+    }
+
+    .insight-col {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      max-width: 380px;
+    }
+    .insight-icon {
+      width: 52px;
+      height: 52px;
+      border-radius: 12px;
+      background: #eef2ff;
+      border: 1.5px solid #c7d2fe;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .insight-icon svg {
+      width: 32px;
+      height: 32px;
+      color: #4338ca;
+    }
+    .insight-text h4 {
+      font-size: 13.5px;
+      font-weight: 800;
+      color: #312e81;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+    .insight-text p, .insight-text ul {
+      font-size: 11.2px;
+      color: #475569;
+      line-height: 1.4;
+    }
+    .insight-text ul {
+      list-style-type: none;
+    }
+    .insight-text li::before {
+      content: "• ";
+      color: #6366f1;
+      font-weight: bold;
+    }
+
+    .flow-arrow-down {
+      position: absolute;
+      top: -30px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #8b5cf6;
+      font-size: 26px;
+      font-weight: bold;
+    }
+
+    /* ELBOW CONNECTOR */
+    .elbow-up {
+      width: 140px;
+      height: 60px;
+      border-right: 2px solid #64748b;
+      border-top: 2px solid #64748b;
+      position: absolute;
+      right: 140px;
+      bottom: 120px;
+      pointer-events: none;
+    }
+
+    .badge-pill {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 9.5px;
+      font-weight: 700;
+      background: #e2e8f0;
+      color: #334155;
+      margin-top: 3px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <div class="header">
+    <h1>WORKFLOW ARCHITECTURE – AEGISTRACE</h1>
+    <p>Deterministic Client-Side Bitcoin Blockchain Forensics, Heuristic De-Anonymization & Asset Recovery Workstation</p>
+  </div>
+
+  <!-- TOP WORKFLOW STAGES (1 to 6) -->
+  <div class="workflow-row">
+
+    <!-- 1. USER INPUT -->
+    <div class="card step-1">
+      <div class="card-header">1. Target Ingestion</div>
+      <div class="card-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+          <line x1="8" y1="21" x2="16" y2="21"></line>
+          <line x1="12" y1="17" x2="12" y2="21"></line>
+        </svg>
+      </div>
+      <div class="card-subtitle">Seed Target & Config</div>
+      <div class="card-body">
+        <ul>
+          <li><strong>Target TxID / Address:</strong> Legacy (<code>1</code>), SegWit (<code>3</code>), Native (<code>bc1q</code>), Taproot (<code>bc1p</code>)</li>
+          <li><strong>Investigation Depth:</strong> 1–5 hops + adaptive peel chain extension</li>
+          <li><strong>Mode Selection:</strong> Live Mainnet vs. Offline Deterministic Replay</li>
+          <li><strong>Watchlist Importer:</strong> Bulk CSV / JSON monitored addresses</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="step-arrow">➔</div>
+
+    <!-- 2. DATA ACQUISITION -->
+    <div class="card step-2">
+      <div class="card-header">2. Resilient Ingestion</div>
+      <div class="card-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+        </svg>
+      </div>
+      <div class="card-subtitle">Dual-Gateway Live Mainnet</div>
+      <div class="card-body">
+        <ul>
+          <li><strong>Primary Gateway:</strong> Blockstream Esplora REST API</li>
+          <li><strong>Fallback Gateway:</strong> Mempool.space with automatic failover</li>
+          <li><strong>Circuit Breaker:</strong> Throttles on 429 rate limits & network timeouts</li>
+          <li><strong>In-Memory LRU Cache:</strong> 5-minute TTL reduces gateway round-trips</li>
+          <li><strong>Bounded Concurrency:</strong> Parallel outspend lookups</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="step-arrow">➔</div>
+
+    <!-- 3. DATA PREPROCESSING -->
+    <div class="card step-3">
+      <div class="card-header">3. Preprocessing & Script</div>
+      <div class="card-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#ea580c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </div>
+      <div class="card-subtitle">Normalization & Opcode Parsing</div>
+      <div class="card-body">
+        <ul>
+          <li><strong>Schema Validation:</strong> Discards corrupt or malformed gateway payloads</li>
+          <li><strong>Script Disassembler:</strong> Decodes opcodes & scriptPubKeys (P2PKH, P2SH, Taproot)</li>
+          <li><strong>OP_RETURN Parser:</strong> Extracts embedded protocol & bridge markers</li>
+          <li><strong>Distinct UTXO Graph:</strong> Preserves outputs even during address reuse</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="step-arrow">➔</div>
+
+    <!-- 4. ANALYSIS ENGINE -->
+    <div class="card step-4">
+      <div class="card-header">4. Forensic Analytics Core</div>
+      <div class="engine-grid">
+
+        <!-- 4A -->
+        <div class="engine-subcard">
+          <div class="engine-subcard-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
+            8-Factor Classifier
+          </div>
+          <p>Disambiguates change vs. payment using script matching, address reuse, roundness, dwell time, fee rates, and per-hop decaying confidence.</p>
+        </div>
+
+        <!-- 4B -->
+        <div class="engine-subcard">
+          <div class="engine-subcard-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path></svg>
+            Triple Taint Engine
+          </div>
+          <p>Computes <strong>Haircut, FIFO, & Poison</strong> taint propagation models with continuous mathematical value-conservation & anti-minting audits.</p>
+        </div>
+
+        <!-- 4C -->
+        <div class="engine-subcard">
+          <div class="engine-subcard-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+            DSU Clustering & Peels
+          </div>
+          <p>Disjoint-Set Union (DSU) Common-Input Ownership (CIOH), peel-chain trajectory detection, and Shannon Entropy CoinJoin mixing halts.</p>
+        </div>
+
+        <!-- 4D -->
+        <div class="engine-subcard">
+          <div class="engine-subcard-header">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+            Typology & 5D Risk Radar
+          </div>
+          <p>Detects smurfing/structuring sweeps, swap routers, bridge memos, and scores 5D risk (mixer proximity, velocity, hop distance, sanctions).</p>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="step-arrow">➔</div>
+
+    <!-- 5. RESULTS & VISUALIZATION -->
+    <div class="card step-5">
+      <div class="card-header">5. Visualization & UI</div>
+      <div class="card-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#0891b2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+          <line x1="8" y1="21" x2="16" y2="21"></line>
+          <line x1="12" y1="17" x2="12" y2="21"></line>
+          <circle cx="8" cy="9" r="1.5"></circle>
+          <circle cx="16" cy="7" r="1.5"></circle>
+          <circle cx="12" cy="12" r="1.5"></circle>
+          <line x1="8" y1="9" x2="12" y2="12"></line>
+          <line x1="12" y1="12" x2="16" y2="7"></line>
+        </svg>
+      </div>
+      <div class="card-subtitle">Interactive Investigation UI</div>
+      <div class="card-body">
+        <ul>
+          <li><strong>SVG Graph Canvas:</strong> Force-directed graph with pan, zoom & expand</li>
+          <li><strong>Taint Heatmap:</strong> Visual gradient of tainted fund propagation</li>
+          <li><strong>Sidebar & Inspector:</strong> Bytecode, locktimes & address histories</li>
+          <li><strong>Syndicate Map:</strong> Cross-case linkage & joint-tx co-spend view</li>
+          <li><strong>Case Comparison:</strong> Side-by-side gap & endpoint analysis</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="step-arrow">➔</div>
+
+    <!-- 6. REPORT GENERATION -->
+    <div class="card step-6">
+      <div class="card-header">6. Evidence & Recovery</div>
+      <div class="card-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#ca8a04" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+          <polyline points="10 9 9 9 8 9"></polyline>
+        </svg>
+      </div>
+      <div class="card-subtitle">Admissibility & Court Filings</div>
+      <div class="card-body">
+        <ul>
+          <li><strong>Cryptographic Custody:</strong> Immutable SHA-256 hash-chained event ledger</li>
+          <li><strong>Section 65B BSA:</strong> Digital evidence certificate export (Indian Law)</li>
+          <li><strong>Section 67 NDPS:</strong> Draft summons & asset freeze notices</li>
+          <li><strong>Trace Snapshots:</strong> JSON payload with canonical SHA-256 verification</li>
+          <li><strong>Asset Recovery Dossier:</strong> Prioritized leads & action histories</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- BOTTOM SECTION: LOCAL VAULT, FORENSIC INSIGHTS & RECOVERY -->
+  <div class="bottom-section">
+
+    <!-- LEGEND -->
+    <div class="legend-box">
+      <div class="legend-title">ARCHITECTURAL LEGEND</div>
+      <div class="legend-grid">
+        <div class="legend-item"><div class="legend-dot" style="background: #3b82f6;"></div> Ingestion</div>
+        <div class="legend-item"><div class="legend-dot" style="background: #8b5cf6;"></div> Analytics</div>
+        <div class="legend-item"><div class="legend-dot" style="background: #22c55e;"></div> Gateway</div>
+        <div class="legend-item"><div class="legend-dot" style="background: #06b6d4;"></div> Interface</div>
+        <div class="legend-item"><div class="legend-dot" style="background: #f97316;"></div> Processing</div>
+        <div class="legend-item"><div class="legend-dot" style="background: #eab308;"></div> Evidence</div>
+        <div class="legend-item" style="grid-column: span 2;"><div class="legend-dot" style="background: #6366f1;"></div> Local Vault & Legal Workflow</div>
+      </div>
+    </div>
+
+    <!-- LOWER PIPELINE: VAULT -> RECOVERY LEADS -> LAW ENFORCEMENT -->
+    <div class="insights-container">
+
+      <!-- Column 1: Zero-Trust Local Storage Vault -->
+      <div class="insight-col">
+        <div class="insight-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+          </svg>
+        </div>
+        <div class="insight-text">
+          <h4>Zero-Trust Local Vault</h4>
+          <ul>
+            <li><strong>Browser IndexedDB:</strong> Persistent local case storage (No cloud leaks)</li>
+            <li><strong>Judicial Corpus:</strong> Verified ground-truth benchmark cases</li>
+            <li><strong>OSINT Registry:</strong> Known exchange clusters & mixer lists</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="step-arrow" style="color: #6366f1;">➔</div>
+
+      <!-- Column 2: Asset Recovery Module -->
+      <div class="insight-col">
+        <div class="insight-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+          </svg>
+        </div>
+        <div class="insight-text">
+          <h4>Asset Recovery Engine</h4>
+          <ul>
+            <li><strong>Flow Attribution:</strong> Distinguishes illicit tainted vs. moved sats</li>
+            <li><strong>4-Factor Priority Queue:</strong> Ranks leads by value, recency, coverage</li>
+            <li><strong>Action State Machine:</strong> Tracks preservation & lawful requests</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="step-arrow" style="color: #6366f1;">➔</div>
+
+      <!-- Column 3: Law Enforcement Execution -->
+      <div class="insight-col">
+        <div class="insight-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            <circle cx="12" cy="11" r="3"></circle>
+          </svg>
+        </div>
+        <div class="insight-text">
+          <h4>Law Enforcement & FIU</h4>
+          <ul>
+            <li><strong>Emergency Freezes:</strong> Rapid exchange preservation orders</li>
+            <li><strong>Statutory Subpoenas:</strong> Section 91 CrPC / Section 67 NDPS</li>
+            <li><strong>Court Prosecution:</strong> Verifiable, tamper-evident evidence dossiers</li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+</body>
+</html>

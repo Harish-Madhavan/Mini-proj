@@ -1,0 +1,118 @@
+flowchart TD
+    %% -------------------------------------------------------------
+    %% STAGE 1: USER INPUT & TARGET INGESTION
+    %% -------------------------------------------------------------
+    subgraph S1 ["1. USER INPUT & INVESTIGATION TARGET"]
+        direction TB
+        I1["Target Identification<br/>• TxID (64-char hex)<br/>• Bitcoin Address (1, 3, bc1q, bc1p)"]
+        I2["Parameters & Mode<br/>• Trace Depth (1-5 hops + peel extend)<br/>• Live Mainnet vs. Offline Replay<br/>• Batch Monitored Watchlists"]
+        I1 --> I2
+    end
+
+    %% -------------------------------------------------------------
+    %% STAGE 2: RESILIENT DATA ACQUISITION
+    %% -------------------------------------------------------------
+    subgraph S2 ["2. RESILIENT DATA ACQUISITION"]
+        direction TB
+        G1["Dual Gateway Routing<br/>• Primary: Blockstream Esplora<br/>• Fallback: Mempool.space API"]
+        G2["Network Fault Tolerance<br/>• Circuit Breaker Controller<br/>• 429 Throttling & 5-Min LRU Cache<br/>• Bounded-Concurrency Outspends"]
+        G1 --> G2
+    end
+
+    %% -------------------------------------------------------------
+    %% STAGE 3: DATA PREPROCESSING & SCRIPT PARSING
+    %% -------------------------------------------------------------
+    subgraph S3 ["3. PREPROCESSING & SCRIPT DECODER"]
+        direction TB
+        P1["Validation & Sanitization<br/>• Malformed Gateway Payload Pruning<br/>• Distinct UTXO Graph Separation"]
+        P2["Script PubKey Disassembly<br/>• P2PKH, P2SH, SegWit, Taproot<br/>• OP_RETURN Bridge & Protocol Decoders<br/>• Dwell Time & Fee Context Normalization"]
+        P1 --> P2
+    end
+
+    %% -------------------------------------------------------------
+    %% STAGE 4: FORENSIC ANALYTICS CORE
+    %% -------------------------------------------------------------
+    subgraph S4 ["4. FORENSIC ANALYTICS ENGINE"]
+        direction TB
+        E1["8-Factor Heuristic Classifier<br/>• Change vs. Payment Disambiguation<br/>• Script match, reuse, roundness, dwell<br/>• Decaying Per-Hop Confidence"]
+        E2["Triple Taint Propagation Engine<br/>• Haircut, FIFO, & Poison Models<br/>• Mathematical Value-Conservation<br/>• Anti-Minting Edge Audits"]
+        E3["Entity Clustering & Privacy Analysis<br/>• Common-Input Ownership (CIOH / DSU)<br/>• Peel-Chain Trajectory Priority<br/>• Shannon Entropy CoinJoin Mixer Halt"]
+        E4["Typologies & 5D Risk Radar<br/>• Smurfing & Batch Sweeps Detection<br/>• Swap Routers & Cross-Chain Memos<br/>• 5D Risk Radar (Mixers, Velocity, Sanctions)"]
+        E1 --- E2
+        E3 --- E4
+    end
+
+    %% -------------------------------------------------------------
+    %% STAGE 5: INTERACTIVE RESULTS & VISUALIZATION
+    %% -------------------------------------------------------------
+    subgraph S5 ["5. RESULTS & INTERACTIVE VISUALIZATION"]
+        direction TB
+        V1["SVG Force-Directed Graph<br/>• Interactive Pan, Zoom, Expand<br/>• Real-time Taint Heatmap Overlay"]
+        V2["Specialized Case Views<br/>• Script Bytecode & Node Inspector<br/>• Syndicate Cross-Case Co-Spend Map<br/>• Real-Time Case Comparison Matrix"]
+        V1 --> V2
+    end
+
+    %% -------------------------------------------------------------
+    %% STAGE 6: REPORTING & COURT EVIDENCE DOSSIER
+    %% -------------------------------------------------------------
+    subgraph S6 ["6. EVIDENCE DOSSIER & COURT REPORTING"]
+        direction TB
+        R1["Cryptographic Chain of Custody<br/>• SHA-256 Hash-Chained Audit Ledger<br/>• Tamper-Evident Case Snapshots"]
+        R2["Statutory Court Exhibits<br/>• Section 65B BSA Evidence Certificate<br/>• Section 67 NDPS Asset Freeze Notices<br/>• Comprehensive Audit Trail Export"]
+        R1 --> R2
+    end
+
+    %% -------------------------------------------------------------
+    %% LOWER ROW: ZERO-TRUST VAULT, ASSET RECOVERY, LAW ENFORCEMENT
+    %% -------------------------------------------------------------
+    subgraph KB ["ZERO-TRUST LOCAL VAULT"]
+        direction TB
+        K1["Local Browser Storage<br/>• IndexedDB (No Cloud Telemetry)<br/>• Verified Judicial Ground-Truth Corpus<br/>• Known VDA Exchanges & Mixers"]
+    end
+
+    subgraph AR ["ASSET RECOVERY ENGINE"]
+        direction TB
+        A1["Prioritized Lead Generation<br/>• Attributed vs. Moved Flow Separation<br/>• UTXO Unspent Recoverability Checks<br/>• 4-Factor Deterministic Ranking (0-100)<br/>• Action State Machine with Evidence Gate"]
+    end
+
+    subgraph LE ["LAW ENFORCEMENT & JUDICIAL PROCESS"]
+        direction TB
+        L1["Statutory Execution<br/>• Section 91 CrPC Preservation<br/>• Exchange KYC & Subpoena Worksheets<br/>• Asset Seizure & Court Prosecution"]
+    end
+
+    %% -------------------------------------------------------------
+    %% CONNECTORS
+    %% -------------------------------------------------------------
+    S1 ==> S2
+    S2 ==> S3
+    S3 ==> S4
+    S4 ==> S5
+    S5 ==> S6
+
+    S4 -.-> KB
+    KB ==> AR
+    AR ==> LE
+    LE -.-> S6
+
+    %% -------------------------------------------------------------
+    %% STYLING & CLASSES
+    %% -------------------------------------------------------------
+    classDef inputStyle fill:#eff6ff,stroke:#3b82f6,stroke-width:2px,color:#1e3a8a
+    classDef gateStyle fill:#f0fdf4,stroke:#22c55e,stroke-width:2px,color:#14532d
+    classDef prepStyle fill:#fff7ed,stroke:#f97316,stroke-width:2px,color:#7c2d12
+    classDef engineStyle fill:#faf5ff,stroke:#8b5cf6,stroke-width:2px,color:#581c87
+    classDef uiStyle fill:#ecfeff,stroke:#06b6d4,stroke-width:2px,color:#164e63
+    classDef reportStyle fill:#fefce8,stroke:#eab308,stroke-width:2px,color:#713f12
+    classDef vaultStyle fill:#f8fafc,stroke:#64748b,stroke-width:2px,color:#0f172a
+    classDef recoveryStyle fill:#fdf4ff,stroke:#d946ef,stroke-width:2px,color:#701a75
+    classDef leStyle fill:#eef2ff,stroke:#4f46e5,stroke-width:2px,color:#312e81
+
+    class S1,I1,I2 inputStyle
+    class S2,G1,G2 gateStyle
+    class S3,P1,P2 prepStyle
+    class S4,E1,E2,E3,E4 engineStyle
+    class S5,V1,V2 uiStyle
+    class S6,R1,R2 reportStyle
+    class KB,K1 vaultStyle
+    class AR,A1 recoveryStyle
+    class LE,L1 leStyle
